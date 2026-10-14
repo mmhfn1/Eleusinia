@@ -154,6 +154,7 @@ function Home({ st, people, run, open }: { st: State; people: People; run: Run; 
           <Avatar k={st.me} p={st.profile} />
           {user(st.me)}
         </div>
+        <FriendId st={st} />
         <Settings st={st} />
         <h2>Groups</h2>
         {Object.values(st.groups).map((g) => (
@@ -185,7 +186,7 @@ function Home({ st, people, run, open }: { st: State; people: People; run: Run; 
       <Splitter label="Resize groups sidebar" width={width} set={setWidth} dir={1} />
 
       <main className="home">
-        <Search run={run} />
+        <Search st={st} run={run} />
         {byStatus('incoming').map((k) => (
           <div className="row" key={k}>
             <Avatar k={k} p={prof(k)} />
@@ -220,47 +221,66 @@ function Home({ st, people, run, open }: { st: State; people: People; run: Run; 
 
 type Found = { key: Key; profile: Profile }
 
-// Looks an ID up and lists everyone who holds it; the request goes only to the row that is clicked.
-function Search({ run }: { run: Run }) {
+// Suggests people as their username or ID is typed (from 4 characters). The request goes only to the row clicked.
+function Search({ st, run }: { st: State; run: Run }) {
+  const [text, setText] = useState('')
   const [found, setFound] = useState<Found[] | null>(null)
   const [busy, setBusy] = useState(false)
-  function submit(e: FormEvent<HTMLFormElement>) {
-    e.preventDefault()
-    const input = e.currentTarget.elements.namedItem('code') as HTMLInputElement
+  const latest = useRef(0)
+
+  useEffect(() => {
+    const q = text.trim()
+    const id = ++latest.current // answers to older keystrokes are dropped
+    if (q.length < 4) {
+      setFound(null)
+      setBusy(false)
+      return
+    }
     setBusy(true)
-    setFound(null)
-    run(api.call('findFriend', input.value).then(setFound)).then(() => setBusy(false))
+    const timer = setTimeout(() => {
+      api.call('findFriend', q).then(
+        (r: Found[]) => id === latest.current && (setFound(r), setBusy(false)),
+        () => id === latest.current && setBusy(false),
+      )
+    }, 350)
+    return () => clearTimeout(timer)
+  }, [text])
+
+  const sameId = found && new Set(found.map((f) => f.profile.handle)).size < found.length
+  const pick = (r: Found) => {
+    run(api.call('addFriend', r.key, r.profile))
+    setText('')
   }
+  const status = (k: Key) => ({ friend: 'Already friends', outgoing: 'Request sent', incoming: 'Wants to be friends' })[st.friends[k]]
+
   return (
     <div className="search-box">
-      <form className="search" onSubmit={submit}>
-        <input name="code" aria-label="Friend ID" placeholder="Find a friend by ID, e.g. name#1234" />
-        <button disabled={busy}>{busy ? 'Searching…' : 'Search'}</button>
-      </form>
-      {found && (
-        <div className="results" role="group" aria-label="People with this ID">
-          {found.length > 1 && (
-            <p className="dim">{found.length} different people are using this ID. Ask your friend for their key ending (shown on the right) and pick that one.</p>
-          )}
+      <input
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        aria-label="Find a friend"
+        aria-describedby="search-status"
+        placeholder="Find a friend: type 4+ letters of their username, or their full ID (name#1234)"
+        autoComplete="off"
+      />
+      <p id="search-status" className="dim" aria-live="polite">
+        {busy ? 'Searching…' : found && (found.length ? `${found.length} found. Click a person to send a friend request.` : 'No one online matches that.')}
+      </p>
+      {found && found.length > 0 && (
+        <div className="results" role="group" aria-label="Suggestions">
+          {sameId && <p className="dim">Some people here share the same ID. Ask your friend for their key ending (on the right) and pick that one.</p>}
           {found.map((r) => (
-            <button
-              key={r.key}
-              className="item result"
-              onClick={() => {
-                run(api.call('addFriend', r.key, r.profile))
-                setFound(null)
-              }}
-            >
+            <button key={r.key} className="item result" disabled={st.friends[r.key] === 'friend' || st.friends[r.key] === 'outgoing'} onClick={() => pick(r)}>
               <Avatar k={r.key} p={r.profile} />
               <span>
                 <b>{r.profile.handle}</b> {r.profile.name}
+                {status(r.key) && <span className="dim"> · {status(r.key)}</span>}
               </span>
               <span className="tail" title="Key ending">
                 {keyTail(r.key)}
               </span>
             </button>
           ))}
-          <p className="dim">Click a person to send a friend request.</p>
         </div>
       )}
     </div>
@@ -378,6 +398,35 @@ function Card({ k, st, p, close, message, edit, run }: CardProps) {
   )
 }
 
+function FriendId({ st }: { st: State }) {
+  return (
+    <section className="friend-id" aria-labelledby="friend-id-title">
+      <h2 id="friend-id-title">Your friend ID</h2>
+      <div className="row">
+        <b>{st.profile.handle}</b>
+        <button onClick={() => navigator.clipboard.writeText(st.profile.handle)}>Copy</button>
+      </div>
+      <p className="dim">
+        Key ending <span className="tail">{keyTail(st.me)}</span>
+      </p>
+    </section>
+  )
+}
+
+// An (i) button whose explanation shows while it is hovered or focused, and is read out as its description.
+function Info({ id, children }: { id: string; children: ReactNode }) {
+  return (
+    <span className="info">
+      <button type="button" className="info-icon" aria-label="More information" aria-describedby={id}>
+        i
+      </button>
+      <span role="tooltip" id={id} className="tip">
+        {children}
+      </span>
+    </span>
+  )
+}
+
 function Settings({ st }: { st: State }) {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   const set = (p: Partial<State['settings']>) => api.call('setSettings', p)
@@ -396,18 +445,21 @@ function Settings({ st }: { st: State }) {
   )
   return (
     <details onToggle={() => navigator.mediaDevices.enumerateDevices().then(setDevices)}>
-      <summary>Friend ID and settings</summary>
-      <label>
-        Your friend ID (share this)
-        <input readOnly value={st.profile.handle} onFocus={(e) => e.target.select()} />
-      </label>
-      <button onClick={() => navigator.clipboard.writeText(st.profile.handle)}>Copy friend ID</button>
-      <p>
-        Your key ending: <b className="tail">{keyTail(st.me)}</b>
-      </p>
-      <label>
-        Voice bitrate: {st.settings.audioKbps} kbps
+      <summary>Settings</summary>
+      <div className="setting">
+        <label htmlFor="bitrate">Voice bitrate: {st.settings.audioKbps} kbps</label>
+        <Info id="bitrate-tip">
+          This is the quality other people hear from you.
+          <br />
+          <b>Higher</b> (64 kbps and up): fuller, clearer voice, good enough for music. Uses more upload: you send a separate copy to each
+          person in the call, so 64 kbps with 5 others is about 320 kbps.
+          <br />
+          <b>Lower</b> (16 to 24 kbps): less data and steadier on weak or mobile connections, but your voice sounds thinner.
+          <br />
+          32 kbps is plenty for normal speech.
+        </Info>
         <input
+          id="bitrate"
           type="range"
           min={8}
           max={256}
@@ -415,7 +467,7 @@ function Settings({ st }: { st: State }) {
           value={st.settings.audioKbps}
           onChange={(e) => set({ audioKbps: Number(e.target.value) })}
         />
-      </label>
+      </div>
       {pick('audioinput', 'Microphone', 'mic')}
       {pick('audiooutput', 'Speakers', 'out')}
     </details>

@@ -265,3 +265,58 @@ b.tail {
 aside h1 {
   overflow-wrap: anywhere;
 }
+.friend-id p {
+  margin: 0;
+}
+.friend-id .row b {
+  overflow-wrap: anywhere;
+}
+.setting {
+  position: relative;
+  margin: 6px 0;
+}
+.setting > label {
+  display: inline;
+  margin: 0;
+}
+.setting input {
+  display: block;
+  width: 100%;
+}
+.info-icon {
+  width: 18px;
+  height: 18px;
+  padding: 0;
+  margin-left: 6px;
+  border-radius: 50%;
+  font: italic 600 12px/1 Georgia, serif;
+  vertical-align: middle;
+}
+.tip {
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  z-index: 1;
+  padding: 8px 10px;
+  background: #111214;
+  border: 1px solid #4e5058;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.info:hover .tip,
+.info:focus-within .tip {
+  display: block;
+}
+.search-box > input {
+  width: 100%;
+}
+#search-status {
+  margin: 4px 0 0;
+  min-height: 1.4em;
+}
+.result:disabled {
+  cursor: default;
+  opacity: 0.6;
+}

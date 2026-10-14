@@ -221,9 +221,9 @@ test('setup assigns username#1234; search shows a stranger with their picture an
   b.node.addFriend(a.key)
   await until(() => a.node.state().friends[b.key] === 'friend')
 
-  await expect(a.node.findFriend('nobody#0000')).rejects.toThrow(/online/)
-  await expect(a.node.findFriend('nope')).rejects.toThrow(/like name#1234/)
-  await expect(a.node.findFriend(a.node.state().profile.handle)).rejects.toThrow(/own/)
+  expect(await a.node.findFriend('nobody#0000')).toEqual([])
+  expect(await a.node.findFriend('nope')).toEqual([])
+  expect(await a.node.findFriend(a.node.state().profile.handle)).toEqual([])
   expect(() => a.node.addFriend(a.key)).toThrow()
   expect(() => a.node.addFriend('bob#1234')).toThrow()
 }, 120000)
@@ -291,4 +291,26 @@ test('one person in several groups: each group keeps its own members and message
   expect(b.node.state().groups[g2]).toBeUndefined()
   expect(c.node.state().groups[g1]).toBeUndefined()
   expect(texts(b, g2)).toEqual([])
+}, 120000)
+
+test('suggestions start at 4 letters of a username and narrow as more is typed', async () => {
+  const a = start()
+  const b = start()
+  const c = start()
+  await b.node.setProfile({ username: 'bobby', name: 'Bob', about: '', avatar: PNG })
+  await c.node.setProfile({ username: 'bobcat', name: 'Cat' })
+  await a.node.setProfile({ username: 'ann_x', name: 'Ann' })
+  const keys = async (q: string) => (await a.node.findFriend(q)).map((f) => f.key).sort()
+
+  expect(await keys('bob')).toEqual([]) // under 4 letters: no search at all
+  expect(await keys('Bobb')).toEqual([b.key])
+  const both = await a.node.findFriend('bobc')
+  expect(both.map((f) => f.key)).toEqual([c.key])
+  expect(both[0].profile).toMatchObject({ name: 'Cat', handle: c.node.state().profile.handle })
+  expect(await keys('bobby#')).toEqual([b.key])
+  expect(await keys(b.node.state().profile.handle.slice(0, 8))).toEqual([b.key])
+  expect(await keys('zzzz')).toEqual([])
+  expect((await a.node.findFriend('bobb'))[0].profile.avatar).toBe(PNG)
+  // Searching sends no friend request
+  expect(b.node.state().friends).toEqual({})
 }, 120000)

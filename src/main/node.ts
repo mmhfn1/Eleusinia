@@ -132,28 +132,31 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000 }: Opts) 
   }
   const spread = (g: Group) => g.members.forEach((m) => m !== me && reach(m))
 
-  // Strangers we asked for a profile card during friend search. Only their answer is accepted.
-  const asked = new Map<Key, (p: Profile) => void>()
-  function card(key: Key, handle: string) {
-    if (known(key) && s.profiles[key]) return Promise.resolve({ ...s.profiles[key], handle })
-    return new Promise<Profile>((resolve) => {
-      const done = (p: Profile) => {
-        clearTimeout(timer)
-        asked.delete(key)
-        if (!wants(key) && s.friends[key] !== 'incoming') net.drop(key)
-        resolve({ ...p, handle })
-      }
-      // No answer still lists the person, with the picture generated from their key.
-      const timer = setTimeout(() => done(cleanProfile(null)), 5000)
-      asked.set(key, done)
-      if (net.linked(key)) net.send(key, { t: 'who' })
-      else net.dial(key)
-    })
+  // Profile cards we asked strangers for during friend search. Only their answers are accepted.
+  const asking = new Map<Key, { done: (p: Profile) => void; promise: Promise<Profile> }>()
+  function card(key: Key): Promise<Profile> {
+    if (known(key) && s.profiles[key]) return Promise.resolve(s.profiles[key])
+    const pending = asking.get(key)
+    if (pending) return pending.promise
+    let resolve!: (p: Profile) => void
+    const promise = new Promise<Profile>((r) => (resolve = r))
+    // No answer still lets the caller list the person, with the picture generated from their key.
+    const timer = setTimeout(() => done(cleanProfile(null)), 4000)
+    function done(p: Profile) {
+      clearTimeout(timer)
+      asking.delete(key)
+      if (!wants(key) && s.friends[key] !== 'incoming') net.drop(key)
+      resolve(p)
+    }
+    asking.set(key, { done, promise })
+    if (net.linked(key)) net.send(key, { t: 'who' })
+    else net.dial(key)
+    return promise
   }
 
   function onMsg(key: Key, w: Wire) {
     if (w.t === 'who') return net.send(key, { t: 'card', ...s.profile })
-    if (w.t === 'card') return asked.get(key)?.(cleanProfile(w))
+    if (w.t === 'card') return asking.get(key)?.done(cleanProfile(w))
     if (w.t === 'hello') {
       if (typeof w.name !== 'string') return
       const st = s.friends[key]
@@ -213,7 +216,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000 }: Opts) 
     {
       open(key) {
         if (wants(key)) greet(key)
-        if (asked.has(key)) net.send(key, { t: 'who' })
+        if (asking.has(key)) net.send(key, { t: 'who' })
         push()
       },
       close: push,
@@ -232,7 +235,17 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000 }: Opts) 
   const timer = setInterval(redial, redialMs)
 
   const topic = (id: string) => createHash('sha256').update('eleusinia:' + id).digest()
-  const announce = () => (s.profile.handle ? net.announce(topic(s.profile.handle)) : Promise.resolve())
+  const prefixTopic = (prefix: string) => createHash('sha256').update('eleusinia-prefix:' + prefix).digest()
+  // The exact ID, plus every username prefix from 4 letters up so people can be suggested while their ID is typed.
+  function topicsOf(handle: string) {
+    const user = handle.split('#')[0]
+    const topics = [topic(handle)]
+    for (let n = 4; n <= user.length; n++) topics.push(prefixTopic(user.slice(0, n)))
+    return topics
+  }
+  const announce = async () => {
+    if (s.profile.handle) await Promise.all(topicsOf(s.profile.handle).map(net.announce))
+  }
   const ready = announce()
   const announcer = setInterval(announce, 5 * 60000)
 
@@ -258,17 +271,19 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000 }: Opts) 
       for (const k of net.keys()) if (wants(k)) hi(k)
       if (fresh) await announce() // so the ID can be found as soon as setup finishes
     },
-    // Everyone online who holds this friend ID, with their profile. Nothing central keeps IDs unique,
-    // so there can be several: the caller shows them all and the user picks one.
-    async findFriend(code: string) {
-      const handle = normHandle(String(code))
-      if (!isHandle(handle)) throw new Error('Enter a friend ID like name#1234')
-      const found = (await net.lookup(topic(handle))).filter((k) => k !== me).slice(0, 10)
-      if (!found.length) {
-        if (handle === s.profile.handle) throw new Error('That is your own ID')
-        throw new Error('Nobody with that ID is online right now. Ask them to open the app, then try again.')
-      }
-      return Promise.all(found.map(async (key) => ({ key, profile: await card(key, handle) })))
+    // People online matching what has been typed so far: an exact friend ID, or (from 4 letters) usernames
+    // starting with it. Nothing central keeps IDs unique, so one ID can match several people; the user picks.
+    async findFriend(text: string) {
+      const q = normHandle(String(text)).slice(0, 25)
+      const user = q.split('#')[0]
+      const exact = isHandle(q)
+      if (!exact && (user.length < 4 || !isUsername(user))) return []
+      const keys = (await net.lookup(exact ? topic(q) : prefixTopic(user))).filter((k) => k !== me).slice(0, 8)
+      const found = await Promise.all(
+        // Found by exact ID we know which ID they announced; found by prefix we only have their own word for it.
+        keys.map(async (key) => ({ key, profile: exact ? { ...(await card(key)), handle: q } : await card(key) })),
+      )
+      return exact ? found : found.filter((f) => f.profile.handle.startsWith(q))
     },
     // Sends a friend request to one exact person, or accepts theirs. `profile` labels the pending request.
     addFriend(key: Key, profile?: Profile) {

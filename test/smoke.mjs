@@ -82,23 +82,41 @@ try {
         input.dispatchEvent(new Event('change', { bubbles: true }))
         await new Promise(r => setTimeout(r, 500))
       }
-      f.elements.username.value = '${n}'; f.elements.name.value = '${n}'; f.elements.about.value = 'I am ${n}'; f.requestSubmit()
+      f.elements.username.value = '${n}tester'; f.elements.name.value = '${n}'; f.elements.about.value = 'I am ${n}'; f.requestSubmit()
     })()`)
     await until(`${n} lands on Home`, () => p.ev(`!!document.querySelector('main.home')`))
   }
   const ids = {}
   for (const [p, n] of [[b, 'Bob'], [c, 'Cy']]) {
-    ids[n] = await p.ev(`document.querySelector('aside details input[readonly]').value`)
+    ids[n] = await p.ev(`document.querySelector('.friend-id b').textContent`)
     console.log(`     ${n} friend ID: ${ids[n]}`)
-    if (!new RegExp('^' + n.toLowerCase() + '#\\d{4}$').test(ids[n])) throw new Error('unexpected friend ID ' + ids[n])
+    if (!new RegExp('^' + n.toLowerCase() + 'tester#\\d{4}$').test(ids[n])) throw new Error('unexpected friend ID ' + ids[n])
   }
 
-  console.log('--- Friend search dropdown')
+  console.log('--- Friend ID and Settings sections, bitrate (i)')
+  const layout = await a.ev(`(() => {
+    const sec = document.querySelector('section.friend-id'), set = document.querySelector('aside details')
+    const tip = document.getElementById('bitrate-tip'), icon = document.querySelector('.info-icon')
+    set.open = true
+    const hidden = getComputedStyle(tip).display
+    icon.focus()
+    const shown = getComputedStyle(tip).display
+    const r = icon.getBoundingClientRect(), l = document.querySelector('label[for=bitrate]').getBoundingClientRect()
+    return { idSection: !!sec && !sec.closest('details'), summary: set.querySelector('summary').textContent, hidden, shown, rightOfLabel: r.left >= l.right - 1 && Math.abs(r.top - l.top) < 12, tip: tip.textContent.slice(0, 60) }
+  })()`)
+  console.log('     ', JSON.stringify(layout))
+  if (!(layout.idSection && layout.summary === 'Settings' && layout.hidden === 'none' && layout.shown === 'block' && layout.rightOfLabel)) throw new Error('settings layout wrong')
+  console.log('ok   friend ID is its own section; Settings separate; (i) sits right of the bitrate and shows its tip on focus')
+  await a.ev(`document.activeElement.blur(); document.querySelector('aside details').open = false`)
+
+  console.log('--- Friend search suggestions')
   for (const [p, n] of [[b, 'Bob'], [c, 'Cy']]) {
     const tail = await p.ev(`api.call('state').then(s => '…' + s.me.slice(-6).toUpperCase())`)
-    await a.ev(`(() => { const f = document.querySelector('form.search'); f.elements.code.value = '${ids[n].toUpperCase()}'; f.requestSubmit() })()`)
+    // Type the first 4 letters of the username, as a person would, and wait for the suggestion.
+    const typed = n === 'Bob' ? ids[n].slice(0, 4).toUpperCase() : ids[n].toUpperCase()
+    await a.ev(`(() => { const i = document.querySelector('.search-box input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, '${typed}'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
     const pic = n === 'Cy' ? 'svg.avatar' : 'img.avatar'
-    await until(`A's search lists ${n}: ${n === 'Cy' ? 'generated' : 'uploaded'} picture, ID, key ending ${tail}`, () =>
+    await until(`typing "${typed}" suggests ${n}: ${n === 'Cy' ? 'generated' : 'uploaded'} picture, ID, key ending ${tail}`, () =>
       a.ev(`(() => { const r = document.querySelectorAll('.result'); return r.length === 1 && !!r[0].querySelector('${pic}') && r[0].textContent.includes('${ids[n]}') && r[0].querySelector('.tail').textContent === '${tail}' })()`))
     await a.ev(`document.querySelector('.result').click()`)
     await until(`${n} sees the request with Ann's picture`, () => p.ev(`[...document.querySelectorAll('.row')].some(r => r.textContent.includes('Ann wants') && r.querySelector('img.avatar'))`))
@@ -118,7 +136,7 @@ try {
   console.log('--- Profile card')
   await b.ev(`document.querySelector('.msg .user').click()`)
   await until('B clicking the name opens Ann card with picture, about, ID and key ending', () =>
-    b.ev(`(() => { const d = document.querySelector('dialog[open]'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('ann#') && d.textContent.includes('Key ending') && !!d.querySelector('img.avatar.big') })()`))
+    b.ev(`(() => { const d = document.querySelector('dialog[open]'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('anntester#') && d.textContent.includes('Key ending') && !!d.querySelector('img.avatar.big') })()`))
   await b.ev(`[...document.querySelectorAll('dialog button')].find(x => x.textContent === 'Close').click()`)
 
   console.log('--- Voice call from the left sidebar')
