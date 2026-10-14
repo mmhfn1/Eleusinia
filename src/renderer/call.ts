@@ -1,6 +1,7 @@
-import { createCandidates, createWatchdog, offers, relayCandidate } from '../shared/callstate'
+import { createCandidates, createWatchdog, lightOpus, offers, relayCandidate } from '../shared/callstate'
 import { fellBack, nextDevice, usable } from '../shared/devices'
 import type { Event, Key, State } from '../shared/protocol'
+import { SAMPLE_EVERY, type Sample, grade, remember, worst } from '../shared/quality'
 
 declare global {
   interface Window {
@@ -25,6 +26,10 @@ let stream: MediaStream | null = null
 let micId = ''
 let outId = ''
 let relayMissing = false // no network address the relay port could use
+// Connection samples per person in the call, or '' for the network while nobody is connected. Memory only.
+const samples = new Map<string, Sample[]>()
+let sampler: ReturnType<typeof setInterval> | null = null
+let measuring = false
 let notify = () => {}
 export const onChange = (fn: () => void) => void (notify = fn)
 
@@ -96,12 +101,17 @@ async function addRelay(k: Key, pc: RTCPeerConnection) {
 // Answers echo their offer's id, so an answer to an older offer is never applied to a newer connection.
 let offerId = 0
 
+// Every description we send asks for Opus silence suppression (see lightOpus).
+async function local(pc: RTCPeerConnection, d: RTCSessionDescriptionInit) {
+  await pc.setLocalDescription({ type: d.type, sdp: lightOpus(d.sdp ?? '') })
+}
+
 async function offer(k: Key) {
   if (!conv) return
   const c = conv
   const pc = connect(k)
   const id = (peers.get(k)!.offer = ++offerId)
-  await pc.setLocalDescription(await pc.createOffer())
+  await local(pc, await pc.createOffer())
   send(c, k, { k: 'offer', sdp: pc.localDescription!.toJSON(), id })
 }
 
@@ -111,7 +121,7 @@ async function restart(k: Key) {
   if (!conv || !p || p.pc.signalingState === 'closed') return
   const id = (p.offer = ++offerId)
   p.pc.restartIce()
-  await p.pc.setLocalDescription(await p.pc.createOffer({ iceRestart: true }))
+  await local(p.pc, await p.pc.createOffer({ iceRestart: true }))
   send(conv, k, { k: 'offer', sdp: p.pc.localDescription!.toJSON(), restart: true, id })
 }
 
@@ -127,6 +137,50 @@ async function isRelayed(pc: RTCPeerConnection) {
   let pair: any
   stats.forEach((s) => s.type === 'transport' && (pair = stats.get(s.selectedCandidatePairId)))
   return stats.get(pair?.remoteCandidateId)?.candidateType === 'relay'
+}
+
+// Round trip, loss and jitter of what we send, as the other side reports it; the route's round trip until it has.
+async function sampleLink(pc: RTCPeerConnection): Promise<Sample | null> {
+  const stats = await pc.getStats()
+  let s: Sample | null = null
+  let pair: any
+  stats.forEach((r) => {
+    if (r.type === 'remote-inbound-rtp' && r.kind === 'audio' && r.roundTripTime !== undefined)
+      s = { rtt: r.roundTripTime * 1000, loss: r.fractionLost ?? 0, jitter: (r.jitter ?? 0) * 1000 }
+    if (r.type === 'transport') pair = stats.get(r.selectedCandidatePairId)
+  })
+  return s ?? (pair?.currentRoundTripTime !== undefined ? { rtt: pair.currentRoundTripTime * 1000 } : null)
+}
+
+// Samples every connected link; with nobody connected, the network itself, so the sign works when alone in a call.
+async function measure() {
+  if (measuring || !conv) return
+  measuring = true
+  try {
+    const live = [...peers].filter(([, p]) => p.pc.connectionState === 'connected')
+    for (const k of samples.keys()) if (k && !live.some(([l]) => l === k)) samples.delete(k)
+    if (live.length) {
+      samples.delete('')
+      for (const [k, p] of live) {
+        const s = await sampleLink(p.pc).catch(() => null)
+        if (s) samples.set(k, remember(samples.get(k), s))
+      }
+    } else {
+      const ms: number | null = await window.api.call('ping').catch(() => null)
+      samples.set('', remember(samples.get(''), { rtt: ms ?? Infinity }))
+    }
+  } finally {
+    measuring = false
+  }
+  if (conv) notify()
+}
+
+// For the Voice Connected sign: the weakest of your links (or the network while alone), and the latest ping of each.
+// A link that is reconnecting counts as poor.
+export function signal() {
+  const reconnecting = [...peers.values()].some((p) => ['disconnected', 'failed'].includes(p.pc.connectionState))
+  const pings = [...samples].map(([k, s]) => ({ k, ms: s[s.length - 1].rtt }))
+  return { grade: reconnecting ? ('poor' as const) : worst([...samples.values()].map(grade)), pings }
 }
 
 // Swaps in a microphone for every connection. A chosen one that fails to open gives way to the default.
@@ -191,6 +245,8 @@ export async function join(c: string) {
   navigator.mediaDevices.addEventListener('devicechange', onDeviceChange)
   send(c, null, { k: 'join' })
   followDevices() // device ids are only listed once the microphone is allowed
+  sampler = setInterval(measure, SAMPLE_EVERY)
+  measure()
   notify()
 }
 
@@ -199,6 +255,9 @@ export function leave() {
   send(conv, null, { k: 'leave' })
   for (const k of [...peers.keys()]) drop(k)
   navigator.mediaDevices.removeEventListener('devicechange', onDeviceChange)
+  if (sampler) clearInterval(sampler)
+  sampler = null
+  samples.clear()
   stream?.getTracks().forEach((t) => ((t.onended = null), t.stop()))
   stream = null
   conv = null
@@ -247,7 +306,7 @@ async function handle(from: Key, c: string, d: any) {
     const p = d.restart && peers.get(from)
     const pc = p && p.pc.signalingState !== 'closed' ? p.pc : connect(from)
     await describe(from, pc, d.sdp)
-    await pc.setLocalDescription(await pc.createAnswer())
+    await local(pc, await pc.createAnswer())
     send(c, from, { k: 'answer', sdp: pc.localDescription!.toJSON(), id: d.id })
   } else if (d.k === 'answer') {
     const p = peers.get(from)

@@ -122,6 +122,15 @@ export function createWatchdog(me: string, them: string, act: Recovery, timers: 
   }
 }
 
+// Asks the other side to send almost nothing while we are silent (Opus DTX), which cuts most of a mesh call's
+// traffic; in-band error correction stays on, so speech quality is unchanged. Applied to our own description,
+// since each side reads the other's preference from it.
+export function lightOpus(sdp: string) {
+  const pt = /a=rtpmap:(\d+) opus\/48000/i.exec(sdp)?.[1]
+  if (!pt) return sdp
+  return sdp.replace(new RegExp(`a=fmtp:${pt} [^\\r\\n]*`), (line) => (/usedtx=/.test(line) ? line : line + ';usedtx=1'))
+}
+
 // The relay port as an ICE candidate for our own connection. Low priority, so any direct route wins.
 // raddr is the unspecified address of the same family, as the candidate grammar expects.
 export const relayCandidate = (ip: string, port: number) =>

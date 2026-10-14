@@ -9,11 +9,11 @@ Peer-to-peer chat and voice calls for desktop, with no central server. A Discord
 ## Features
 
 - **No accounts, no server.** Your identity is a key pair created on first launch and stored encrypted on your computer.
-- **Friends by ID.** You pick a username and get a random number, giving a friend ID like `name#1234`. Search an ID to see who holds it, with their picture and key ending, then send a request.
-- **Profiles.** Display name, about line and picture. Until you upload a picture you get a pattern generated from your key.
+- **Friends by ID.** You pick a username and get a random number, giving a friend ID like `name#1234`. Search an ID to see who holds it, with their picture and Unique Key (the last characters of their key), then send a request.
+- **Profiles.** Display name, about line and picture. You can move, zoom and rotate a picture to line it up before it is saved. Until you upload one you get a pattern generated from your key.
 - **Direct and group chat.** Text messages, signed by their author.
 - **Offline delivery.** You can send while the recipient is offline; it shows as pending and arrives when they are next online with you. In groups, any member who has a message passes it on.
-- **Voice calls.** 1:1 and group, audio sent directly between participants, with mute, deafen, a bitrate slider and microphone/speaker selection. A call that drops after a network blip or switch reconnects by itself. If your chosen headset or speakers are unplugged mid-call, the call moves to the system default and back when they return.
+- **Voice calls.** 1:1 and group, audio sent directly between participants, with mute, deafen, a bitrate slider and microphone/speaker selection. A call that drops after a network blip or switch reconnects by itself. If your chosen headset or speakers are unplugged mid-call, the call moves to the system default and back when they return. A wifi sign next to **Voice Connected** shows your connection: green when good and stable, orange when degraded, red when poor; hover or focus it to see your ping to each person (or to the network when you are alone in the call). Measurements are kept in memory only. Audio stays light: Opus sends almost nothing while you are silent, with its error correction kept on.
 - **Resizable layout.** Groups sidebar, friends list split into online and offline, and in a conversation a voice sidebar, the chat and a members sidebar.
 
 ## How it works
@@ -67,7 +67,7 @@ Both people must have the app open when one searches for the other's ID.
 
 ## Known limits
 
-- **Friend IDs are not guaranteed unique.** Nothing central can reserve a name. Two people can hold the same `name#1234`; search lists both and shows each one's key ending so you can pick the right person. A 6-character key ending stops accidents, not a determined impostor.
+- **Friend IDs are not guaranteed unique.** Nothing central can reserve a name. Two people can hold the same `name#1234`; search lists both and shows each one's Unique Key so you can pick the right person. The Unique Key shown is the last 6 characters of the person's public key: it stops accidents, not a determined impostor.
 - **Both people must be online to find each other by ID**, and a direct message needs sender and recipient online at the same time at some point.
 - **Your profile is visible to anyone who knows your ID**, since search fetches it before you are friends.
 - **Strict networks.** When routers block a direct call connection, the call is carried over the same encrypted link chat uses (shown as "relayed through the chat link"). This adds a little delay, and a call still fails if the two people cannot reach each other for chat either. The fallback needs a network address on your machine (IPv4, or IPv6 when there is no IPv4); without one, the call panel says the fallback is unavailable.
@@ -78,5 +78,4 @@ Both people must have the app open when one searches for the other's ID.
 
 ## Roadmap
 
-1. Screen share and camera in calls, with video bitrate controls and a cap on simultaneous senders.
-2. If needed for large video calls: one participant relays streams, with automatic hand-over when they leave.
+Screen sharing and camera, with quality controls open to everyone, then a host with automatic hand-over if large video calls need one. See [docs/roadmap-video.md](docs/roadmap-video.md).

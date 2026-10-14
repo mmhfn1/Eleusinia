@@ -376,6 +376,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     // A UDP port on this machine that carries a call with `key` over the peer link (see relay.ts).
     relayOpen: (key: Key) => (known(key) ? relay.open(key) : null),
     relayClose: (key: Key) => relay.close(key),
+    ping: () => net.ping(),
     setSettings(p: Partial<Settings>) {
       Object.assign(s.settings, p)
       changed()

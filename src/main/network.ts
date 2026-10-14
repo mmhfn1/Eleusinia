@@ -87,6 +87,19 @@ export function createNet(keyPair: { publicKey: Buffer; secretKey: Buffer }, on:
       if (b.byteLength <= 1000) sock.trySend(b)
       else sock.write(JSON.stringify({ t: 'pkt', d: b.toString('base64') }) + '\n')
     },
+    // Round trip in ms to a few DHT nodes, the fastest counting: how this connection does with nobody else to measure.
+    // Null when none answer.
+    async ping() {
+      const nodes = dht.table.size ? [0, 1, 2].map(() => dht.table.random()) : dht.bootstrapNodes.slice(0, 3)
+      const times = await Promise.all(
+        nodes.map(async (n: { host: string; port: number }) => {
+          const start = performance.now()
+          return dht.ping(n).then(() => performance.now() - start, () => Infinity)
+        }),
+      )
+      const best = Math.min(...times)
+      return Number.isFinite(best) ? Math.round(best) : null
+    },
     drop(key: Key) {
       links.get(key)?.sock.destroy()
     },

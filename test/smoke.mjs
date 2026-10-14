@@ -96,6 +96,11 @@ try {
         const input = f.querySelector('input[type=file]'); input.files = dt.files
         input.dispatchEvent(new Event('change', { bubbles: true }))
         await new Promise(r => setTimeout(r, 500))
+        // The cropper opens; nudge the picture once, then keep it.
+        const frame = document.querySelector('dialog[open] .crop-frame')
+        frame.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))
+        ;[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent.includes('Use picture')).click()
+        await new Promise(r => setTimeout(r, 300))
       }
       f.elements.username.value = '${n}tester'; f.elements.name.value = '${n}'; f.elements.about.value = 'I am ${n}'; f.requestSubmit()
     })()`)
@@ -131,7 +136,7 @@ try {
     const typed = n === 'Bob' ? ids[n].slice(0, 4).toUpperCase() : ids[n].toUpperCase()
     await a.ev(`(() => { const i = document.querySelector('.search-box input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, '${typed}'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
     const pic = n === 'Cy' ? '.avatar svg' : '.avatar img'
-    await until(`typing "${typed}" suggests ${n}: ${n === 'Cy' ? 'generated' : 'uploaded'} picture, ID, key ending ${tail}`, () =>
+    await until(`typing "${typed}" suggests ${n}: ${n === 'Cy' ? 'generated' : 'uploaded'} picture, ID, Unique Key ${tail}`, () =>
       a.ev(`(() => { const r = document.querySelectorAll('.result'); return r.length === 1 && !!r[0].querySelector('${pic}') && r[0].textContent.includes('${ids[n]}') && r[0].querySelector('.tail').textContent === '${tail}' })()`))
     await a.ev(`document.querySelector('.result').click()`)
     await until(`${n} sees the request with Ann's picture`, () => p.ev(`[...document.querySelectorAll('.request')].some(r => r.textContent.includes('Ann wants') && r.querySelector('.avatar img'))`))
@@ -153,16 +158,29 @@ try {
 
   console.log('--- Profile card')
   await b.ev(`document.querySelector('.msg .user').click()`)
-  await until('B clicking the name opens Ann card with picture, about, ID and key ending', () =>
-    b.ev(`(() => { const d = document.querySelector('dialog[open]'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('anntester#') && d.textContent.includes('Key ending') && !!d.querySelector('.avatar img') })()`))
+  await until('B clicking the name opens Ann card with picture, about, ID and Unique Key', () =>
+    b.ev(`(() => { const d = document.querySelector('dialog[open]'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('anntester#') && d.textContent.includes('Unique Key') && !!d.querySelector('.avatar img') })()`))
   await b.ev(`[...document.querySelectorAll('dialog button')].find(x => x.textContent === 'Close').click()`)
 
   console.log('--- Voice call from the left sidebar')
   await a.ev(press('Start call'))
+  const sign = (p) => p.ev(`(() => { const s = document.querySelector('.signal'); const tip = document.getElementById('ping-tip'); document.querySelector('.signal-icon').focus(); return s ? [s.className, s.textContent.includes('Voice Connected'), tip.textContent, getComputedStyle(tip).display] : null })()`)
+  const graded = (s) => !!s && /\b(good|fair|poor)\b/.test(s[0]) && s[1] && s[3] === 'block'
+  const alone = await until('A alone in the call: Voice Connected, coloured, ping to the network on focus', async () => {
+    const s = await sign(a)
+    return graded(s) && /Ping: \d+ ms/.test(s[2]) && s
+  }, 20)
+  console.log('     ', JSON.stringify(alone))
   await until('B sees the call in its sidebar', () => b.ev(`[...document.querySelectorAll('aside.voice button')].some(x => x.textContent.includes('Join call (1)'))`))
   await b.ev(press('Join call'))
   await until('A connected to Bob', () => a.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Bob')`))
   await until('B connected to Ann', () => b.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Ann')`))
+  const both = await until('A sign now measures the link to Bob', async () => {
+    const s = await sign(a)
+    return graded(s) && /Bob: \d+ ms/.test(s[2]) && s
+  }, 20)
+  console.log('     ', JSON.stringify(both))
+  await a.ev(`document.activeElement.blur()`)
   // ELEUSINIA_NO_DIRECT=1 withholds direct routes, as two strict routers would; the call must then go through the relay.
   const forced = process.env.ELEUSINIA_NO_DIRECT === '1'
   await until(`call is ${forced ? 'relayed through the chat link' : 'direct'}`, async () =>

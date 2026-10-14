@@ -323,6 +323,12 @@ test('messages are shown in time order, stacked per person while each follows th
   expect(shown.map(({ m, first }) => (first ? '+' : '') + m.text)).toEqual(['+a1', 'a2', '+b1', 'b2', '+b3', '+a3'])
 })
 
+test('the network ping gives a round trip in ms', async () => {
+  const ms = await start().node.ping()
+  expect(ms).toBeGreaterThanOrEqual(0)
+  expect(ms).toBeLessThan(5000)
+}, 60000)
+
 test('call packets cross the peer link through the relay, both small and large', async () => {
   const dgram = await import('node:dgram')
   const a = start()

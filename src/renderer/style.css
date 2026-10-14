@@ -32,6 +32,10 @@
   --gold: #c5b08a;
 
   --danger: #ec8a99;
+  /* Call quality only: the one place traffic-light colours are wanted, so they read at a glance. */
+  --good: #6fd598;
+  --fair: #eba24f;
+  --poor: #ef6b6b;
   --danger-deep: #6e2433;
   --danger-veil: rgb(236 138 153 / 0.12);
 
@@ -1512,4 +1516,67 @@ hr {
 }
 .settings-dialog .dialog-body {
   gap: 26px;
+}
+
+/* Voice Connected sign */
+.signal {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--silver);
+  font-weight: 500;
+}
+.signal-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  color: var(--mist-2);
+  transition: color var(--t);
+}
+.signal-icon:hover {
+  background: var(--obsidian-3);
+}
+.signal.good .signal-icon {
+  color: var(--good);
+}
+.signal.fair .signal-icon {
+  color: var(--fair);
+}
+.signal.poor .signal-icon {
+  color: var(--poor);
+}
+.ping-row {
+  display: block;
+}
+
+/* Picture cropper */
+.crop-frame {
+  position: relative;
+  justify-self: center;
+  overflow: hidden;
+  border-radius: var(--r-md);
+  background: var(--void);
+  cursor: grab;
+  touch-action: none;
+}
+.crop-frame:active {
+  cursor: grabbing;
+}
+.crop-frame::after {
+  /* darkens what falls outside the round portrait */
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(circle, transparent 69.5%, rgb(4 6 10 / 0.6) 70%);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+  border-radius: inherit;
+}
+.crop-frame canvas {
+  display: block;
 }

@@ -1,4 +1,5 @@
 import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react'
+import { type Offset, clampOffset, cropRect } from '../shared/crop'
 import { usable } from '../shared/devices'
 import { type Group, type Key, type Msg, type Profile, type State, MAX_TEXT, dmId, keyTail, stack } from '../shared/protocol'
 import * as call from './call'
@@ -276,7 +277,7 @@ function FriendId({ st }: { st: State }) {
         <CopyButton text={st.profile.handle} label="Copy friend ID" />
       </div>
       <p className="row-sub">
-        Key ending <span className="tail">{keyTail(st.me)}</span>
+        Unique Key <span className="tail">{keyTail(st.me)}</span>
       </p>
     </section>
   )
@@ -335,7 +336,7 @@ function Search({ st, run }: { st: State; run: Run }) {
       </p>
       {found && found.length > 0 && (
         <div className="results" role="group" aria-label="Suggestions">
-          {sameId && <p className="notice">Some people here share the same ID. Ask your friend for their key ending and choose that one.</p>}
+          {sameId && <p className="notice">Some people here share the same ID. Ask your friend for their Unique Key and choose that one.</p>}
           {found.map((r) => (
             <button key={r.key} className="row-button result" disabled={st.friends[r.key] === 'friend' || st.friends[r.key] === 'outgoing'} onClick={() => pick(r)}>
               <Avatar k={r.key} p={r.profile} size={36} />
@@ -345,7 +346,7 @@ function Search({ st, run }: { st: State; run: Run }) {
                 </span>
                 {status(r.key) && <span className="row-sub">{status(r.key)}</span>}
               </span>
-              <span className="tail" title="Key ending">
+              <span className="tail" title="Unique Key">
                 {keyTail(r.key)}
               </span>
             </button>
@@ -356,19 +357,112 @@ function Search({ st, run }: { st: State; run: Run }) {
   )
 }
 
-// Square-crops and shrinks a picture so it is small enough to send to every contact.
-async function shrink(file: File) {
-  const bmp = await createImageBitmap(file)
-  const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = 128
-  const side = Math.min(bmp.width, bmp.height)
-  canvas.getContext('2d')!.drawImage(bmp, (bmp.width - side) / 2, (bmp.height - side) / 2, side, side, 0, 0, 128, 128)
-  return canvas.toDataURL('image/jpeg', 0.8)
+const FRAME = 240 // the cropper's frame, in CSS pixels
+const PORTRAIT = 128 // saved portrait size: small enough to send to every contact
+
+// Lets the user move, zoom and rotate a picture under a round frame before it becomes their portrait.
+function Cropper({ file, done, close }: { file: File; done: (url: string) => void; close: (err?: string) => void }) {
+  const [img, setImg] = useState<ImageBitmap | null>(null)
+  const [zoom, setZoom] = useState(1)
+  const [off, setOff] = useState<Offset>({ x: 0, y: 0 })
+  const view = useRef<HTMLCanvasElement>(null)
+  const drag = useRef<{ x: number; y: number; o: Offset } | null>(null)
+
+  useEffect(() => {
+    createImageBitmap(file).then(setImg, () => close('That picture could not be read'))
+  }, [file])
+  useEffect(() => () => img?.close(), [img]) // frees the decoded picture as soon as it is replaced or closed
+  const draw = (c: HTMLCanvasElement, px: number) => {
+    if (!img) return
+    const r = cropRect(img.width, img.height, FRAME, zoom, off)
+    c.getContext('2d')!.drawImage(img, r.x, r.y, r.size, r.size, 0, 0, px, px)
+  }
+  useEffect(() => {
+    const c = view.current
+    if (!c || !img) return
+    c.width = c.height = Math.round(FRAME * devicePixelRatio)
+    draw(c, c.width)
+  }, [img, zoom, off])
+
+  const place = (o: Offset, z = zoom) => img && setOff(clampOffset(img.width, img.height, FRAME, z, o))
+  const zoomTo = (z: number) => {
+    const next = Math.min(4, Math.max(1, z))
+    setZoom(next)
+    place(off, next)
+  }
+  async function rotate() {
+    if (!img) return
+    const c = document.createElement('canvas')
+    ;[c.width, c.height] = [img.height, img.width]
+    const ctx = c.getContext('2d')!
+    ctx.translate(c.width, 0)
+    ctx.rotate(Math.PI / 2)
+    ctx.drawImage(img, 0, 0)
+    setImg(await createImageBitmap(c))
+    setOff({ x: 0, y: 0 })
+  }
+  function save() {
+    const c = document.createElement('canvas')
+    c.width = c.height = PORTRAIT
+    draw(c, PORTRAIT)
+    done(c.toDataURL('image/jpeg', 0.85))
+  }
+  function keys(e: KeyboardEvent<HTMLDivElement>) {
+    const step = ({ ArrowLeft: [-8, 0], ArrowRight: [8, 0], ArrowUp: [0, -8], ArrowDown: [0, 8] } as Record<string, number[]>)[e.key]
+    if (step) place({ x: off.x + step[0], y: off.y + step[1] })
+    else if (e.key === '+' || e.key === '=') zoomTo(zoom + 0.1)
+    else if (e.key === '-') zoomTo(zoom - 0.1)
+    else return
+    e.preventDefault()
+  }
+
+  return (
+    <Dialog label="Position your picture" close={() => close()}>
+      <h1>Position your picture</h1>
+      <div
+        className="crop-frame"
+        style={{ width: FRAME, height: FRAME }}
+        tabIndex={0}
+        role="group"
+        aria-label="Picture position. Drag, or use the arrow keys to move and plus or minus to zoom."
+        onKeyDown={keys}
+        onPointerDown={(e) => {
+          e.currentTarget.setPointerCapture(e.pointerId)
+          drag.current = { x: e.clientX, y: e.clientY, o: off }
+        }}
+        onPointerMove={(e) => {
+          const d = drag.current
+          if (d && e.currentTarget.hasPointerCapture(e.pointerId)) place({ x: d.o.x + e.clientX - d.x, y: d.o.y + e.clientY - d.y })
+        }}
+        onPointerUp={() => (drag.current = null)}
+        onWheel={(e) => zoomTo(zoom - e.deltaY / 500)}
+      >
+        <canvas ref={view} style={{ width: FRAME, height: FRAME }} />
+      </div>
+      <p className="row-sub">Drag to line it up. Only the area inside the circle shows as your picture.</p>
+      <label className="field-label">
+        Zoom
+        <input type="range" min={1} max={4} step={0.01} value={zoom} onChange={(e) => zoomTo(Number(e.target.value))} />
+      </label>
+      <div className="form-actions">
+        <button type="button" className="button subtle" onClick={rotate} disabled={!img}>
+          <Icon name="rotate" size={16} /> Rotate
+        </button>
+        <button type="button" className="button" onClick={() => close()}>
+          Cancel
+        </button>
+        <button type="button" className="button primary" onClick={save} disabled={!img}>
+          Use picture
+        </button>
+      </div>
+    </Dialog>
+  )
 }
 
 // First launch (and Edit profile): the threshold into Eleusinia.
 function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () => void }) {
   const [avatar, setAvatar] = useState(st.profile.avatar)
+  const [picking, setPicking] = useState<File | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
   function submit(e: FormEvent<HTMLFormElement>) {
@@ -400,7 +494,11 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
                   type="file"
                   accept="image/*"
                   className="visually-hidden"
-                  onChange={(e) => e.target.files?.[0] && shrink(e.target.files[0]).then(setAvatar, () => setErr('That picture could not be read'))}
+                  onChange={(e) => {
+                    const f = e.target.files?.[0]
+                    e.target.value = '' // so choosing the same file again reopens the cropper
+                    if (f) setPicking(f)
+                  }}
                 />
               </label>
               {avatar ? (
@@ -444,6 +542,19 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
               {err}
             </p>
           )}
+          {picking && (
+            <Cropper
+              file={picking}
+              done={(url) => {
+                setAvatar(url)
+                setPicking(null)
+              }}
+              close={(e) => {
+                setPicking(null)
+                if (e) setErr(e)
+              }}
+            />
+          )}
           <div className="form-actions">
             {!first && (
               <button type="button" className="button" onClick={done}>
@@ -482,7 +593,7 @@ function Card({ k, st, p, close, message, edit, run }: CardProps) {
           <dd>
             <b>{p.handle || 'not set up yet'}</b> {p.handle && <CopyButton text={p.handle} label="Copy friend ID" />}
           </dd>
-          <dt>Key ending</dt>
+          <dt>Unique Key</dt>
           <dd>
             <b className="tail">{keyTail(k)}</b>
           </dd>
@@ -702,6 +813,32 @@ function DeleteAccount({ st, close }: { st: State; close: () => void }) {
 
 type ConvProps = { st: State; conv: string; people: People; run: Run; home: () => void }
 
+const GRADE_WORDS = { good: 'good and stable', fair: 'degraded', poor: 'poor' }
+
+// Your voice connection while in a call: a wifi sign coloured by quality, with ping on hover or focus.
+function VoiceSignal({ name }: { name: (k: Key) => string }) {
+  const { grade, pings } = call.signal()
+  return (
+    <div className={`signal ${grade ?? 'measuring'}`}>
+      <span className="info">
+        <button type="button" className="signal-icon" aria-label={`Connection ${grade ? GRADE_WORDS[grade] : 'being measured'}`} aria-describedby="ping-tip">
+          <Icon name="wifi" size={18} />
+        </button>
+        <span role="tooltip" id="ping-tip" className="tip">
+          {pings.length
+            ? pings.map(({ k, ms }) => (
+                <span key={k} className="ping-row">
+                  {k ? name(k) : 'Ping'}: <b>{Number.isFinite(ms) ? `${Math.round(ms)} ms` : 'no response'}</b>
+                </span>
+              ))
+            : 'Measuring ping…'}
+        </span>
+      </span>
+      <span className="signal-text">Voice Connected</span>
+    </div>
+  )
+}
+
 const STATE_WORDS: Record<string, string> = {
   new: 'Connecting…',
   connecting: 'Connecting…',
@@ -751,6 +888,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
           <h2 id="voice-title">Voice</h2>
           {inCall ? (
             <>
+              <VoiceSignal name={name} />
               <div className="callers" aria-live="polite">
                 <div className="caller">
                   <Avatar k={st.me} p={st.profile} size={44} />
