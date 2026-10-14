@@ -8,7 +8,7 @@ declare global {
 }
 
 // Voice calls as a full mesh: one RTCPeerConnection per other participant, signaled over the control links.
-type Peer = { pc: RTCPeerConnection; audio: HTMLAudioElement; relayed?: boolean; candidates: ReturnType<typeof createCandidates> }
+type Peer = { pc: RTCPeerConnection; audio: HTMLAudioElement; relayed?: boolean; candidates: ReturnType<typeof createCandidates>; offer?: number }
 
 export const active = new Map<string, Set<Key>>() // conversation -> peers we know are in its call
 export const peers = new Map<Key, Peer>()
@@ -87,21 +87,26 @@ async function addRelay(k: Key, pc: RTCPeerConnection) {
   await pc.addIceCandidate({ candidate: `candidate:9 1 udp 16777215 ${r.ip} ${r.port} typ relay raddr 0.0.0.0 rport 0`, sdpMid: mid, sdpMLineIndex: 0 })
 }
 
+// Answers echo their offer's id, so an answer to an older offer is never applied to a newer connection.
+let offerId = 0
+
 async function offer(k: Key) {
   if (!conv) return
   const c = conv
   const pc = connect(k)
+  const id = (peers.get(k)!.offer = ++offerId)
   await pc.setLocalDescription(await pc.createOffer())
-  send(c, k, { k: 'offer', sdp: pc.localDescription!.toJSON() })
+  send(c, k, { k: 'offer', sdp: pc.localDescription!.toJSON(), id })
 }
 
 // Finds a new route on the same connection; the other side answers without tearing anything down.
 async function restart(k: Key) {
-  const pc = peers.get(k)?.pc
-  if (!conv || !pc || pc.signalingState === 'closed') return
-  pc.restartIce()
-  await pc.setLocalDescription(await pc.createOffer({ iceRestart: true }))
-  send(conv, k, { k: 'offer', sdp: pc.localDescription!.toJSON(), restart: true })
+  const p = peers.get(k)
+  if (!conv || !p || p.pc.signalingState === 'closed') return
+  const id = (p.offer = ++offerId)
+  p.pc.restartIce()
+  await p.pc.setLocalDescription(await p.pc.createOffer({ iceRestart: true }))
+  send(conv, k, { k: 'offer', sdp: p.pc.localDescription!.toJSON(), restart: true, id })
 }
 
 // Sets the remote side's description, then the candidates that arrived before it and the relay port.
@@ -169,8 +174,9 @@ async function handle(from: Key, c: string, d: any) {
   if (c !== conv) return
 
   if (d.k === 'join') {
+    // A duplicate while our connection works or is being set up; otherwise they lost us and we start over.
     const p = peers.get(from)
-    if (p && !['failed', 'closed'].includes(p.pc.connectionState)) return
+    if (p && ['new', 'connecting', 'connected'].includes(p.pc.connectionState)) return
     if (!offers(state.me, from)) return void send(c, from, { k: 'join' })
     await offer(from)
   } else if (d.k === 'offer') {
@@ -179,11 +185,11 @@ async function handle(from: Key, c: string, d: any) {
     const pc = p && p.pc.signalingState !== 'closed' ? p.pc : connect(from)
     await describe(from, pc, d.sdp)
     await pc.setLocalDescription(await pc.createAnswer())
-    send(c, from, { k: 'answer', sdp: pc.localDescription!.toJSON() })
+    send(c, from, { k: 'answer', sdp: pc.localDescription!.toJSON(), id: d.id })
   } else if (d.k === 'answer') {
-    const pc = peers.get(from)?.pc
-    if (!pc) return
-    await describe(from, pc, d.sdp)
+    const p = peers.get(from)
+    if (!p || (d.id !== undefined && d.id !== p.offer)) return
+    await describe(from, p.pc, d.sdp)
   } else if (d.k === 'ice') {
     await peers.get(from)?.candidates.add(d.c)
   }
@@ -204,10 +210,16 @@ export function onState(next: State) {
   for (const k of prev.online) {
     if (next.online.includes(k)) continue
     for (const set of active.values()) set.delete(k)
-    drop(k)
+    const w = peers.has(k) && watchdogs.get(k)
+    if (w) w.away(() => (drop(k), notify()))
+    else drop(k)
   }
-  // Tell people who just came online that a call is running.
-  if (conv) for (const k of next.online) if (!prev.online.includes(k) && membersOf(conv).includes(k)) send(conv, k, { k: 'join' })
+  // Tell people who just came online that a call is running, unless our call with them never broke.
+  for (const k of next.online) {
+    if (prev.online.includes(k)) continue
+    watchdogs.get(k)?.back()
+    if (conv && membersOf(conv).includes(k) && peers.get(k)?.pc.connectionState !== 'connected') send(conv, k, { k: 'join' })
+  }
 
   const [a, b] = [prev.settings, next.settings]
   if (a.audioKbps !== b.audioKbps) for (const p of peers.values()) bitrate(p.pc)

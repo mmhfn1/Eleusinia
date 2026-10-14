@@ -23,6 +23,9 @@ export const offers = (me: string, them: string) => me < them
 export const RESTART_AFTER = 3000
 // An ICE restart needs a round trip of signaling plus fresh connectivity checks, so give it time to finish.
 export const RESTART_GRACE = 8000
+// The blip that breaks a call usually drops the chat link too, so a caller who goes offline keeps their place
+// this long before being dropped, giving the link time to come back.
+export const OFFLINE_GRACE = 15000
 const BACKOFF = [2000, 5000, 10000, 15000]
 export const backoff = (attempt: number) => BACKOFF[Math.min(attempt, BACKOFF.length - 1)]
 
@@ -60,6 +63,7 @@ export function createWatchdog(me: string, them: string, act: Recovery, timers: 
   let timer: unknown = null
   let pending: 'restart' | 'rebuild' | null = null
   let stopped = false
+  let away: unknown = null
   const leader = offers(me, them)
 
   const clear = () => {
@@ -76,6 +80,10 @@ export function createWatchdog(me: string, them: string, act: Recovery, timers: 
   }
   // Rebuild unless a connection holds by the next backoff step; this also catches a rebuilt connection
   // stuck before `connected`. A restart that does not help within its grace period starts this too.
+  const back = () => {
+    if (away !== null) timers.clear(away)
+    away = null
+  }
   const rebuild = () => (act.rebuild(), rebuildLater())
   const rebuildLater = () => arm('rebuild', backoff(attempt++), rebuild)
 
@@ -90,9 +98,23 @@ export function createWatchdog(me: string, them: string, act: Recovery, timers: 
       else if (next === 'disconnected' && !pending) arm('restart', RESTART_AFTER, () => (act.restart(), arm('rebuild', RESTART_GRACE, rebuild)))
       else if (next === 'failed' && pending !== 'rebuild') rebuildLater()
     },
+    // The peer went offline: drop them unless they are back within the grace period. A call that is still
+    // connected directly does not need the chat link, so it is checked again later instead.
+    away(drop: () => void) {
+      if (stopped || away !== null) return
+      const check = () => {
+        away = null
+        if (stopped) return
+        if (state === 'connected') away = timers.set(check, OFFLINE_GRACE)
+        else drop()
+      }
+      away = timers.set(check, OFFLINE_GRACE)
+    },
+    back,
     stop() {
       stopped = true
       clear()
+      back()
     },
     get attempt() {
       return attempt

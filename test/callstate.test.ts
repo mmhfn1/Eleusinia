@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { type IceCandidate, RESTART_AFTER, RESTART_GRACE, backoff, createCandidates, createWatchdog, offers } from '../src/shared/callstate'
+import { type IceCandidate, OFFLINE_GRACE, RESTART_AFTER, RESTART_GRACE, backoff, createCandidates, createWatchdog, offers } from '../src/shared/callstate'
 
 // Stands in for RTCPeerConnection: rejects candidates until a remote description is set, as the real one does.
 function fakePc() {
@@ -229,5 +229,57 @@ test('stopping (peer offline or call ended) cancels pending recovery', () => {
   w.update('failed')
   timers.advance(120000)
   expect(log).toEqual([])
+  expect(timers.pending).toBe(0)
+})
+
+test('a caller who goes offline keeps their place for 15 s, then is dropped', () => {
+  for (const [me, them] of [['aa', 'bb'], ['bb', 'aa']]) {
+    const { w, timers } = watch(me, them)
+    let dropped = 0
+    w.update('connected')
+    w.update('disconnected')
+    w.away(() => dropped++)
+    w.away(() => dropped++) // repeated offline events do not push the drop back or drop twice
+    timers.advance(OFFLINE_GRACE - 1)
+    expect(dropped).toBe(0)
+    timers.advance(1)
+    expect(dropped).toBe(1)
+    timers.advance(60000)
+    expect(dropped).toBe(1)
+  }
+})
+
+test('a caller back online within the grace period is not dropped', () => {
+  const { w, timers } = watch('aa', 'bb')
+  let dropped = 0
+  w.update('connected')
+  w.update('disconnected')
+  w.away(() => dropped++)
+  timers.advance(OFFLINE_GRACE - 1)
+  w.back()
+  timers.advance(60000)
+  expect(dropped).toBe(0)
+})
+
+test('a call still connected directly survives the chat link going away, until it breaks too', () => {
+  const { w, timers } = watch('bb', 'aa')
+  let dropped = 0
+  w.update('connected')
+  w.away(() => dropped++)
+  timers.advance(OFFLINE_GRACE * 4)
+  expect(dropped).toBe(0)
+  w.update('failed')
+  timers.advance(OFFLINE_GRACE)
+  expect(dropped).toBe(1)
+})
+
+test('stopping cancels a pending offline drop', () => {
+  const { w, timers } = watch('aa', 'bb')
+  let dropped = 0
+  w.update('disconnected')
+  w.away(() => dropped++)
+  w.stop()
+  timers.advance(60000)
+  expect(dropped).toBe(0)
   expect(timers.pending).toBe(0)
 })
