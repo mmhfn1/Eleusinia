@@ -1,7 +1,7 @@
 /* Eleusinia: an Awoken chamber deep in a fractured throne.
    Colour roles: void/abyss/obsidian = surfaces (darkest outside, lighter inward), silver = text and identity,
    mist = secondary text, Awoken blue = the one interactive accent (selection, focus, primary actions),
-   cyan = presence and live states, violet = rare depth in atmosphere, gold = messages still waiting to send. */
+   cyan = presence and live states, violet = rare depth in atmosphere, gold = waiting (messages still to send, calls reconnecting). */
 :root {
   color-scheme: dark;
 
@@ -882,8 +882,9 @@ aside {
     0 0 0 1.5px color-mix(in srgb, var(--cyan) 70%, transparent),
     0 0 14px color-mix(in srgb, var(--cyan) 22%, transparent);
 }
+.caller.state-disconnected .row-sub,
 .caller.state-failed .row-sub {
-  color: var(--danger);
+  color: var(--gold);
 }
 .call-controls {
   display: flex;
