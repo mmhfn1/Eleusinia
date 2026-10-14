@@ -1,7 +1,7 @@
 /* Eleusinia: an Awoken chamber deep in a fractured throne.
    Colour roles: void/abyss/obsidian = surfaces (darkest outside, lighter inward), silver = text and identity,
    mist = secondary text, Awoken blue = the one interactive accent (selection, focus, primary actions),
-   cyan = presence and live states, violet = rare depth in atmosphere, gold = rare fine ornament only. */
+   cyan = presence and live states, violet = rare depth in atmosphere, gold = messages still waiting to send. */
 :root {
   color-scheme: dark;
 
@@ -30,7 +30,6 @@
   --cyan: #82d6e5;
   --violet: #a998d6;
   --gold: #c5b08a;
-  --gold-faint: rgb(197 176 138 / 0.36);
 
   --danger: #ec8a99;
   --danger-deep: #6e2433;
@@ -309,8 +308,8 @@ input[type='range'] {
 }
 .notice {
   padding: 8px 10px;
-  border-left: 2px solid var(--gold);
-  background: color-mix(in srgb, var(--gold) 7%, transparent);
+  border-left: 2px solid var(--accent);
+  background: var(--accent-veil);
   color: var(--silver-2);
   font-size: 13px;
 }
@@ -346,55 +345,6 @@ input[type='range'] {
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
-}
-.ornament {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  color: var(--gold);
-}
-.ornament > span {
-  flex: 1;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--gold-faint), transparent);
-}
-.ornament svg {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 1.2;
-  opacity: 0.8;
-}
-.orrery {
-  fill: none;
-  pointer-events: none;
-}
-.orrery .ring {
-  stroke: var(--gold);
-  stroke-width: 0.5;
-  opacity: 0.5;
-}
-.orrery .ring.faint {
-  opacity: 0.28;
-}
-.orrery .axis {
-  stroke: var(--accent);
-  stroke-width: 0.3;
-  opacity: 0.25;
-}
-.orrery .links {
-  stroke: var(--accent);
-  stroke-width: 0.5;
-  opacity: 0.45;
-}
-.orrery .star {
-  fill: var(--silver);
-  opacity: 0.8;
-}
-.orrery.small {
-  width: 120px;
-  height: 120px;
-  opacity: 0.7;
 }
 .tail {
   font-family: var(--mono);
@@ -445,30 +395,14 @@ b.tail {
     0 0 8px color-mix(in srgb, var(--cyan) 60%, transparent);
 }
 .crest {
-  position: relative;
   display: inline-grid;
   place-items: center;
   flex: none;
-}
-.crest svg {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-}
-.crest path {
-  fill: hsl(var(--hue) 42% 20%);
-  stroke: hsl(var(--hue) 55% 62% / 0.75);
-  stroke-width: 1;
-}
-.crest path.inner {
-  fill: hsl(var(--hue) 45% 26%);
-  stroke: hsl(var(--hue) 70% 78% / 0.25);
-}
-.crest > span {
-  position: relative;
+  border-radius: 28%;
+  background: linear-gradient(160deg, hsl(var(--hue) 30% 26%), hsl(var(--hue) 34% 15%));
+  box-shadow: inset 0 1px 0 hsl(var(--hue) 50% 70% / 0.18);
+  color: hsl(var(--hue) 55% 88%);
   font: 600 1em/1 var(--serif);
-  color: hsl(var(--hue) 60% 90%);
 }
 
 /* ---------- Shell ---------- */
@@ -495,14 +429,14 @@ b.tail {
   border-right: 1px solid var(--line);
 }
 .rail::after {
-  /* a fine gold inlay down the rail's edge, fading at both ends */
+  /* the rail's edge: a hairline of fog, brighter at the top where the light falls */
   content: '';
   position: absolute;
-  top: 12%;
-  bottom: 12%;
-  right: -1px;
+  top: 0;
+  bottom: 0;
+  right: 0;
   width: 1px;
-  background: linear-gradient(180deg, transparent, var(--gold-faint), transparent);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--fog) 30%, transparent), var(--line) 40%);
 }
 .rail-mark {
   display: grid;
@@ -514,9 +448,6 @@ b.tail {
 .rail-mark .emblem {
   background: linear-gradient(180deg, var(--silver), var(--mist));
   filter: drop-shadow(0 0 10px color-mix(in srgb, var(--accent) 35%, transparent));
-}
-.rail-rule {
-  width: 36px;
 }
 .rail-groups {
   flex: 1;
@@ -546,7 +477,7 @@ b.tail {
   padding: 0;
   border: 1px solid transparent;
   border-radius: 14px;
-  background: var(--obsidian);
+  background: transparent;
   color: var(--silver-2);
   font-size: 14px;
   transition:
@@ -562,10 +493,8 @@ b.tail {
   color: var(--silver);
 }
 .rail-item.active {
-  background: linear-gradient(180deg, var(--obsidian-4), var(--obsidian-3));
-  border-color: color-mix(in srgb, var(--gold) 45%, transparent);
+  background: var(--obsidian-3);
   color: var(--silver);
-  box-shadow: 0 0 18px -4px var(--accent-glow);
 }
 .rail-item::before {
   /* the active marker: a slim lit blade on the rail's left edge */
@@ -677,21 +606,11 @@ aside {
   display: grid;
   gap: 6px;
   padding: 12px;
-  border: 1px solid var(--line);
   border-radius: var(--r-lg);
   background:
     linear-gradient(180deg, color-mix(in srgb, var(--silver) 4%, transparent), transparent),
     var(--abyss-2);
   position: relative;
-}
-.friend-id::before {
-  content: '';
-  position: absolute;
-  left: 12px;
-  right: 12px;
-  top: -1px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--gold-faint), transparent);
 }
 .id-plate {
   display: flex;
@@ -798,34 +717,6 @@ aside {
 .workspace::after,
 .threshold::after {
   background: linear-gradient(0deg, color-mix(in srgb, var(--fog) 9%, transparent), transparent 38%);
-}
-.ruin .ruin-top {
-  stop-color: var(--silver);
-  stop-opacity: 0.11;
-}
-.ruin .ruin-base {
-  stop-color: var(--fog);
-  stop-opacity: 0.04;
-}
-.ruin .ruin-lamp {
-  stop-color: var(--gold);
-  stop-opacity: 0.32;
-}
-.ruin .ruin-lamp-edge {
-  stop-color: var(--gold);
-  stop-opacity: 0;
-}
-.ruin .ruin-flame {
-  fill: var(--gold);
-}
-.workspace-ruin {
-  position: absolute;
-  right: 3%;
-  bottom: 0;
-  z-index: -1;
-  width: min(42%, 520px);
-  height: 88%;
-  pointer-events: none;
 }
 .page-head {
   display: flex;
@@ -953,40 +844,14 @@ aside {
   position: relative;
   display: grid;
   gap: 12px;
-  padding: 16px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--r-lg);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--obsidian) 90%, transparent), color-mix(in srgb, var(--abyss) 95%, transparent));
-  overflow: hidden;
-  transition:
-    border-color var(--t),
-    box-shadow var(--t);
 }
-.chamber::before {
-  content: '';
-  position: absolute;
-  left: 20%;
-  right: 20%;
-  top: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--gold), transparent);
-  opacity: 0.6;
+.voice.live {
+  background:
+    radial-gradient(420px 320px at 50% 14%, color-mix(in srgb, var(--cyan) 9%, transparent), transparent 70%),
+    radial-gradient(400px 300px at 50% 18%, color-mix(in srgb, var(--accent) 14%, transparent), transparent 70%),
+    linear-gradient(180deg, var(--obsidian-2), var(--abyss));
 }
-.voice.live .chamber {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  box-shadow:
-    0 0 32px -10px var(--accent-glow),
-    inset 0 0 40px -20px color-mix(in srgb, var(--accent) 40%, transparent);
-}
-.chamber-sky {
-  position: absolute;
-  right: -50px;
-  top: -50px;
-  width: 200px;
-  height: 200px;
-  opacity: 0.45;
-}
-.chamber > :not(.chamber-sky) {
+.chamber > * {
   position: relative;
 }
 .chamber-state {
@@ -1009,17 +874,13 @@ aside {
 .caller .avatar img,
 .caller .avatar svg {
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--gold) 50%, transparent),
-    0 0 0 4px color-mix(in srgb, var(--abyss) 90%, transparent),
-    0 0 0 5px color-mix(in srgb, var(--accent) 25%, transparent);
+    0 0 0 1px var(--line-strong);
 }
 .caller.state-connected .avatar img,
 .caller.state-connected .avatar svg {
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--gold) 60%, transparent),
-    0 0 0 4px color-mix(in srgb, var(--abyss) 90%, transparent),
-    0 0 0 5px color-mix(in srgb, var(--cyan) 55%, transparent),
-    0 0 14px color-mix(in srgb, var(--cyan) 25%, transparent);
+    0 0 0 1.5px color-mix(in srgb, var(--cyan) 70%, transparent),
+    0 0 14px color-mix(in srgb, var(--cyan) 22%, transparent);
 }
 .caller.state-failed .row-sub {
   color: var(--danger);
@@ -1143,9 +1004,6 @@ details[open] > summary::before {
 .members > h2 {
   padding: 4px 6px 6px;
 }
-.members .ornament {
-  margin: 10px 0 6px;
-}
 .member {
   display: flex;
   align-items: center;
@@ -1175,7 +1033,7 @@ details[open] > summary::before {
   right: 20px;
   bottom: -1px;
   height: 1px;
-  background: linear-gradient(90deg, var(--gold-faint), transparent 40%);
+  background: linear-gradient(90deg, color-mix(in srgb, var(--fog) 28%, transparent), var(--line) 50%, transparent);
 }
 .chat-head h1 {
   font-size: 20px;
@@ -1311,7 +1169,7 @@ details[open] > summary::before {
 .user:hover {
   color: var(--silver);
   text-decoration: underline;
-  text-decoration-color: var(--gold-faint);
+  text-decoration-color: color-mix(in srgb, var(--accent) 50%, transparent);
   text-underline-offset: 3px;
 }
 
@@ -1350,7 +1208,7 @@ details[open] > summary::before {
 }
 .counter {
   align-self: center;
-  color: var(--gold);
+  color: var(--mist-2);
   font-size: 11px;
   white-space: nowrap;
 }
@@ -1411,16 +1269,6 @@ dialog::backdrop {
   max-width: 100%;
   padding: 26px 28px 24px;
 }
-.dialog-body::before {
-  content: '';
-  position: absolute;
-  left: 25%;
-  right: 25%;
-  top: 0;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--gold), transparent);
-  opacity: 0.6;
-}
 .dialog-body:focus {
   outline: none;
   box-shadow: none;
@@ -1439,10 +1287,8 @@ dialog::backdrop {
 .card-portrait .avatar img,
 .card-portrait .avatar svg {
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--gold) 55%, transparent),
-    0 0 0 6px color-mix(in srgb, var(--abyss-2) 90%, transparent),
-    0 0 0 7px color-mix(in srgb, var(--accent) 30%, transparent),
-    0 0 30px color-mix(in srgb, var(--accent) 25%, transparent);
+    0 0 0 1px var(--line-strong),
+    0 0 40px color-mix(in srgb, var(--fog) 18%, transparent);
 }
 .card h1 {
   font-size: 28px;
@@ -1558,15 +1404,6 @@ legend {
     radial-gradient(900px 500px at 50% 0%, color-mix(in srgb, var(--violet) 6%, transparent), transparent 70%),
     linear-gradient(180deg, var(--abyss-2), var(--void));
 }
-.threshold-ruin {
-  position: fixed;
-  left: 50%;
-  bottom: 0;
-  z-index: -1;
-  width: min(900px, 110vh);
-  height: 100vh;
-  translate: -50% 0;
-}
 .threshold-inner {
   position: relative;
   display: grid;
@@ -1595,15 +1432,6 @@ legend {
   border-radius: 12px;
   background: linear-gradient(180deg, color-mix(in srgb, var(--obsidian-2) 92%, transparent), color-mix(in srgb, var(--abyss-2) 95%, transparent));
   box-shadow: var(--shadow-3);
-}
-.panel::before {
-  content: '';
-  position: absolute;
-  left: 20%;
-  right: 20%;
-  top: -1px;
-  height: 1px;
-  background: linear-gradient(90deg, transparent, var(--gold), transparent);
 }
 .profile {
   display: grid;
@@ -1666,4 +1494,15 @@ legend {
 }
 .settings-dialog .dialog-body {
   width: 600px;
+}
+
+hr {
+  width: 100%;
+  height: 1px;
+  margin: 10px 0;
+  border: none;
+  background: linear-gradient(90deg, transparent, var(--line-strong) 20%, var(--line-strong) 80%, transparent);
+}
+.settings-dialog .dialog-body {
+  gap: 26px;
 }

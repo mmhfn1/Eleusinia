@@ -210,7 +210,7 @@ try {
 
   console.log('--- Bob goes offline (process killed)')
   b.child.kill()
-  await until('A lists Bob under Offline after a divider', () => a.ev(`document.querySelector('.rail-item[aria-label^="Home"]').click(); [...document.querySelectorAll('.offline .row-button')].some(x => x.textContent.includes('Bob')) && !!document.querySelector('main.home .ornament')`), 60)
+  await until('A lists Bob under Offline after a divider', () => a.ev(`document.querySelector('.rail-item[aria-label^="Home"]').click(); [...document.querySelectorAll('.offline .row-button')].some(x => x.textContent.includes('Bob')) && !!document.querySelector('main.home hr')`), 60)
   await a.ev(open('Bob'))
   await a.ev(say('dm while offline'))
   await until('A shows the DM as pending', () => a.ev(pendingMark), 5)

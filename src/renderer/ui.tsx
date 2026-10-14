@@ -1,5 +1,5 @@
 // Small shared pieces of the Eleusinia interface: icons, portraits, emblems, dialogs and ornaments.
-import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useId, useRef, useState } from 'react'
+import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 import { type Group, type Key, type Profile, identicon } from '../shared/protocol'
 
 const ICONS: Record<string, ReactNode> = {
@@ -108,84 +108,13 @@ export function Avatar({ k, p, size = 32, online }: { k: Key; p: Profile; size?:
   )
 }
 
-// A group's crest: a faceted crystal holding the group's first letter, coloured from the group id.
+// A group's tile: its first letter on a tinted stone square, coloured from the group id.
 export function GroupEmblem({ g, size = 32 }: { g: Group; size?: number }) {
   const hue = 190 + (parseInt(g.id.slice(0, 4), 16) % 80)
   return (
-    <span className="crest" style={{ width: size, height: size, fontSize: size * 0.42, ['--hue' as string]: hue }} aria-hidden="true">
-      <svg viewBox="0 0 32 32">
-        <path d="M16 1.5 30.5 16 16 30.5 1.5 16z" />
-        <path d="M16 5.5 26.5 16 16 26.5 5.5 16z" className="inner" />
-      </svg>
-      <span>{(g.name.trim()[0] ?? '?').toUpperCase()}</span>
+    <span className="crest" style={{ width: size, height: size, fontSize: size * 0.46, ['--hue' as string]: hue }} aria-hidden="true">
+      {(g.name.trim()[0] ?? '?').toUpperCase()}
     </span>
-  )
-}
-
-// A fine gold rule with a diamond at its centre.
-export function Ornament({ className = '' }: { className?: string }) {
-  return (
-    <div className={`ornament ${className}`} aria-hidden="true">
-      <span />
-      <svg viewBox="0 0 12 12" width="9" height="9">
-        <path d="M6 0.5 11.5 6 6 11.5 0.5 6z" />
-      </svg>
-      <span />
-    </div>
-  )
-}
-
-// A ruined Awoken spire in the fog: a broken crown, flanking towers, an arcade and shards hanging in the air,
-// with one small lamp still burning. Purely decorative, drawn in low-contrast stone so text over it stays readable.
-export function Ruin({ className = '' }: { className?: string }) {
-  const id = useId()
-  const shards: [number, number, number][] = [
-    [190, 66, 1], [238, 50, 0.85], [212, 26, 0.6], [258, 86, 0.75], [174, 100, 0.7], [229, 4, 0.4], [150, 40, 0.45], [282, 30, 0.35],
-  ]
-  return (
-    <svg className={`ruin ${className}`} viewBox="0 0 400 800" preserveAspectRatio="xMidYMax meet" aria-hidden="true">
-      <defs>
-        <linearGradient id={id + 's'} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0" className="ruin-top" />
-          <stop offset="1" className="ruin-base" />
-        </linearGradient>
-        <radialGradient id={id + 'l'}>
-          <stop offset="0" className="ruin-lamp" />
-          <stop offset="1" className="ruin-lamp-edge" />
-        </radialGradient>
-      </defs>
-      <g fill={`url(#${id}s)`} fillRule="evenodd">
-        <path d="M150 800 165 610 150 600 172 470 160 462 188 300 178 292 196 170 206 120 214 150 222 96 230 140 240 118 244 170 252 292 242 300 268 462 256 470 278 600 262 610 276 800Z M210 372h8v22h-8z M206 560h16v30h-16z" />
-        <path d="M70 800 78 640 70 632 92 560 100 528 108 560 128 632 120 640 126 800Z" />
-        <path d="M300 800 306 680 298 672 318 610 326 586 334 610 352 672 344 680 350 800Z" />
-        <path d="M110 680H310V722H110Z M130 722v-14a10 10 0 0 1 20 0v14z M170 722v-14a10 10 0 0 1 20 0v14z M230 722v-14a10 10 0 0 1 20 0v14z M270 722v-14a10 10 0 0 1 20 0v14z" />
-        {shards.map(([x, y, o], i) => (
-          <path key={i} d={`M${x} ${y}l${6 + (i % 3) * 3} -${8 + (i % 2) * 4} l${3 + (i % 2) * 2} ${14 + (i % 3) * 2}z`} opacity={o} />
-        ))}
-      </g>
-      <circle cx="214" cy="383" r="16" fill={`url(#${id}l)`} />
-      <circle cx="214" cy="383" r="1.6" className="ruin-flame" />
-    </svg>
-  )
-}
-
-// A still celestial diagram: orbits, a few stars and the lines between them. Purely decorative.
-export function Orrery({ className = '' }: { className?: string }) {
-  const stars: [number, number][] = [
-    [100, 22], [160, 58], [176, 120], [128, 170], [58, 152], [30, 92], [70, 44],
-  ]
-  return (
-    <svg className={`orrery ${className}`} viewBox="0 0 200 200" aria-hidden="true">
-      <circle cx="100" cy="100" r="92" className="ring" />
-      <circle cx="100" cy="100" r="64" className="ring faint" />
-      <circle cx="100" cy="100" r="34" className="ring faint" />
-      <path d="M100 4v192M4 100h192" className="axis" />
-      <path d="M100 30 170 100 100 170 30 100z" className="ring faint" />
-      <polyline points={stars.map((s) => s.join(',')).join(' ')} className="links" />
-      {stars.map(([x, y], i) => (
-        <circle key={i} cx={x} cy={y} r={i % 3 ? 1.6 : 2.4} className="star" />
-      ))}
-    </svg>
   )
 }
 

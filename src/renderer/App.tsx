@@ -1,7 +1,7 @@
 import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react'
 import { type Group, type Key, type Msg, type Profile, type State, MAX_TEXT, dmId, keyTail, stack } from '../shared/protocol'
 import * as call from './call'
-import { Avatar, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Info, Ornament, Orrery, Ruin, Splitter, Wordmark, useWidth } from './ui'
+import { Avatar, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Info, Splitter, Wordmark, useWidth } from './ui'
 
 const api = window.api
 const NOBODY: Profile = { handle: '', name: '', about: '', avatar: '' }
@@ -109,7 +109,6 @@ function Rail({ st, open, go, show }: { st: State; open: string | null; go: (c: 
         <Emblem size={38} />
       </div>
       {item('Home: friends and direct messages', homeActive, () => go(null), <Icon name="home" size={20} />)}
-      <Ornament className="rail-rule" />
       <div className="rail-groups">
         {Object.values(st.groups).map((g) =>
           item(
@@ -202,7 +201,6 @@ function Home({ st, people, run, open, newGroup }: { st: State; people: People; 
       <Splitter label="Resize groups sidebar" width={width} set={setWidth} dir={1} />
 
       <main className="workspace home">
-        <Ruin className="workspace-ruin" />
         <header className="page-head">
           <h1>Friends</h1>
           <span className="page-sub">
@@ -250,16 +248,14 @@ function Home({ st, people, run, open, newGroup }: { st: State; people: People; 
           <section className="online" aria-label="Online friends">
             <h2>Online · {online.length}</h2>
             {online.map(friend)}
-            {friends.length > 0 && !online.length && <p className="quiet">None of your friends are online right now.</p>}
           </section>
-          <Ornament />
+          <hr />
           <section className="offline" aria-label="Offline friends">
             <h2>Offline · {offline.length}</h2>
             {offline.map(friend)}
           </section>
           {!friends.length && (
             <div className="empty-state">
-              <Orrery className="small" />
               <p className="empty-title">No friends yet</p>
               <p className="quiet">Search for someone's friend ID above. Your own ID is in the sidebar for them to find you.</p>
             </div>
@@ -385,7 +381,6 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
   }
   return (
     <main className="threshold">
-      <Ruin className="threshold-ruin" />
       <div className="threshold-inner">
         {first && (
           <header className="threshold-head">
@@ -395,7 +390,6 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
         )}
         <form className="profile panel" onSubmit={submit}>
           <h1>{first ? 'Create your account' : 'Edit profile'}</h1>
-          <Ornament />
           <div className="portrait-pick">
             <Avatar k={st.me} p={{ ...st.profile, avatar }} size={88} />
             <div>
@@ -439,7 +433,9 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
             <input name="name" defaultValue={st.profile.name} required maxLength={40} autoFocus={!first} />
           </label>
           <label className="field-label">
-            About you <span className="hint inline">(optional)</span>
+            <span>
+              About you <span className="hint inline">(optional)</span>
+            </span>
             <input name="about" defaultValue={st.profile.about} maxLength={200} />
           </label>
           {err && (
@@ -480,7 +476,6 @@ function Card({ k, st, p, close, message, edit, run }: CardProps) {
         <h1>{p.name}</h1>
         {k !== st.me && <p className="row-sub">{st.online.includes(k) ? 'Online' : 'Offline'}</p>}
         {p.about && <p className="about">{p.about}</p>}
-        <Ornament />
         <dl className="identity">
           <dt>Friend ID</dt>
           <dd>
@@ -538,7 +533,6 @@ function NewGroup({ st, people, run, close, open }: { st: State; people: People;
         }}
       >
         <h1>Create a group</h1>
-        <Ornament />
         <label className="field-label">
           Group name
           <input name="name" required maxLength={100} autoFocus />
@@ -619,7 +613,6 @@ function SettingsDialog({ st, close, edit, remove }: { st: State; close: () => v
   return (
     <Dialog label="Settings" close={close} className="settings-dialog">
       <h1>Settings</h1>
-      <Ornament />
       <section className="settings-section">
         <h2>Voice</h2>
         <AudioSettings st={st} />
@@ -679,7 +672,6 @@ function DeleteAccount({ st, close }: { st: State; close: () => void }) {
     <Dialog label="Delete account" close={close}>
       <form className="new-group" onSubmit={submit}>
         <h1>Delete account</h1>
-        <Ornament />
         <p>
           This permanently erases your account, friends, groups and messages from this computer, and you leave every group. Friends who are online are told;
           others keep your old messages. This cannot be undone.
@@ -752,7 +744,6 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
           {!group && <p className="row-sub">{prof(other).handle}</p>}
         </div>
         <section className="chamber" aria-labelledby="voice-title">
-          <Orrery className="chamber-sky" />
           <h2 id="voice-title">Voice</h2>
           {inCall ? (
             <>
@@ -814,7 +805,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
           <aside className="members" style={{ width: right }} aria-label="Group members">
             <h2>Online ({onlineMembers.length})</h2>
             {onlineMembers.map(member)}
-            <Ornament />
+            <hr />
             <h2>Offline ({offlineMembers.length})</h2>
             {offlineMembers.map(member)}
           </aside>
@@ -925,7 +916,6 @@ function Chat({ st, conv, title, people, run, home }: { st: State; conv: string;
 
   return (
     <main className="workspace chat">
-      <Ruin className="workspace-ruin" />
       <header className="chat-head">
         {group ? <GroupEmblem g={group} size={32} /> : <Avatar k={other} p={prof(other)} size={32} online={isOnline(other)} />}
         <div className="row-text">
@@ -954,7 +944,6 @@ function Chat({ st, conv, title, people, run, home }: { st: State; conv: string;
       {leaving && (
         <Dialog label="Leave group" close={() => setLeaving(false)}>
           <h1>Leave {title}?</h1>
-          <Ornament />
           <p>Its messages are deleted from this computer, and you cannot be added back to this group.</p>
           <div className="form-actions">
             <button className="button" onClick={() => setLeaving(false)}>
