@@ -121,3 +121,8 @@ export function createWatchdog(me: string, them: string, act: Recovery, timers: 
     },
   }
 }
+
+// The relay port as an ICE candidate for our own connection. Low priority, so any direct route wins.
+// raddr is the unspecified address of the same family, as the candidate grammar expects.
+export const relayCandidate = (ip: string, port: number) =>
+  `candidate:9 1 udp 16777215 ${ip} ${port} typ relay raddr ${ip.includes(':') ? '::' : '0.0.0.0'} rport 0`

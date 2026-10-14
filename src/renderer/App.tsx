@@ -770,6 +770,11 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
                 ))}
                 {!call.peers.size && <p className="quiet">Waiting for others to join…</p>}
               </div>
+              {call.notices().map((n) => (
+                <p className="call-notice" role="status" key={n}>
+                  {n}
+                </p>
+              ))}
               <div className="call-controls">
                 <button className={`button ${call.muted || call.deafened ? 'active' : ''}`} aria-pressed={call.muted || call.deafened} onClick={call.toggleMute}>
                   <Icon name={call.muted || call.deafened ? 'micOff' : 'mic'} size={16} /> {call.muted || call.deafened ? 'Unmute' : 'Mute'}

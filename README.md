@@ -13,7 +13,7 @@ Peer-to-peer chat and voice calls for desktop, with no central server. A Discord
 - **Profiles.** Display name, about line and picture. Until you upload a picture you get a pattern generated from your key.
 - **Direct and group chat.** Text messages, signed by their author.
 - **Offline delivery.** You can send while the recipient is offline; it shows as pending and arrives when they are next online with you. In groups, any member who has a message passes it on.
-- **Voice calls.** 1:1 and group, audio sent directly between participants, with mute, deafen, a bitrate slider and microphone/speaker selection. A call that drops after a network blip or switch reconnects by itself.
+- **Voice calls.** 1:1 and group, audio sent directly between participants, with mute, deafen, a bitrate slider and microphone/speaker selection. A call that drops after a network blip or switch reconnects by itself. If your chosen headset or speakers are unplugged mid-call, the call moves to the system default and back when they return.
 - **Resizable layout.** Groups sidebar, friends list split into online and offline, and in a conversation a voice sidebar, the chat and a members sidebar.
 
 ## How it works
@@ -70,7 +70,7 @@ Both people must have the app open when one searches for the other's ID.
 - **Friend IDs are not guaranteed unique.** Nothing central can reserve a name. Two people can hold the same `name#1234`; search lists both and shows each one's key ending so you can pick the right person. A 6-character key ending stops accidents, not a determined impostor.
 - **Both people must be online to find each other by ID**, and a direct message needs sender and recipient online at the same time at some point.
 - **Your profile is visible to anyone who knows your ID**, since search fetches it before you are friends.
-- **Strict networks.** When routers block a direct call connection, the call is carried over the same encrypted link chat uses (shown as "relayed through the chat link"). This adds a little delay, and a call still fails if the two people cannot reach each other for chat either.
+- **Strict networks.** When routers block a direct call connection, the call is carried over the same encrypted link chat uses (shown as "relayed through the chat link"). This adds a little delay, and a call still fails if the two people cannot reach each other for chat either. The fallback needs a network address on your machine (IPv4, or IPv6 when there is no IPv4); without one, the call panel says the fallback is unavailable.
 - **Groups have no admin or kick.** Any member can add their own friends. Members can leave; leaving is permanent and that person cannot be added back.
 - **Deleting an account only erases it from your computer.** Friends who are offline at the time keep you in their list, and everyone keeps the messages you already sent them.
 - **Text only:** no attachments, edits, deletes, reactions or unread markers.
