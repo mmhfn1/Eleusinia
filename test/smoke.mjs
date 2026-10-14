@@ -58,8 +58,17 @@ async function until(label, fn, secs = 90) {
   throw new Error('timed out: ' + label)
 }
 
-// Goes Home first, since friends and groups are only listed there.
-const open = (text) => `(() => { document.querySelector('button.home')?.click(); [...document.querySelectorAll('.row-button')].find(x => x.textContent.includes('${text}')).click() })()`
+// Goes Home first, since friends and groups are only listed there, and waits for the row: the Home list
+// is drawn after the click returns.
+const open = (text) => `(async () => {
+  document.querySelector('button.home')?.click()
+  for (let i = 0; i < 50; i++) {
+    const row = [...document.querySelectorAll('.row-button')].find(x => x.textContent.includes('${text}'))
+    if (row) return row.click()
+    await new Promise(r => setTimeout(r, 100))
+  }
+  throw new Error('no row for ${text}')
+})()`
 const say = (text) => `(() => { const f = document.querySelector('form.send'); f.elements.text.value = '${text}'; f.requestSubmit() })()`
 const shows = (text) => `!!document.querySelector('.msgs')?.textContent.includes('${text}')`
 const pendingMark = `!!document.querySelector('.msgs')?.textContent.includes('pending')`
@@ -221,15 +230,20 @@ try {
   await a.ev(say('dm while offline'))
   await until('A shows the DM as pending', () => a.ev(pendingMark), 5)
   await c.ev(say('group while bob offline'))
-  await until('A shows the group message', async () => (await a.ev(open('Trio')), a.ev(shows('group while bob offline'))))
+  await a.ev(open('Trio'))
+  await until('A shows the group message', () => a.ev(shows('group while bob offline')))
   await until('A members sidebar shows Bob offline', () => a.ev(`document.querySelector('aside.members').textContent.includes('Offline (1)')`))
 
   console.log('--- Bob comes back')
   b = await launch(9234, b.dir)
   await until('B is straight on Home (profile kept)', () => b.ev(`!!document.querySelector('main.home')`))
-  await until('B received the offline DM', async () => (await b.ev(open('Ann')), b.ev(shows('dm while offline'))), 120)
-  await until('B received the offline group message', async () => (await b.ev(open('Trio')), b.ev(shows('group while bob offline'))), 120)
-  await until('A shows the DM delivered', async () => (await a.ev(open('Bob')), a.ev(`${shows('dm while offline')} && !${pendingMark}`)), 120)
+  // Each chat is opened once, then watched: new messages and receipts show live in an open chat.
+  await b.ev(open('Ann'))
+  await until('B received the offline DM', () => b.ev(shows('dm while offline')), 120)
+  await b.ev(open('Trio'))
+  await until('B received the offline group message', () => b.ev(shows('group while bob offline')), 120)
+  await a.ev(open('Bob'))
+  await until('A shows the DM delivered', () => a.ev(`${shows('dm while offline')} && !${pendingMark}`), 120)
 
   console.log('--- Leaving a group')
   await a.ev(`document.querySelector('.rail-item[aria-label^="Second"]').click()`)
