@@ -78,3 +78,17 @@ test('a device that comes back under a new id is switched back to by name', () =
   expect(step([builtIn, { kind: 'audioinput', deviceId: 'new-id', label: 'HyperX Cloud' }])).toBe('new-id')
   expect(fellBack('old-id', inUse)).toBe(false)
 })
+
+test('a name match never lands on the virtual default or communications entries', () => {
+  const real = { kind: 'audioinput', deviceId: 'real-id', label: 'HyperX Cloud' }
+  const def = { kind: 'audioinput', deviceId: 'default', label: 'Default - HyperX Cloud' }
+  const comms = { kind: 'audioinput', deviceId: 'communications', label: 'Communications - HyperX Cloud' }
+  // A saved name that happens to equal a virtual entry's name does not match it, by id or by prefix.
+  expect(usable('old-id', 'audioinput', [builtIn, def, comms], 'Default - HyperX Cloud')).toBe('')
+  expect(usable('old-id', 'audioinput', [builtIn, def, comms], 'Communications - HyperX Cloud')).toBe('')
+  expect(usable('old-id', 'audioinput', [builtIn, { ...def, deviceId: 'odd-id' }], 'Default - HyperX Cloud')).toBe('')
+  // The real device is still found by name next to them.
+  expect(usable('old-id', 'audioinput', [def, comms, real], 'HyperX Cloud')).toBe('real-id')
+  // Choosing a virtual entry by id still works while it is listed.
+  expect(usable('communications', 'audioinput', [builtIn, comms], 'Communications - HyperX Cloud')).toBe('communications')
+})
