@@ -39,7 +39,13 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
       })
       ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }))
     })
-  return { child, ev, dir, title: page.title }
+  // DevTools lists the page before it has loaded, when its title is still empty; read it once loading is done.
+  let title = ''
+  for (let i = 0; i < 50 && !title; i++) {
+    title = await ev(`document.readyState === 'complete' ? document.title : ''`).catch(() => '')
+    if (!title) await sleep(200)
+  }
+  return { child, ev, dir, title }
 }
 
 async function until(label, fn, secs = 90) {
