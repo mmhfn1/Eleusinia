@@ -13,7 +13,7 @@ Peer-to-peer chat and voice calls for desktop, with no central server. A Discord
 - **Profiles.** Display name, about line and picture. Until you upload a picture you get a pattern generated from your key.
 - **Direct and group chat.** Text messages, signed by their author.
 - **Offline delivery.** You can send while the recipient is offline; it shows as pending and arrives when they are next online with you. In groups, any member who has a message passes it on.
-- **Voice calls.** 1:1 and group, audio sent directly between participants, with mute, deafen, a bitrate slider and microphone/speaker selection.
+- **Voice calls.** 1:1 and group, audio sent directly between participants, with mute, deafen, a bitrate slider and microphone/speaker selection. A call that drops after a network blip or switch reconnects by itself.
 - **Resizable layout.** Groups sidebar, friends list split into online and offline, and in a conversation a voice sidebar, the chat and a members sidebar.
 
 ## How it works
@@ -28,7 +28,7 @@ The only outside infrastructure is the public DHT's bootstrap nodes and a public
 
 - `src/main/network.ts`: one encrypted stream per peer, found by public key.
 - `src/main/node.ts`: friends, groups, message logs and their sync. No Electron imports, so the tests run it directly.
-- `src/shared/`: wire types, validation, signing and merge logic.
+- `src/shared/`: wire types, validation, signing and merge logic, and the per-peer call decisions (`callstate.ts`: early ICE candidates, reconnect timing).
 - `src/renderer/`: the React UI (`App.tsx`) and voice calls (`call.ts`).
 
 ## Getting started

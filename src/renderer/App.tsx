@@ -703,7 +703,7 @@ const STATE_WORDS: Record<string, string> = {
   connecting: 'Connecting…',
   connected: 'Connected',
   disconnected: 'Reconnecting…',
-  failed: 'Could not connect',
+  failed: 'Reconnecting…', // call.ts retries until the peer leaves or goes offline
   closed: 'Disconnected',
 }
 

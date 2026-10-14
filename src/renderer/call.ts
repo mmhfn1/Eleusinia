@@ -1,3 +1,4 @@
+import { createCandidates, createWatchdog, offers } from '../shared/callstate'
 import type { Event, Key, Settings, State } from '../shared/protocol'
 
 declare global {
@@ -7,10 +8,12 @@ declare global {
 }
 
 // Voice calls as a full mesh: one RTCPeerConnection per other participant, signaled over the control links.
-type Peer = { pc: RTCPeerConnection; audio: HTMLAudioElement; relayed?: boolean }
+type Peer = { pc: RTCPeerConnection; audio: HTMLAudioElement; relayed?: boolean; candidates: ReturnType<typeof createCandidates> }
 
 export const active = new Map<string, Set<Key>>() // conversation -> peers we know are in its call
 export const peers = new Map<Key, Peer>()
+// Outlives a rebuilt connection, so reconnect attempts keep backing off until one holds.
+const watchdogs = new Map<Key, ReturnType<typeof createWatchdog>>()
 export let conv: string | null = null
 export let muted = false
 export let deafened = false // hear nobody; also keeps your microphone off
@@ -33,7 +36,7 @@ function bitrate(pc: RTCPeerConnection) {
   }
 }
 
-function drop(k: Key) {
+function close(k: Key) {
   const p = peers.get(k)
   if (!p) return
   p.pc.close()
@@ -42,8 +45,15 @@ function drop(k: Key) {
   window.api.call('relayClose', k)
 }
 
+// Ends the call with k for good: they left, went offline, or we left.
+function drop(k: Key) {
+  watchdogs.get(k)?.stop()
+  watchdogs.delete(k)
+  close(k)
+}
+
 function connect(k: Key) {
-  drop(k)
+  close(k)
   const c = conv!
   const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
   const audio = new Audio()
@@ -53,8 +63,11 @@ function connect(k: Key) {
   for (const t of stream!.getTracks()) pc.addTrack(t, stream!)
   pc.onicecandidate = (e) => e.candidate && send(c, k, { k: 'ice', c: e.candidate.toJSON() })
   pc.ontrack = (e) => (audio.srcObject = e.streams[0])
-  const peer: Peer = { pc, audio }
+  const peer: Peer = { pc, audio, candidates: createCandidates(pc) }
+  if (!watchdogs.has(k)) watchdogs.set(k, createWatchdog(state.me, k, { restart: () => serial(() => restart(k)), rebuild: () => serial(() => offer(k)) }))
   pc.onconnectionstatechange = async () => {
+    if (peers.get(k) !== peer) return // a replaced connection
+    watchdogs.get(k)?.update(pc.connectionState)
     if (pc.connectionState === 'connected') {
       bitrate(pc)
       peer.relayed = await isRelayed(pc)
@@ -72,6 +85,30 @@ async function addRelay(k: Key, pc: RTCPeerConnection) {
   if (!r || pc.signalingState === 'closed') return
   const mid = pc.getTransceivers()[0]?.mid ?? '0'
   await pc.addIceCandidate({ candidate: `candidate:9 1 udp 16777215 ${r.ip} ${r.port} typ relay raddr 0.0.0.0 rport 0`, sdpMid: mid, sdpMLineIndex: 0 })
+}
+
+async function offer(k: Key) {
+  if (!conv) return
+  const c = conv
+  const pc = connect(k)
+  await pc.setLocalDescription(await pc.createOffer())
+  send(c, k, { k: 'offer', sdp: pc.localDescription!.toJSON() })
+}
+
+// Finds a new route on the same connection; the other side answers without tearing anything down.
+async function restart(k: Key) {
+  const pc = peers.get(k)?.pc
+  if (!conv || !pc || pc.signalingState === 'closed') return
+  pc.restartIce()
+  await pc.setLocalDescription(await pc.createOffer({ iceRestart: true }))
+  send(conv, k, { k: 'offer', sdp: pc.localDescription!.toJSON(), restart: true })
+}
+
+// Sets the remote side's description, then the candidates that arrived before it and the relay port.
+async function describe(k: Key, pc: RTCPeerConnection, sdp: RTCSessionDescriptionInit) {
+  await pc.setRemoteDescription(sdp)
+  await peers.get(k)?.candidates.flush()
+  await addRelay(k, pc)
 }
 
 async function isRelayed(pc: RTCPeerConnection) {
@@ -134,35 +171,31 @@ async function handle(from: Key, c: string, d: any) {
   if (d.k === 'join') {
     const p = peers.get(from)
     if (p && !['failed', 'closed'].includes(p.pc.connectionState)) return
-    // The smaller key always makes the offer, so two people joining at once cannot both offer.
-    if (state.me > from) return void send(c, from, { k: 'join' })
-    const pc = connect(from)
-    await pc.setLocalDescription(await pc.createOffer())
-    send(c, from, { k: 'offer', sdp: pc.localDescription!.toJSON() })
+    if (!offers(state.me, from)) return void send(c, from, { k: 'join' })
+    await offer(from)
   } else if (d.k === 'offer') {
-    const pc = connect(from)
-    await pc.setRemoteDescription(d.sdp)
-    await addRelay(from, pc)
+    // An ICE restart reuses the connection; any other offer starts a new one.
+    const p = d.restart && peers.get(from)
+    const pc = p && p.pc.signalingState !== 'closed' ? p.pc : connect(from)
+    await describe(from, pc, d.sdp)
     await pc.setLocalDescription(await pc.createAnswer())
     send(c, from, { k: 'answer', sdp: pc.localDescription!.toJSON() })
   } else if (d.k === 'answer') {
     const pc = peers.get(from)?.pc
     if (!pc) return
-    await pc.setRemoteDescription(d.sdp)
-    await addRelay(from, pc)
+    await describe(from, pc, d.sdp)
   } else if (d.k === 'ice') {
-    await peers.get(from)?.pc.addIceCandidate(d.c)
+    await peers.get(from)?.candidates.add(d.c)
   }
 }
 
-// One at a time, so a candidate never overtakes the offer it belongs to.
+// One at a time, so a candidate never overtakes the offer it belongs to, and a reconnect never
+// interleaves with incoming signals.
 let queue = Promise.resolve()
-export function onSignal(from: Key, c: string, d: any) {
-  queue = queue
-    .then(() => handle(from, c, d))
-    .catch(console.error)
-    .then(notify)
+function serial(fn: () => Promise<void>) {
+  queue = queue.then(fn).catch(console.error).then(notify)
 }
+export const onSignal = (from: Key, c: string, d: any) => serial(() => handle(from, c, d))
 
 export function onState(next: State) {
   const prev = state

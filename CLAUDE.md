@@ -11,7 +11,7 @@ See `README.md` for features, known limits and the roadmap.
 | `npm install` | Install; the postinstall also downloads the Electron binary (~100 MB). If `npm run dev` says `Electron uninstall`, run `npx install-electron` |
 | `npm run dev` | Run with hot reload |
 | `npm run typecheck` | `tsc --noEmit` over `src` and `test` |
-| `npm test` | Vitest: `test/node.test.ts` runs the whole node layer against a local test DHT, no Electron |
+| `npm test` | Vitest: `test/node.test.ts` runs the whole node layer against a local test DHT, no Electron; `test/callstate.test.ts` covers call reconnect decisions with a fake connection |
 | `npm run smoke` | Builds, then drives three real app windows over the **public** DHT: setup, friend search, chat, a voice call, offline delivery (~40 s, opens windows) |
 | `ELEUSINIA_NO_DIRECT=1 npm run smoke` | Same, but direct call routes are withheld so the call must go through the relay |
 
@@ -31,6 +31,7 @@ setup, also run both smoke modes.
 | `src/main/relay.ts` | Fallback when routers block direct WebRTC: a local UDP port offered to WebRTC as a low-priority `relay` candidate, with packets ferried over the peer link. Media stays DTLS-SRTP encrypted |
 | `src/shared/protocol.ts` | Wire, state and event types; validation (`isKey`, `cleanProfile`, …); message stacking |
 | `src/shared/sync.ts` | Signing and verification, group merge, missing-message calculation |
+| `src/shared/callstate.ts` | Per-peer call decisions with no WebRTC imports: buffers early ICE candidates, decides when to restart ICE or rebuild (smaller key acts, with backoff). Tested in `test/callstate.test.ts` |
 | `src/renderer/App.tsx`, `ui.tsx` | React UI |
 | `src/renderer/call.ts` | Voice: full-mesh `RTCPeerConnection` per participant, offer/answer/ICE over `signal`, mute/deafen, device and bitrate changes |
 | `src/preload/index.ts` | Exposes `window.api.call` and `window.api.on` |
