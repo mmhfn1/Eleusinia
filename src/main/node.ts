@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomInt } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   type Event,
@@ -20,7 +20,7 @@ import {
   isUsername,
   normHandle,
 } from '../shared/protocol'
-import { mergeGroup, missing, signAdd, signMsg, validGroup, verifyAdd, verifyMsg } from '../shared/sync'
+import { mergeGroup, missing, signAdd, signLeft, signMsg, validGroup, verifyAdd, verifyMsg } from '../shared/sync'
 import { createNet } from './network'
 import { createRelay } from './relay'
 
@@ -61,14 +61,16 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     renameSync(file + '.tmp', file) // atomic, so a crash mid-write cannot corrupt the state
   }
 
-  const inGroupWith = (key: Key) => Object.values(s.groups).some((g) => g.members.includes(key))
+  // Groups we are in. Groups we left stay stored, so the notice of leaving keeps reaching their members.
+  const ours = () => Object.values(s.groups).filter((g) => g.members.includes(me))
+  const inGroupWith = (key: Key) => ours().some((g) => g.members.includes(key))
   const known = (key: Key) => s.friends[key] === 'friend' || inGroupWith(key)
   const wants = (key: Key) => known(key) || s.friends[key] === 'outgoing'
 
   // Members of a conversation; empty means it is not a conversation we take part in.
   function members(conv: unknown): Key[] {
     if (typeof conv !== 'string') return []
-    if (Object.hasOwn(s.groups, conv)) return s.groups[conv].members
+    if (Object.hasOwn(s.groups, conv)) return s.groups[conv].members.includes(me) ? s.groups[conv].members : []
     const [a, b] = conv.split('_')
     const other = a === me ? b : a
     return isKey(other) && conv === dmId(me, other) && s.friends[other] === 'friend' ? [me, other] : []
@@ -80,7 +82,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     friends: s.friends,
     profiles: s.profiles,
     online: net.keys().filter(known),
-    groups: s.groups,
+    groups: Object.fromEntries(ours().map((g) => [g.id, g])),
     settings: s.settings,
   })
   const push = () => emit({ type: 'state', state: state() })
@@ -174,11 +176,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     }
     if (w.t === 'group') {
       const g = w.g
-      if (!validGroup(g) || !g.members.includes(key) || !g.members.includes(me)) return
+      // The sender is a member, or a member who just left (their signed notice is checked by validGroup).
+      if (!validGroup(g) || !(g.members.includes(key) || g.left?.[key]) || !(g.members.includes(me) || s.groups[g.id])) return
       // A member we have never met may hand us the group, but only with proof that one of our friends added us.
       const add = g.adds?.[me]
       if (!known(key) && !(add && s.friends[add.by] === 'friend' && verifyAdd(g.id, me, add))) return
       const merged = mergeGroup(s.groups[g.id], g)
+      // They are behind (for example, they have not heard that someone left): send them ours.
+      if (JSON.stringify(merged) !== JSON.stringify(mergeGroup(undefined, g))) net.send(key, { t: 'group', g: merged })
       if (JSON.stringify(merged) === JSON.stringify(s.groups[g.id])) return
       s.groups[g.id] = merged
       changed()
@@ -210,6 +215,10 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       for (const k of ms) if (k !== me && k !== key && k !== m.author) net.send(k, { t: 'msg', m })
     } else if (w.t === 'call') {
       if (members(w.conv).includes(key)) emit({ type: 'call', from: key, conv: w.conv, data: w.data })
+    } else if (w.t === 'gone') {
+      delete s.friends[key]
+      if (!known(key)) delete s.profiles[key]
+      changed()
     } else if (w.t === 'pkt') {
       if (typeof w.d === 'string') relay.deliver(key, Buffer.from(w.d, 'base64'))
     }
@@ -235,7 +244,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const relay = createRelay((key, b) => net.packet(key, b))
 
   const redial = () => {
-    const keys = new Set(Object.values(s.groups).flatMap((g) => g.members))
+    const keys = new Set(ours().flatMap((g) => g.members))
     for (const [k, st] of Object.entries(s.friends)) if (st !== 'incoming') keys.add(k)
     keys.delete(me)
     for (const k of keys) net.dial(k)
@@ -340,6 +349,25 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const m = signMsg({ conv, author: me, seq: (log(conv).have[me] ?? 0) + 1, ts: Date.now(), text }, keyPair.secretKey)
       append(m)
       for (const k of ms) if (k !== me) net.send(k, { t: 'msg', m })
+    },
+    // Leaving is signed and permanent. The group's messages are deleted from this computer.
+    leaveGroup(id: string) {
+      const g = Object.hasOwn(s.groups, id) ? s.groups[id] : undefined
+      if (!g || !g.members.includes(me)) return
+      s.groups[id] = mergeGroup(undefined, { ...g, left: { ...g.left, [me]: signLeft(id, keyPair) } })
+      logs.delete(id)
+      rmSync(logFile(id), { force: true })
+      changed()
+      for (const k of g.members) if (k !== me) net.send(k, { t: 'group', g: s.groups[id] })
+    },
+    // Leaves every group, tells online friends, then erases this account's identity, friends, groups and
+    // messages from this computer. The caller restarts the app afterwards.
+    async deleteAccount() {
+      for (const g of ours()) this.leaveGroup(g.id)
+      for (const k of net.keys()) if (s.friends[k] === 'friend') net.send(k, { t: 'gone' })
+      await new Promise((r) => setTimeout(r, 1500)) // let those notices leave before the links close
+      await this.destroy()
+      for (const f of ['state.json', 'state.json.tmp', 'identity.json', 'msgs']) rmSync(join(dir, f), { recursive: true, force: true })
     },
     signal(conv: string, to: Key | null, data: unknown) {
       if (noDirect && (data as { k?: string })?.k === 'ice') return

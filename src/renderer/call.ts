@@ -13,6 +13,7 @@ export const active = new Map<string, Set<Key>>() // conversation -> peers we kn
 export const peers = new Map<Key, Peer>()
 export let conv: string | null = null
 export let muted = false
+export let deafened = false // hear nobody; also keeps your microphone off
 
 let state: State
 let stream: MediaStream | null = null
@@ -47,6 +48,7 @@ function connect(k: Key) {
   const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
   const audio = new Audio()
   audio.autoplay = true
+  audio.muted = deafened
   if (state.settings.out) audio.setSinkId(state.settings.out).catch(() => {})
   for (const t of stream!.getTracks()) pc.addTrack(t, stream!)
   pc.onicecandidate = (e) => e.candidate && send(c, k, { k: 'ice', c: e.candidate.toJSON() })
@@ -83,7 +85,7 @@ export async function join(c: string) {
   leave()
   stream = await mic(state.settings)
   conv = c
-  muted = false
+  muted = deafened = false
   send(c, null, { k: 'join' })
   notify()
 }
@@ -98,9 +100,21 @@ export function leave() {
   notify()
 }
 
+const applyMic = () => stream?.getAudioTracks().forEach((t) => (t.enabled = !muted && !deafened))
+
+// Unmuting while deafened also undeafens, since you cannot talk without hearing the reply.
 export function toggleMute() {
-  muted = !muted
-  stream?.getAudioTracks().forEach((t) => (t.enabled = !muted))
+  if (deafened) deafened = muted = false
+  else muted = !muted
+  for (const p of peers.values()) p.audio.muted = deafened
+  applyMic()
+  notify()
+}
+
+export function toggleDeafen() {
+  deafened = !deafened
+  for (const p of peers.values()) p.audio.muted = deafened
+  applyMic()
   notify()
 }
 
@@ -168,7 +182,7 @@ export function onState(next: State) {
   if (a.mic !== b.mic && stream) {
     mic(b).then((fresh) => {
       const track = fresh.getAudioTracks()[0]
-      track.enabled = !muted
+      track.enabled = !muted && !deafened
       for (const p of peers.values()) p.pc.getSenders().forEach((s) => s.track?.kind === 'audio' && s.replaceTrack(track))
       stream?.getTracks().forEach((t) => t.stop())
       stream = fresh

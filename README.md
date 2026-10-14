@@ -1,3 +1,5 @@
+<p align="center"><img src="build/icon.png" alt="" width="112"></p>
+
 # Eleusinia
 
 Peer-to-peer chat and voice calls for desktop, with no central server. A Discord/TeamSpeak-style app where every message and call goes directly between the people involved.
@@ -11,7 +13,7 @@ Peer-to-peer chat and voice calls for desktop, with no central server. A Discord
 - **Profiles.** Display name, about line and picture. Until you upload a picture you get a pattern generated from your key.
 - **Direct and group chat.** Text messages, signed by their author.
 - **Offline delivery.** You can send while the recipient is offline; it shows as pending and arrives when they are next online with you. In groups, any member who has a message passes it on.
-- **Voice calls.** 1:1 and group, audio sent directly between participants, with a bitrate slider and microphone/speaker selection.
+- **Voice calls.** 1:1 and group, audio sent directly between participants, with mute, deafen, a bitrate slider and microphone/speaker selection.
 - **Resizable layout.** Groups sidebar, friends list split into online and offline, and in a conversation a voice sidebar, the chat and a members sidebar.
 
 ## How it works
@@ -69,7 +71,8 @@ Both people must have the app open when one searches for the other's ID.
 - **Both people must be online to find each other by ID**, and a direct message needs sender and recipient online at the same time at some point.
 - **Your profile is visible to anyone who knows your ID**, since search fetches it before you are friends.
 - **Strict networks.** When routers block a direct call connection, the call is carried over the same encrypted link chat uses (shown as "relayed through the chat link"). This adds a little delay, and a call still fails if the two people cannot reach each other for chat either.
-- **Groups have no admin, leave or kick.** Any member can add their own friends.
+- **Groups have no admin or kick.** Any member can add their own friends. Members can leave; leaving is permanent and that person cannot be added back.
+- **Deleting an account only erases it from your computer.** Friends who are offline at the time keep you in their list, and everyone keeps the messages you already sent them.
 - **Text only:** no attachments, edits, deletes, reactions or unread markers.
 - **Desktop only, one device per identity,** and no installer yet.
 

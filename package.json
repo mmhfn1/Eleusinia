@@ -15,6 +15,7 @@
   },
   "type": "commonjs",
   "dependencies": {
+    "@fontsource/cormorant-garamond": "^5.3.0",
     "hypercore-crypto": "^3.7.0",
     "hyperdht": "^6.34.1"
   },

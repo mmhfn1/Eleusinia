@@ -1,7 +1,8 @@
 export type Key = string // 64 hex chars: ed25519 public key, also the friend code
 export type FriendStatus = 'friend' | 'outgoing' | 'incoming'
 export type Add = { by: Key; sig: string } // proof that `by` added a member to a group
-export type Group = { id: string; name: string; members: Key[]; updatedAt: number; adds?: Record<Key, Add> }
+// left: members who left, each with their own signature, so nobody can be removed by someone else.
+export type Group = { id: string; name: string; members: Key[]; updatedAt: number; adds?: Record<Key, Add>; left?: Record<Key, string> }
 export type Msg = { conv: string; author: Key; seq: number; ts: number; text: string; sig: string }
 export type Have = Record<Key, number> // highest seq held, per author
 // handle: the unique-ish ID friends type, username#1234. avatar: small image data URL, or ''.
@@ -27,6 +28,7 @@ export type Wire =
   | { t: 'msg'; m: Msg }
   | { t: 'call'; conv: string; data: unknown }
   | { t: 'pkt'; d: string } // a relayed call packet too big for a datagram, base64
+  | { t: 'gone' } // the sender deleted their account
 
 export type Event =
   | { type: 'state'; state: State }
@@ -59,7 +61,7 @@ export function identicon(key: Key) {
   return { hue: Math.round(((byte(5) * 256 + byte(6)) / 65536) * 360), cells }
 }
 // Shown next to a person so two people with the same friend ID can be told apart. Public key only.
-export const keyTail = (key: Key) => '…' + key.slice(-6).toUpperCase()
+export const keyTail = (key: Key) => key.slice(-6).toUpperCase()
 
 // Messages in time order, with a run of messages from one person (each within 5 minutes of the last)
 // stacked under a single name and picture. Equal times keep arrival order.

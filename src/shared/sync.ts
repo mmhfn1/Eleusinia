@@ -13,6 +13,11 @@ export const signAdd = (id: string, member: string, kp: { publicKey: Buffer; sec
 export const verifyAdd = (id: string, member: string, a?: Add) =>
   !!a && isKey(a.by) && isSig(a.sig) && crypto.verify(addBody(id, member), Buffer.from(a.sig, 'hex'), Buffer.from(a.by, 'hex'))
 
+const leftBody = (id: string, member: string) => Buffer.from(`left:${id}:${member}`)
+export const signLeft = (id: string, kp: { publicKey: Buffer; secretKey: Buffer }) => crypto.sign(leftBody(id, kp.publicKey.toString('hex')), kp.secretKey).toString('hex')
+export const verifyLeft = (id: string, member: string, sig: unknown) =>
+  isKey(member) && isSig(sig) && crypto.verify(leftBody(id, member), Buffer.from(sig, 'hex'), Buffer.from(member, 'hex'))
+
 export function signMsg(m: Omit<Msg, 'sig'>, secretKey: Buffer): Msg {
   return { ...m, sig: crypto.sign(body(m), secretKey).toString('hex') }
 }
@@ -45,20 +50,24 @@ export function validGroup(g: Group): boolean {
     Array.isArray(g.members) &&
     g.members.length <= 100 &&
     g.members.every(isKey) &&
-    (g.adds === undefined || (!!g.adds && typeof g.adds === 'object' && Object.keys(g.adds).length <= 100))
+    (g.adds === undefined || (!!g.adds && typeof g.adds === 'object' && Object.keys(g.adds).length <= 100)) &&
+    (g.left === undefined || (!!g.left && typeof g.left === 'object' && Object.keys(g.left).length <= 100 && Object.entries(g.left).every(([k, sig]) => verifyLeft(g.id, k, sig))))
   )
 }
 
-// Members only ever grow (union); the name follows the latest edit. Same result on every peer in any order.
+// Members are the union of both sides minus everyone who has left (leaving is permanent); the name follows the
+// latest edit. Same result on every peer in any order.
 export function mergeGroup(a: Group | undefined, b: Group): Group {
-  a ??= { ...b, members: [], adds: {} }
+  a ??= { ...b, members: [], adds: {}, left: {} }
   const newer = b.updatedAt > a.updatedAt || (b.updatedAt === a.updatedAt && b.name > a.name) ? b : a
-  const members = [...new Set([...a.members, ...b.members])].sort()
+  const left: Record<string, string> = {}
+  for (const k of [...new Set([...Object.keys(a.left ?? {}), ...Object.keys(b.left ?? {})])].sort()) left[k] = a.left?.[k] ?? b.left![k]
+  const members = [...new Set([...a.members, ...b.members])].filter((k) => !left[k]).sort()
   const adds: Record<string, Add> = {}
   for (const k of members) {
     const [x, y] = [a.adds?.[k], b.adds?.[k]]
     const pick = x && y ? (String(x.sig) <= String(y.sig) ? x : y) : (x ?? y)
     if (pick) adds[k] = { by: pick.by, sig: pick.sig }
   }
-  return { id: a.id, name: newer.name, members, updatedAt: newer.updatedAt, adds }
+  return { id: a.id, name: newer.name, members, updatedAt: newer.updatedAt, adds, left }
 }

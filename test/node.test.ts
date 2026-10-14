@@ -1,4 +1,4 @@
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import DHT from 'hyperdht'
@@ -7,7 +7,7 @@ import { afterAll, beforeAll, expect, test } from 'vitest'
 import { createNode } from '../src/main/node'
 import { createNet } from '../src/main/network'
 import { type Group, type Msg, cleanProfile, dmId, identicon, isHandle, keyTail, normHandle, stack } from '../src/shared/protocol'
-import { mergeGroup, missing, signAdd, signMsg, verifyAdd, verifyMsg } from '../src/shared/sync'
+import { mergeGroup, missing, signAdd, signLeft, signMsg, validGroup, verifyAdd, verifyMsg } from '../src/shared/sync'
 
 test('a tampered or re-attributed message fails verification', () => {
   const a = DHT.keyPair()
@@ -28,7 +28,7 @@ test('group merge converges whichever side merges first', () => {
   const a: Group = { id: 'g', name: 'old', members: ['a', 'b'], updatedAt: 1 }
   const b: Group = { id: 'g', name: 'new', members: ['a', 'c'], updatedAt: 2 }
   expect(mergeGroup(a, b)).toEqual(mergeGroup(b, a))
-  expect(mergeGroup(a, b)).toEqual({ id: 'g', name: 'new', members: ['a', 'b', 'c'], updatedAt: 2, adds: {} })
+  expect(mergeGroup(a, b)).toEqual({ id: 'g', name: 'new', members: ['a', 'b', 'c'], updatedAt: 2, adds: {}, left: {} })
 })
 
 test('a group invite only verifies for the member and group it was signed for', () => {
@@ -67,7 +67,7 @@ test('generated pictures are stable, mirrored and differ between keys', () => {
   for (let row = 0; row < 5; row++) expect(cells[row * 5]).toBe(cells[row * 5 + 4])
   expect(hue).toBeGreaterThanOrEqual(0)
   expect(hue).toBeLessThanOrEqual(360)
-  expect(keyTail('ab'.repeat(29) + 'a3f9c2')).toBe('…A3F9C2')
+  expect(keyTail('ab'.repeat(29) + 'a3f9c2')).toBe('A3F9C2')
 })
 
 // Three real nodes on a local DHT: friends, direct chat, offline delivery, groups.
@@ -353,4 +353,66 @@ test('call packets cross the peer link through the relay, both small and large',
   pb.close()
   a.node.relayClose(b.key)
   b.node.relayClose(a.key)
+}, 120000)
+
+test('only the member themselves can sign their leaving, and a merge drops them for good', () => {
+  const [a, b] = [DHT.keyPair(), DHT.keyPair()]
+  const [ka, kb] = [a.publicKey.toString('hex'), b.publicKey.toString('hex')]
+  const id = 'ab'.repeat(16)
+  const g: Group = { id, name: 'g', members: [ka, kb].sort(), updatedAt: 1, adds: {} }
+  const left = { ...g, left: { [ka]: signLeft(id, a) } }
+  expect(validGroup(left)).toBe(true)
+  expect(validGroup({ ...g, left: { [ka]: signLeft(id, b) } })).toBe(false) // B cannot remove A
+  expect(validGroup({ ...g, left: { [ka]: signLeft('cd'.repeat(16), a) } })).toBe(false) // nor reuse another group's notice
+  // Whichever order the copies meet in, A is gone, even from a copy that still lists A
+  expect(mergeGroup(g, left).members).toEqual([kb])
+  expect(mergeGroup(left, g).members).toEqual([kb])
+  expect(mergeGroup(mergeGroup(left, g), { ...g, updatedAt: 9 }).members).toEqual([kb])
+})
+
+test('leaving a group: others learn it, even one who was offline, and the leaver keeps none of it', async () => {
+  const a = start()
+  const b = start()
+  let c = start()
+  await befriend(a, b)
+  await befriend(a, c)
+  const gid = a.node.createGroup('club', [b.key, c.key])
+  await until(() => !!b.node.state().groups[gid] && !!c.node.state().groups[gid])
+  a.node.send(gid, 'hello all')
+  await until(() => texts(b, gid).includes('hello all') && texts(c, gid).includes('hello all'))
+  await c.node.destroy()
+
+  b.node.leaveGroup(gid)
+  expect(b.node.state().groups[gid]).toBeUndefined()
+  expect(b.node.history(gid).msgs).toEqual([])
+  expect(() => b.node.send(gid, 'still here?')).toThrow()
+  await until(() => a.node.state().groups[gid]?.members.length === 2 && !a.node.state().groups[gid].members.includes(b.key))
+
+  // C was offline when B left; A tells C when C returns
+  c = start(c.dir, c.keyPair)
+  await until(() => !!c.node.state().groups[gid] && !c.node.state().groups[gid].members.includes(b.key))
+  // Messages to the group no longer reach B, and B cannot be added back
+  a.node.send(gid, 'after b left')
+  await until(() => texts(c, gid).includes('after b left'))
+  expect(b.node.history(gid).msgs).toEqual([])
+  a.node.addToGroup(gid, b.key)
+  await new Promise((r) => setTimeout(r, 1000))
+  expect(a.node.state().groups[gid].members).not.toContain(b.key)
+  expect(b.node.state().groups[gid]).toBeUndefined()
+}, 120000)
+
+test('deleting an account erases it from this computer, leaves its groups and tells online friends', async () => {
+  const a = start()
+  const b = start()
+  await befriend(a, b)
+  const gid = a.node.createGroup('pair', [b.key])
+  await until(() => !!b.node.state().groups[gid])
+  a.node.send(dmId(a.key, b.key), 'bye soon')
+  await until(() => texts(b, dmId(a.key, b.key)).includes('bye soon'))
+  const { writeFileSync } = await import('node:fs')
+  writeFileSync(join(a.dir, 'identity.json'), '{}') // stands in for the identity file Electron's main process writes
+
+  await a.node.deleteAccount()
+  for (const f of ['state.json', 'identity.json', 'msgs']) expect(existsSync(join(a.dir, f))).toBe(false)
+  await until(() => !b.node.state().friends[a.key] && !b.node.state().groups[gid]?.members.includes(a.key))
 }, 120000)

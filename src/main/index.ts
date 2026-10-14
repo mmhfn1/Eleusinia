@@ -28,9 +28,13 @@ app.whenReady().then(() => {
   const dir = app.getPath('userData')
   mkdirSync(dir, { recursive: true })
   const win = new BrowserWindow({
-    width: 1000,
-    height: 700,
+    width: 1280,
+    height: 800,
+    minWidth: 900,
+    minHeight: 600,
     title: 'Eleusinia',
+    icon: join(__dirname, '../../build/icon.png'),
+    backgroundColor: '#06081a', // the app's darkest tone, so no white flash before the page paints
     autoHideMenuBar: true,
     webPreferences: { preload: join(__dirname, '../preload/index.js') },
   })
@@ -43,9 +47,14 @@ app.whenReady().then(() => {
     emit: (e) => !win.isDestroyed() && win.webContents.send('event', e),
     noDirect: process.env.ELEUSINIA_NO_DIRECT === '1',
   })
-  ipcMain.handle('call', (_e, method: string, ...args: unknown[]) => {
+  ipcMain.handle('call', async (_e, method: string, ...args: unknown[]) => {
     if (!Object.hasOwn(node, method)) throw new Error('Unknown method')
-    return (node as any)[method](...args)
+    const result = await (node as any)[method](...args)
+    if (method === 'deleteAccount') {
+      app.relaunch()
+      app.exit(0)
+    }
+    return result
   })
 
   if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL)

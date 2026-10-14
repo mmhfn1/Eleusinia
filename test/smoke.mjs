@@ -53,12 +53,12 @@ async function until(label, fn, secs = 90) {
 }
 
 // Goes Home first, since friends and groups are only listed there.
-const open = (text) => `(() => { document.querySelector('button.home')?.click(); [...document.querySelectorAll('.item')].find(x => x.textContent.includes('${text}')).click() })()`
+const open = (text) => `(() => { document.querySelector('button.home')?.click(); [...document.querySelectorAll('.row-button')].find(x => x.textContent.includes('${text}')).click() })()`
 const say = (text) => `(() => { const f = document.querySelector('form.send'); f.elements.text.value = '${text}'; f.requestSubmit() })()`
 const shows = (text) => `!!document.querySelector('.msgs')?.textContent.includes('${text}')`
 const pendingMark = `!!document.querySelector('.msgs')?.textContent.includes('pending')`
 const body = (text) => `document.body.innerText.includes('${text}')`
-const press = (label) => `[...document.querySelectorAll('aside.voice button')].find(x => x.textContent.startsWith('${label}')).click()`
+const press = (label) => `[...document.querySelectorAll('aside.voice button')].find(x => x.textContent.includes('${label}')).click()`
 // A tiny real PNG, run through the same shrink path a picked file takes.
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
@@ -71,7 +71,7 @@ try {
   console.log('     window title:', a.title)
   if (a.title !== 'Eleusinia') throw new Error('wrong title')
   for (const [p, n] of [[a, 'Ann'], [b, 'Bob'], [c, 'Cy']]) {
-    await until(`${n} sees setup first, with a generated picture`, () => p.ev(`${body('Welcome to Eleusinia')} && !document.querySelector('aside') && !!document.querySelector('svg.avatar.big rect')`))
+    await until(`${n} sees setup first, with a generated picture`, () => p.ev(`${body('Create your account')} && !document.querySelector('aside') && !!document.querySelector('.portrait-pick .avatar svg rect')`))
     // Cy keeps the generated picture; Ann and Bob upload one.
     await p.ev(`(async () => {
       const f = document.querySelector('form.profile')
@@ -94,37 +94,37 @@ try {
   }
 
   console.log('--- Friend ID and Settings sections, bitrate (i)')
+  await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
   const layout = await a.ev(`(() => {
-    const sec = document.querySelector('section.friend-id'), set = document.querySelector('aside details')
+    const sec = document.querySelector('section.friend-id'), set = document.querySelector('dialog[open]')
     const tip = document.getElementById('bitrate-tip'), icon = document.querySelector('.info-icon')
-    set.open = true
     const hidden = getComputedStyle(tip).display
     icon.focus()
     const shown = getComputedStyle(tip).display
     const r = icon.getBoundingClientRect(), l = document.querySelector('label[for=bitrate]').getBoundingClientRect()
-    return { idSection: !!sec && !sec.closest('details'), summary: set.querySelector('summary').textContent, hidden, shown, rightOfLabel: r.left >= l.right - 1 && Math.abs(r.top - l.top) < 12, tip: tip.textContent.slice(0, 60) }
+    return { idSection: !!sec && !sec.closest('dialog'), summary: set.querySelector('h1').textContent, hidden, shown, rightOfLabel: r.left >= l.right - 1 && Math.abs(r.top - l.top) < 12, tip: tip.textContent.slice(0, 60) }
   })()`)
   console.log('     ', JSON.stringify(layout))
   if (!(layout.idSection && layout.summary === 'Settings' && layout.hidden === 'none' && layout.shown === 'block' && layout.rightOfLabel)) throw new Error('settings layout wrong')
   console.log('ok   friend ID is its own section; Settings separate; (i) sits right of the bitrate and shows its tip on focus')
-  await a.ev(`document.activeElement.blur(); document.querySelector('aside details').open = false`)
+  await a.ev(`document.activeElement.blur(); document.querySelector('dialog[open] .dialog-close').click()`)
 
   console.log('--- Friend search suggestions')
   for (const [p, n] of [[b, 'Bob'], [c, 'Cy']]) {
-    const tail = await p.ev(`api.call('state').then(s => '…' + s.me.slice(-6).toUpperCase())`)
+    const tail = await p.ev(`api.call('state').then(s => s.me.slice(-6).toUpperCase())`)
     // Type the first 4 letters of the username, as a person would, and wait for the suggestion.
     const typed = n === 'Bob' ? ids[n].slice(0, 4).toUpperCase() : ids[n].toUpperCase()
     await a.ev(`(() => { const i = document.querySelector('.search-box input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, '${typed}'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
-    const pic = n === 'Cy' ? 'svg.avatar' : 'img.avatar'
+    const pic = n === 'Cy' ? '.avatar svg' : '.avatar img'
     await until(`typing "${typed}" suggests ${n}: ${n === 'Cy' ? 'generated' : 'uploaded'} picture, ID, key ending ${tail}`, () =>
       a.ev(`(() => { const r = document.querySelectorAll('.result'); return r.length === 1 && !!r[0].querySelector('${pic}') && r[0].textContent.includes('${ids[n]}') && r[0].querySelector('.tail').textContent === '${tail}' })()`))
     await a.ev(`document.querySelector('.result').click()`)
-    await until(`${n} sees the request with Ann's picture`, () => p.ev(`[...document.querySelectorAll('.row')].some(r => r.textContent.includes('Ann wants') && r.querySelector('img.avatar'))`))
-    await p.ev(`[...document.querySelectorAll('.row button')].find(x => x.textContent === 'Accept').click()`)
+    await until(`${n} sees the request with Ann's picture`, () => p.ev(`[...document.querySelectorAll('.request')].some(r => r.textContent.includes('Ann wants') && r.querySelector('.avatar img'))`))
+    await p.ev(`[...document.querySelectorAll('.request button')].find(x => x.textContent === 'Accept').click()`)
   }
 
   console.log('--- Home: online and offline friends')
-  await until('A lists Bob and Cy under Online, nobody under Offline', () => a.ev(`document.querySelectorAll('.online .item').length === 2 && document.querySelectorAll('.offline .item').length === 0`))
+  await until('A lists Bob and Cy under Online, nobody under Offline', () => a.ev(`document.querySelectorAll('.online .row-button').length === 2 && document.querySelectorAll('.offline .row-button').length === 0`))
 
   console.log('--- DM, recipient online')
   await a.ev(open('Bob'))
@@ -134,27 +134,32 @@ try {
   await until('A shows it delivered', () => a.ev(`!${pendingMark}`))
   await a.ev(say('second line'))
   await until('B stacks the second message under the first (one name, one picture)', () =>
-    b.ev(`(() => { const more = [...document.querySelectorAll('.msg-more')]; return document.querySelectorAll('.msgs .msg').length === 1 && more.some(p => p.textContent.includes('second line')) })()`))
+    b.ev(`[...document.querySelectorAll('.msg.continued')].some(p => p.textContent.includes('second line')) && document.querySelectorAll('.msg:not(.continued)').length === 1`))
 
   console.log('--- Profile card')
   await b.ev(`document.querySelector('.msg .user').click()`)
   await until('B clicking the name opens Ann card with picture, about, ID and key ending', () =>
-    b.ev(`(() => { const d = document.querySelector('dialog[open]'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('anntester#') && d.textContent.includes('Key ending') && !!d.querySelector('img.avatar.big') })()`))
+    b.ev(`(() => { const d = document.querySelector('dialog[open]'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('anntester#') && d.textContent.includes('Key ending') && !!d.querySelector('.avatar img') })()`))
   await b.ev(`[...document.querySelectorAll('dialog button')].find(x => x.textContent === 'Close').click()`)
 
   console.log('--- Voice call from the left sidebar')
   await a.ev(press('Start call'))
-  await until('B sees the call in its sidebar', () => b.ev(`[...document.querySelectorAll('aside.voice button')].some(x => x.textContent.startsWith('Join call (1)'))`))
+  await until('B sees the call in its sidebar', () => b.ev(`[...document.querySelectorAll('aside.voice button')].some(x => x.textContent.includes('Join call (1)'))`))
   await b.ev(press('Join call'))
-  await until('A connected to Bob', () => a.ev(`document.querySelector('.callers')?.textContent.includes('Bob: connected')`))
-  await until('B connected to Ann', () => b.ev(`document.querySelector('.callers')?.textContent.includes('Ann: connected')`))
+  await until('A connected to Bob', () => a.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Bob')`))
+  await until('B connected to Ann', () => b.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Ann')`))
   // ELEUSINIA_NO_DIRECT=1 withholds direct routes, as two strict routers would; the call must then go through the relay.
   const forced = process.env.ELEUSINIA_NO_DIRECT === '1'
   await until(`call is ${forced ? 'relayed through the chat link' : 'direct'}`, async () =>
     (await a.ev(`document.querySelector('.callers').textContent.includes('relayed')`)) === forced &&
     (await b.ev(`document.querySelector('.callers').textContent.includes('relayed')`)) === forced, 10)
   await a.ev(press('Mute'))
-  await until('A shows muted', () => a.ev(`document.querySelector('.callers').textContent.includes('You (muted)')`))
+  await until('A shows muted', () => a.ev(`document.querySelector('.callers').textContent.includes('Muted')`))
+  await a.ev(press('Deafen'))
+  await until('A deafened: Deafened shown, both buttons pressed, Bob silenced locally', () =>
+    a.ev(`document.querySelector('.callers').textContent.includes('Deafened') && [...document.querySelectorAll('aside.voice button[aria-pressed=true]')].length === 2 && [...document.querySelectorAll('audio')].every(x => x.muted)`), 5)
+  await a.ev(press('Undeafen'))
+  await until('A undeafened: back to muted only', () => a.ev(`!document.querySelector('.callers').textContent.includes('Deafened') && document.querySelector('.callers').textContent.includes('Muted')`), 5)
   await a.ev(press('Leave call'))
   await until('B sees Ann leave', () => b.ev(`document.querySelector('.callers')?.textContent.includes('Waiting')`))
   await b.ev(press('Leave call'))
@@ -162,7 +167,8 @@ try {
   console.log('--- Groups')
   await a.ev(`document.querySelector('button.home').click()`)
   for (const g of ['Trio', 'Second']) {
-    await a.ev(`(() => { const f = document.querySelector('aside details form'); f.elements.name.value = '${g}'; f.querySelectorAll('[name=member]').forEach(x => x.checked = true); f.requestSubmit() })()`)
+    await a.ev(`document.querySelector('.rail-item[aria-label="Create a group"]').click()`)
+    await a.ev(`(() => { const f = document.querySelector('form.new-group'); f.elements.name.value = '${g}'; f.querySelectorAll('[name=member]').forEach(x => x.checked = true); f.requestSubmit() })()`)
     await sleep(500)
     await a.ev(`document.querySelector('button.home')?.click()`)
   }
@@ -195,16 +201,16 @@ try {
   await sleep(300)
   const after = await a.ev(`[document.querySelector('aside.voice').getBoundingClientRect().width, document.querySelector('aside.members').getBoundingClientRect().width, localStorage.getItem('width-voice'), localStorage.getItem('width-members')]`)
   console.log('     ', JSON.stringify(widths), '->', JSON.stringify(after))
-  if (!(after[0] === 336 && after[1] === 236 && after[2] === '336' && after[3] === '236')) throw new Error('sidebars did not resize and persist')
+  if (!(after[0] === 336 && after[1] === 246 && after[2] === '336' && after[3] === '246')) throw new Error('sidebars did not resize and persist')
   console.log('ok   voice and members sidebars grew by 16px and the widths were saved')
   await a.ev(`document.querySelector('button.home').click()`)
   const home = await a.ev(`(() => { const s = document.querySelector('.splitter'); s.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); return new Promise(r => setTimeout(() => r(document.querySelector('aside').getBoundingClientRect().width), 200)) })()`)
-  if (home !== 256) throw new Error('home sidebar did not resize: ' + home)
-  console.log('ok   home sidebar resized independently (240 -> 256), narrower than the voice sidebar')
+  if (home !== 276) throw new Error('home sidebar did not resize: ' + home)
+  console.log('ok   home sidebar resized independently (260 -> 276), narrower than the voice sidebar')
 
   console.log('--- Bob goes offline (process killed)')
   b.child.kill()
-  await until('A lists Bob under Offline after a divider', () => a.ev(`[...document.querySelectorAll('.offline .item')].some(x => x.textContent.includes('Bob')) && !!document.querySelector('main.home hr')`), 60)
+  await until('A lists Bob under Offline after a divider', () => a.ev(`document.querySelector('.rail-item[aria-label^="Home"]').click(); [...document.querySelectorAll('.offline .row-button')].some(x => x.textContent.includes('Bob')) && !!document.querySelector('main.home .ornament')`), 60)
   await a.ev(open('Bob'))
   await a.ev(say('dm while offline'))
   await until('A shows the DM as pending', () => a.ev(pendingMark), 5)
@@ -218,6 +224,15 @@ try {
   await until('B received the offline DM', async () => (await b.ev(open('Ann')), b.ev(shows('dm while offline'))), 120)
   await until('B received the offline group message', async () => (await b.ev(open('Trio')), b.ev(shows('group while bob offline'))), 120)
   await until('A shows the DM delivered', async () => (await a.ev(open('Bob')), a.ev(`${shows('dm while offline')} && !${pendingMark}`)), 120)
+
+  console.log('--- Leaving a group')
+  await a.ev(`document.querySelector('.rail-item[aria-label^="Second"]').click()`)
+  await a.ev(`document.querySelector('button[aria-label="Leave group"]').click()`)
+  await until('A sees the leave confirmation', () => a.ev(`!!document.querySelector('dialog[open]')?.textContent.includes('Leave Second?')`), 5)
+  await a.ev(`[...document.querySelectorAll('dialog button')].find(x => x.textContent.includes('Leave group')).click()`)
+  await until('A is back home and Second is gone from the rail', () => a.ev(`!!document.querySelector('main.home') && !document.querySelector('.rail-item[aria-label^="Second"]')`), 10)
+  await b.ev(`document.querySelector('.rail-item[aria-label^="Second"]').click()`)
+  await until('B sees Second without Ann', () => b.ev(`(() => { const m = document.querySelector('aside.members'); return !!m && !m.textContent.includes('Ann') && m.textContent.includes('Bob') })()`), 30)
 } catch (e) {
   failed = true
   console.error('FAIL', e.message)
