@@ -19,7 +19,7 @@ Peer-to-peer chat and voice calls for desktop, with no central server. A Discord
 | Part | Technology | What it carries |
 |---|---|---|
 | Finding and linking peers | [HyperDHT](https://github.com/holepunchto/hyperdht) (public DHT, encrypted streams) | Presence, friend requests, profiles, group membership, messages, call signaling |
-| Voice | WebRTC (Chromium, inside Electron), full mesh | Opus audio |
+| Voice | WebRTC (Chromium, inside Electron), full mesh; falls back to the DHT link when no direct route exists (`src/main/relay.ts`) | Opus audio |
 | Storage | JSON and `.jsonl` files in the app's data folder | Friends, groups, settings, message logs |
 
 The only outside infrastructure is the public DHT's bootstrap nodes and a public STUN server, used to find peers and open direct connections. They never see messages or audio.
@@ -68,7 +68,7 @@ Both people must have the app open when one searches for the other's ID.
 - **Friend IDs are not guaranteed unique.** Nothing central can reserve a name. Two people can hold the same `name#1234`; search lists both and shows each one's key ending so you can pick the right person. A 6-character key ending stops accidents, not a determined impostor.
 - **Both people must be online to find each other by ID**, and a direct message needs sender and recipient online at the same time at some point.
 - **Your profile is visible to anyone who knows your ID**, since search fetches it before you are friends.
-- **No relay for strict networks.** Some connections (symmetric NAT, some mobile and corporate networks) cannot be made directly and will fail.
+- **Strict networks.** When routers block a direct call connection, the call is carried over the same encrypted link chat uses (shown as "relayed through the chat link"). This adds a little delay, and a call still fails if the two people cannot reach each other for chat either.
 - **Groups have no admin, leave or kick.** Any member can add their own friends.
 - **Text only:** no attachments, edits, deletes, reactions or unread markers.
 - **Desktop only, one device per identity,** and no installer yet.

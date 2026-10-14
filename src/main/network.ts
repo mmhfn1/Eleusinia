@@ -3,7 +3,7 @@ import type { Key, Wire } from '../shared/protocol'
 
 const MAX_LINE = 1 << 20
 
-type Handlers = { open(key: Key): void; close(key: Key): void; msg(key: Key, w: Wire): void }
+type Handlers = { open(key: Key): void; close(key: Key): void; msg(key: Key, w: Wire): void; packet?(key: Key, b: Buffer): void }
 
 // One encrypted, authenticated stream per peer, found by public key over the DHT.
 export function createNet(keyPair: { publicKey: Buffer; secretKey: Buffer }, on: Handlers, dhtOpts?: object) {
@@ -39,6 +39,7 @@ export function createNet(keyPair: { publicKey: Buffer; secretKey: Buffer }, on:
         if (w && typeof w === 'object' && links.get(key)?.sock === sock) on.msg(key, w)
       }
     })
+    sock.on('message', (b: Buffer) => links.get(key)?.sock === sock && on.packet?.(key, b))
     sock.on('close', () => {
       if (links.get(key)?.sock !== sock) return
       links.delete(key)
@@ -77,6 +78,14 @@ export function createNet(keyPair: { publicKey: Buffer; secretKey: Buffer }, on:
       const keys = new Set<Key>()
       for await (const r of dht.lookup(topic)) for (const peer of r.peers) keys.add(peer.publicKey.toString('hex'))
       return [...keys]
+    },
+    // A call packet: sent as an unreliable datagram when it fits, so a lost one is never waited for.
+    // Larger ones (DTLS handshake) go over the reliable stream instead.
+    packet(key: Key, b: Buffer) {
+      const sock = links.get(key)?.sock
+      if (!sock) return
+      if (b.byteLength <= 1000) sock.trySend(b)
+      else sock.write(JSON.stringify({ t: 'pkt', d: b.toString('base64') }) + '\n')
     },
     drop(key: Key) {
       links.get(key)?.sock.destroy()

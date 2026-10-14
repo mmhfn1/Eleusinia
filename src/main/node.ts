@@ -22,6 +22,7 @@ import {
 } from '../shared/protocol'
 import { mergeGroup, missing, signAdd, signMsg, validGroup, verifyAdd, verifyMsg } from '../shared/sync'
 import { createNet } from './network'
+import { createRelay } from './relay'
 
 type Saved = {
   profile: Profile
@@ -38,10 +39,11 @@ type Opts = {
   emit: (e: Event) => void
   dht?: object
   redialMs?: number
+  noDirect?: boolean // testing: withhold ICE candidates so calls can only connect through the relay
 }
 
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
-export function createNode({ dir, keyPair, emit, dht, redialMs = 15000 }: Opts) {
+export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
   const file = join(dir, 'state.json')
   mkdirSync(join(dir, 'msgs'), { recursive: true })
@@ -208,6 +210,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000 }: Opts) 
       for (const k of ms) if (k !== me && k !== key && k !== m.author) net.send(k, { t: 'msg', m })
     } else if (w.t === 'call') {
       if (members(w.conv).includes(key)) emit({ type: 'call', from: key, conv: w.conv, data: w.data })
+    } else if (w.t === 'pkt') {
+      if (typeof w.d === 'string') relay.deliver(key, Buffer.from(w.d, 'base64'))
     }
   }
 
@@ -219,11 +223,16 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000 }: Opts) 
         if (asking.has(key)) net.send(key, { t: 'who' })
         push()
       },
-      close: push,
+      close(key) {
+        relay.close(key)
+        push()
+      },
       msg: onMsg,
+      packet: (key, b) => known(key) && relay.deliver(key, b),
     },
     dht,
   )
+  const relay = createRelay((key, b) => net.packet(key, b))
 
   const redial = () => {
     const keys = new Set(Object.values(s.groups).flatMap((g) => g.members))
@@ -333,8 +342,12 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000 }: Opts) 
       for (const k of ms) if (k !== me) net.send(k, { t: 'msg', m })
     },
     signal(conv: string, to: Key | null, data: unknown) {
+      if (noDirect && (data as { k?: string })?.k === 'ice') return
       for (const k of members(conv)) if (k !== me && (!to || to === k)) net.send(k, { t: 'call', conv, data })
     },
+    // A UDP port on this machine that carries a call with `key` over the peer link (see relay.ts).
+    relayOpen: (key: Key) => (known(key) ? relay.open(key) : null),
+    relayClose: (key: Key) => relay.close(key),
     setSettings(p: Partial<Settings>) {
       Object.assign(s.settings, p)
       changed()
@@ -342,6 +355,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000 }: Opts) 
     async destroy() {
       clearInterval(timer)
       clearInterval(announcer)
+      relay.closeAll()
       await net.destroy()
     },
   }

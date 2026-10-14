@@ -26,6 +26,7 @@ export type Wire =
   | { t: 'have'; conv: string; have: Have; re?: boolean }
   | { t: 'msg'; m: Msg }
   | { t: 'call'; conv: string; data: unknown }
+  | { t: 'pkt'; d: string } // a relayed call packet too big for a datagram, base64
 
 export type Event =
   | { type: 'state'; state: State }
@@ -59,3 +60,13 @@ export function identicon(key: Key) {
 }
 // Shown next to a person so two people with the same friend ID can be told apart. Public key only.
 export const keyTail = (key: Key) => '…' + key.slice(-6).toUpperCase()
+
+// Messages in time order, with a run of messages from one person (each within 5 minutes of the last)
+// stacked under a single name and picture. Equal times keep arrival order.
+export function stack(msgs: Msg[]) {
+  const sorted = [...msgs].sort((a, b) => a.ts - b.ts)
+  return sorted.map((m, i) => {
+    const prev = sorted[i - 1]
+    return { m, first: !prev || prev.author !== m.author || m.ts - prev.ts > 5 * 60000 }
+  })
+}

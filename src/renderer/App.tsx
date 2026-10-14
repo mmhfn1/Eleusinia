@@ -1,5 +1,5 @@
 import { type FormEvent, type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useReducer, useRef, useState } from 'react'
-import { type Key, type Msg, type Profile, type State, MAX_TEXT, dmId, identicon, keyTail } from '../shared/protocol'
+import { type Key, type Msg, type Profile, type State, MAX_TEXT, dmId, identicon, keyTail, stack } from '../shared/protocol'
 import * as call from './call'
 
 const api = window.api
@@ -518,6 +518,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
                   <Avatar k={k} p={prof(k)} />
                   <span>
                     {name(k)}: {p.pc.connectionState}
+                    {p.relayed && p.pc.connectionState === 'connected' && ' (relayed through the chat link)'}
                   </span>
                 </div>
               ))}
@@ -596,17 +597,24 @@ function Chat({ st, conv, title, people, run }: { st: State; conv: string; title
       </header>
 
       <div className="msgs">
-        {[...msgs].sort((a, b) => a.ts - b.ts).map((m) => (
-          <div key={m.author + m.seq} className="msg">
-            <Avatar k={m.author} p={prof(m.author)} />
-            <p>
-              {user(m.author)} <time>{new Date(m.ts).toLocaleString()}</time>
-              {m.author === st.me && m.seq > acked && <i> pending</i>}
-              <br />
+        {stack(msgs).map(({ m, first }) =>
+          first ? (
+            <div key={m.author + m.seq} className="msg">
+              <Avatar k={m.author} p={prof(m.author)} />
+              <p>
+                {user(m.author)} <time>{new Date(m.ts).toLocaleString()}</time>
+                {m.author === st.me && m.seq > acked && <i> pending</i>}
+                <br />
+                {m.text}
+              </p>
+            </div>
+          ) : (
+            <p key={m.author + m.seq} className="msg-more" title={new Date(m.ts).toLocaleString()}>
               {m.text}
+              {m.author === st.me && m.seq > acked && <i> pending</i>}
             </p>
-          </div>
-        ))}
+          ),
+        )}
         <div ref={end} />
       </div>
 

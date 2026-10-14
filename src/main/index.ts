@@ -41,6 +41,7 @@ app.whenReady().then(() => {
     dir,
     keyPair: loadIdentity(dir),
     emit: (e) => !win.isDestroyed() && win.webContents.send('event', e),
+    noDirect: process.env.ELEUSINIA_NO_DIRECT === '1',
   })
   ipcMain.handle('call', (_e, method: string, ...args: unknown[]) => {
     if (!Object.hasOwn(node, method)) throw new Error('Unknown method')

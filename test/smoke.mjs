@@ -132,6 +132,9 @@ try {
   await a.ev(say('dm online'))
   await until('B shows it', () => b.ev(shows('dm online')))
   await until('A shows it delivered', () => a.ev(`!${pendingMark}`))
+  await a.ev(say('second line'))
+  await until('B stacks the second message under the first (one name, one picture)', () =>
+    b.ev(`(() => { const more = [...document.querySelectorAll('.msg-more')]; return document.querySelectorAll('.msgs .msg').length === 1 && more.some(p => p.textContent.includes('second line')) })()`))
 
   console.log('--- Profile card')
   await b.ev(`document.querySelector('.msg .user').click()`)
@@ -145,6 +148,11 @@ try {
   await b.ev(press('Join call'))
   await until('A connected to Bob', () => a.ev(`document.querySelector('.callers')?.textContent.includes('Bob: connected')`))
   await until('B connected to Ann', () => b.ev(`document.querySelector('.callers')?.textContent.includes('Ann: connected')`))
+  // ELEUSINIA_NO_DIRECT=1 withholds direct routes, as two strict routers would; the call must then go through the relay.
+  const forced = process.env.ELEUSINIA_NO_DIRECT === '1'
+  await until(`call is ${forced ? 'relayed through the chat link' : 'direct'}`, async () =>
+    (await a.ev(`document.querySelector('.callers').textContent.includes('relayed')`)) === forced &&
+    (await b.ev(`document.querySelector('.callers').textContent.includes('relayed')`)) === forced, 10)
   await a.ev(press('Mute'))
   await until('A shows muted', () => a.ev(`document.querySelector('.callers').textContent.includes('You (muted)')`))
   await a.ev(press('Leave call'))

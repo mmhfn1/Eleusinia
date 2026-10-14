@@ -6,7 +6,7 @@ import createTestnet from 'hyperdht/testnet'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 import { createNode } from '../src/main/node'
 import { createNet } from '../src/main/network'
-import { type Group, cleanProfile, dmId, identicon, isHandle, keyTail, normHandle } from '../src/shared/protocol'
+import { type Group, type Msg, cleanProfile, dmId, identicon, isHandle, keyTail, normHandle, stack } from '../src/shared/protocol'
 import { mergeGroup, missing, signAdd, signMsg, verifyAdd, verifyMsg } from '../src/shared/sync'
 
 test('a tampered or re-attributed message fails verification', () => {
@@ -313,4 +313,44 @@ test('suggestions start at 4 letters of a username and narrow as more is typed',
   expect((await a.node.findFriend('bobb'))[0].profile.avatar).toBe(PNG)
   // Searching sends no friend request
   expect(b.node.state().friends).toEqual({})
+}, 120000)
+
+test('messages are shown in time order, stacked per person while each follows the last within 5 minutes', () => {
+  const at = (author: string, ts: number, seq: number): Msg => ({ conv: 'c', author, seq, ts, text: author + seq, sig: '' })
+  const min = 60000
+  // Arrival order differs from time order; equal times keep arrival order
+  const shown = stack([at('b', 3 * min, 1), at('a', 0, 1), at('a', min, 2), at('b', 3 * min, 2), at('b', 9 * min, 3), at('a', 9 * min, 3)])
+  expect(shown.map(({ m, first }) => (first ? '+' : '') + m.text)).toEqual(['+a1', 'a2', '+b1', 'b2', '+b3', '+a3'])
+})
+
+test('call packets cross the peer link through the relay, both small and large', async () => {
+  const dgram = await import('node:dgram')
+  const a = start()
+  const b = start()
+  const stranger = start()
+  await befriend(a, b)
+  expect(await stranger.node.relayOpen(a.key)).toBeNull() // only for people we know
+  const ra = (await a.node.relayOpen(b.key))!
+  const rb = (await b.node.relayOpen(a.key))!
+  // Stand-ins for each side's WebRTC stack
+  const udp = async (ip: string) => {
+    const s = dgram.createSocket('udp4')
+    await new Promise<void>((r) => s.bind(0, ip, r))
+    return s
+  }
+  const [pa, pb] = await Promise.all([udp(ra.ip), udp(rb.ip)])
+  const got: { text: string; from: number }[] = []
+  pb.on('message', (m, r) => got.push({ text: m.toString(), from: r.port }))
+  pb.send('register', rb.port, rb.ip) // B's relay learns where B's stack is from its first packet
+  const big = 'x'.repeat(1500) // over the datagram size: goes over the reliable stream
+  await until(() => {
+    pa.send('ping', ra.port, ra.ip)
+    pa.send(big, ra.port, ra.ip)
+    return got.some((g) => g.text === 'ping') && got.some((g) => g.text === big)
+  })
+  expect(got.every((g) => g.from === rb.port)).toBe(true) // seen as coming from the relay port, like a relay candidate
+  pa.close()
+  pb.close()
+  a.node.relayClose(b.key)
+  b.node.relayClose(a.key)
 }, 120000)

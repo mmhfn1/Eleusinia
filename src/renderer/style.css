@@ -320,3 +320,6 @@ aside h1 {
   cursor: default;
   opacity: 0.6;
 }
+.msgs .msg-more {
+  margin: -8px 0 10px 36px;
+}

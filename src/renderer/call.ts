@@ -7,7 +7,7 @@ declare global {
 }
 
 // Voice calls as a full mesh: one RTCPeerConnection per other participant, signaled over the control links.
-type Peer = { pc: RTCPeerConnection; audio: HTMLAudioElement }
+type Peer = { pc: RTCPeerConnection; audio: HTMLAudioElement; relayed?: boolean }
 
 export const active = new Map<string, Set<Key>>() // conversation -> peers we know are in its call
 export const peers = new Map<Key, Peer>()
@@ -38,6 +38,7 @@ function drop(k: Key) {
   p.pc.close()
   p.audio.srcObject = null
   peers.delete(k)
+  window.api.call('relayClose', k)
 }
 
 function connect(k: Key) {
@@ -50,12 +51,32 @@ function connect(k: Key) {
   for (const t of stream!.getTracks()) pc.addTrack(t, stream!)
   pc.onicecandidate = (e) => e.candidate && send(c, k, { k: 'ice', c: e.candidate.toJSON() })
   pc.ontrack = (e) => (audio.srcObject = e.streams[0])
-  pc.onconnectionstatechange = () => {
-    if (pc.connectionState === 'connected') bitrate(pc)
+  const peer: Peer = { pc, audio }
+  pc.onconnectionstatechange = async () => {
+    if (pc.connectionState === 'connected') {
+      bitrate(pc)
+      peer.relayed = await isRelayed(pc)
+    }
     notify()
   }
-  peers.set(k, { pc, audio })
+  peers.set(k, peer)
   return pc
+}
+
+// Offers the relay port as a last-resort path: ICE prefers any direct route, and only uses this one
+// when routers block every direct route. Must run after the remote description is set.
+async function addRelay(k: Key, pc: RTCPeerConnection) {
+  const r = await window.api.call('relayOpen', k)
+  if (!r || pc.signalingState === 'closed') return
+  const mid = pc.getTransceivers()[0]?.mid ?? '0'
+  await pc.addIceCandidate({ candidate: `candidate:9 1 udp 16777215 ${r.ip} ${r.port} typ relay raddr 0.0.0.0 rport 0`, sdpMid: mid, sdpMLineIndex: 0 })
+}
+
+async function isRelayed(pc: RTCPeerConnection) {
+  const stats = await pc.getStats()
+  let pair: any
+  stats.forEach((s) => s.type === 'transport' && (pair = stats.get(s.selectedCandidatePairId)))
+  return stats.get(pair?.remoteCandidateId)?.candidateType === 'relay'
 }
 
 export async function join(c: string) {
@@ -107,10 +128,14 @@ async function handle(from: Key, c: string, d: any) {
   } else if (d.k === 'offer') {
     const pc = connect(from)
     await pc.setRemoteDescription(d.sdp)
+    await addRelay(from, pc)
     await pc.setLocalDescription(await pc.createAnswer())
     send(c, from, { k: 'answer', sdp: pc.localDescription!.toJSON() })
   } else if (d.k === 'answer') {
-    await peers.get(from)?.pc.setRemoteDescription(d.sdp)
+    const pc = peers.get(from)?.pc
+    if (!pc) return
+    await pc.setRemoteDescription(d.sdp)
+    await addRelay(from, pc)
   } else if (d.k === 'ice') {
     await peers.get(from)?.pc.addIceCandidate(d.c)
   }
