@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { type IceCandidate, RESTART_AFTER, backoff, createCandidates, createWatchdog, offers } from '../src/shared/callstate'
+import { type IceCandidate, RESTART_AFTER, RESTART_GRACE, backoff, createCandidates, createWatchdog, offers } from '../src/shared/callstate'
 
 // Stands in for RTCPeerConnection: rejects candidates until a remote description is set, as the real one does.
 function fakePc() {
@@ -114,12 +114,45 @@ test('a disconnect that lasts restarts ICE once after 3 s', () => {
   expect(log).toEqual(['restart'])
 })
 
-test('a restart that does not bring the link back escalates to a rebuild', () => {
+test('a restart gets 8 s to finish before the first rebuild, then rebuilds back off 2, 5, 10, 15 s', () => {
   const { w, timers, log } = watch('aa', 'bb')
   w.update('connected')
   w.update('disconnected')
   timers.advance(RESTART_AFTER)
-  timers.advance(backoff(0))
+  expect(log).toEqual(['restart'])
+  timers.advance(RESTART_GRACE - 1)
+  expect(log).toEqual(['restart'])
+  timers.advance(1)
+  expect(log).toEqual(['restart', 'rebuild'])
+  for (const wait of [2000, 5000, 10000, 15000, 15000]) {
+    const before = log.length
+    timers.advance(wait - 1)
+    expect(log.length).toBe(before)
+    timers.advance(1)
+    expect(log.length).toBe(before + 1)
+  }
+})
+
+test('a restart that works within its grace period triggers no rebuild', () => {
+  const { w, timers, log } = watch('aa', 'bb')
+  w.update('connected')
+  w.update('disconnected')
+  timers.advance(RESTART_AFTER + RESTART_GRACE - 1)
+  w.update('connected')
+  timers.advance(60000)
+  expect(log).toEqual(['restart'])
+  expect(w.attempt).toBe(0)
+})
+
+test('failed during the grace period still waits for the grace period to end', () => {
+  const { w, timers, log } = watch('aa', 'bb')
+  w.update('connected')
+  w.update('disconnected')
+  timers.advance(RESTART_AFTER)
+  w.update('failed')
+  timers.advance(RESTART_GRACE - 1)
+  expect(log).toEqual(['restart'])
+  timers.advance(1)
   expect(log).toEqual(['restart', 'rebuild'])
 })
 

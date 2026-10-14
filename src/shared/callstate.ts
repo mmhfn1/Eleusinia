@@ -21,6 +21,8 @@ export const offers = (me: string, them: string) => me < them
 
 // A disconnected link often recovers by itself within a few seconds, so wait before restarting ICE.
 export const RESTART_AFTER = 3000
+// An ICE restart needs a round trip of signaling plus fresh connectivity checks, so give it time to finish.
+export const RESTART_GRACE = 8000
 const BACKOFF = [2000, 5000, 10000, 15000]
 export const backoff = (attempt: number) => BACKOFF[Math.min(attempt, BACKOFF.length - 1)]
 
@@ -72,9 +74,10 @@ export function createWatchdog(me: string, them: string, act: Recovery, timers: 
       if (!stopped && state !== 'connected') fn()
     }, ms)
   }
-  // Rebuild unless a connection holds by the next backoff step; this also catches a restart that never
-  // reaches `failed`, or a rebuilt connection stuck before `connected`.
-  const rebuildLater = () => arm('rebuild', backoff(attempt++), () => (act.rebuild(), rebuildLater()))
+  // Rebuild unless a connection holds by the next backoff step; this also catches a rebuilt connection
+  // stuck before `connected`. A restart that does not help within its grace period starts this too.
+  const rebuild = () => (act.rebuild(), rebuildLater())
+  const rebuildLater = () => arm('rebuild', backoff(attempt++), rebuild)
 
   return {
     update(next: string) {
@@ -84,7 +87,7 @@ export function createWatchdog(me: string, them: string, act: Recovery, timers: 
         clear()
         attempt = 0
       } else if (!leader) return
-      else if (next === 'disconnected' && !pending) arm('restart', RESTART_AFTER, () => (act.restart(), rebuildLater()))
+      else if (next === 'disconnected' && !pending) arm('restart', RESTART_AFTER, () => (act.restart(), arm('rebuild', RESTART_GRACE, rebuild)))
       else if (next === 'failed' && pending !== 'rebuild') rebuildLater()
     },
     stop() {
