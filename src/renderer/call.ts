@@ -171,7 +171,9 @@ export function notices() {
   if (!conv) return out
   if (fellBack(state.settings.mic, micId)) out.push('Your microphone is unplugged, so the system default is in use.')
   if (fellBack(state.settings.out, outId)) out.push('Your speakers are unplugged, so the system default is in use.')
-  if (relayMissing) out.push('No network address for the fallback route, so a call works only where a direct connection does.')
+  // Only worth saying while it matters: someone is not connected and the fallback could have helped.
+  const struggling = [...peers.values()].some((p) => p.pc.connectionState !== 'connected')
+  if (relayMissing && struggling) out.push('No network address for the fallback route, so a call works only where a direct connection does.')
   return out
 }
 
