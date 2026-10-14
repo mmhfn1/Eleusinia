@@ -38,7 +38,7 @@ npm install
 npm run dev
 ```
 
-If the window does not open and npm reported that install scripts were skipped, fetch the Electron binary once with `node node_modules/electron/install.js`.
+`npm install` also downloads the Electron app binary (about 100 MB, cached after the first time). If `npm run dev` says `Electron uninstall`, the install was run with scripts disabled; run `npx install-electron` once.
 
 ### Trying it with two identities on one computer
 
