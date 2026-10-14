@@ -46,3 +46,35 @@ test('choosing the default is never a fallback', () => {
   expect(fellBack('', '')).toBe(false)
   expect(nextDevice('', '', 'audioinput', [builtIn])).toBeNull()
 })
+
+test('a chosen device whose id changed is found again by its name', () => {
+  const renamed = { kind: 'audioinput', deviceId: 'new-id', label: 'HyperX Cloud' }
+  expect(usable('old-id', 'audioinput', [builtIn, renamed], 'HyperX Cloud')).toBe('new-id')
+  expect(fellBack('old-id', 'new-id')).toBe(false) // the chosen headset, not a stand-in: no notice
+})
+
+test('the id wins over the name, and the name must match exactly and in kind', () => {
+  const sameName = { kind: 'audioinput', deviceId: 'other', label: 'HyperX Cloud' }
+  expect(usable('headset', 'audioinput', [headset, sameName], 'HyperX Cloud')).toBe('headset')
+  expect(usable('old-id', 'audioinput', [{ kind: 'audioinput', deviceId: 'x', label: 'HyperX Cloud II' }], 'HyperX Cloud')).toBe('')
+  expect(usable('old-id', 'audioinput', [builtIn, { kind: 'audiooutput', deviceId: 'x', label: 'HyperX Cloud' }], 'HyperX Cloud')).toBe('')
+})
+
+test('without a saved name (older settings), a changed id falls back to the default', () => {
+  const renamed = { kind: 'audioinput', deviceId: 'new-id', label: 'HyperX Cloud' }
+  expect(usable('old-id', 'audioinput', [builtIn, renamed])).toBe('')
+  expect(usable('old-id', 'audioinput', [builtIn, renamed], '')).toBe('')
+})
+
+test('a device that comes back under a new id is switched back to by name', () => {
+  let inUse = 'old-id'
+  const step = (devices: { kind: string; deviceId: string; label?: string }[]) => {
+    const next = nextDevice('old-id', inUse, 'audioinput', devices, 'HyperX Cloud')
+    if (next !== null) inUse = next
+    return next
+  }
+  expect(step([builtIn])).toBe('') // unplugged
+  expect(fellBack('old-id', inUse)).toBe(true)
+  expect(step([builtIn, { kind: 'audioinput', deviceId: 'new-id', label: 'HyperX Cloud' }])).toBe('new-id')
+  expect(fellBack('old-id', inUse)).toBe(false)
+})

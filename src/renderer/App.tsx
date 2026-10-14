@@ -1,4 +1,5 @@
 import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react'
+import { usable } from '../shared/devices'
 import { type Group, type Key, type Msg, type Profile, type State, MAX_TEXT, dmId, keyTail, stack } from '../shared/protocol'
 import * as call from './call'
 import { Avatar, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Info, Splitter, Wordmark, useWidth } from './ui'
@@ -566,10 +567,13 @@ function AudioSettings({ st }: { st: State }) {
     navigator.mediaDevices.enumerateDevices().then(setDevices)
   }, [])
   const set = (p: Partial<State['settings']>) => api.call('setSettings', p)
+  // The label is saved too, so the device is found again if its id changes.
+  const choose = (field: 'mic' | 'out', id: string) =>
+    set({ [field]: id, [`${field}Label`]: devices.find((d) => d.deviceId === id)?.label ?? '' })
   const pick = (kind: string, label: string, field: 'mic' | 'out') => (
     <label className="field-label">
       {label}
-      <select value={st.settings[field]} onChange={(e) => set({ [field]: e.target.value })}>
+      <select value={usable(st.settings[field], kind, devices, st.settings[`${field}Label`]) || st.settings[field]} onChange={(e) => choose(field, e.target.value)}>
         <option value="">System default</option>
         {devices
           .filter((d) => d.kind === kind && d.deviceId !== 'default')

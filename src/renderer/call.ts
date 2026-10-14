@@ -151,13 +151,13 @@ function followDevices(micEnded = false) {
       if (!stream) return
       const list = await navigator.mediaDevices.enumerateDevices()
       if (!stream) return
-      const { mic: chosenMic, out: chosenOut } = state.settings
-      const out = nextDevice(chosenOut, outId, 'audiooutput', list)
+      const { mic: chosenMic, out: chosenOut, micLabel, outLabel } = state.settings
+      const out = nextDevice(chosenOut, outId, 'audiooutput', list, outLabel)
       if (out !== null) {
         outId = out
         for (const p of peers.values()) p.audio.setSinkId(outId).catch(() => {})
       }
-      const m = nextDevice(chosenMic, micId, 'audioinput', list)
+      const m = nextDevice(chosenMic, micId, 'audioinput', list, micLabel)
       if (m !== null || micEnded) await useMic(m ?? micId)
     })
     .catch(console.error)
@@ -180,8 +180,8 @@ export function notices() {
 export async function join(c: string) {
   leave()
   const list = await navigator.mediaDevices.enumerateDevices()
-  micId = usable(state.settings.mic, 'audioinput', list)
-  outId = usable(state.settings.out, 'audiooutput', list)
+  micId = usable(state.settings.mic, 'audioinput', list, state.settings.micLabel)
+  outId = usable(state.settings.out, 'audiooutput', list, state.settings.outLabel)
   const fresh = await mic(micId).catch(() => mic((micId = '')))
   stream = fresh
   fresh.getAudioTracks().forEach((t) => (t.onended = () => followDevices(true)))
@@ -286,6 +286,6 @@ export function onState(next: State) {
 
   const [a, b] = [prev.settings, next.settings]
   if (a.audioKbps !== b.audioKbps) for (const p of peers.values()) bitrate(p.pc)
-  if (a.mic !== b.mic || a.out !== b.out) followDevices()
+  if (a.mic !== b.mic || a.out !== b.out || a.micLabel !== b.micLabel || a.outLabel !== b.outLabel) followDevices()
   notify()
 }

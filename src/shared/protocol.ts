@@ -7,7 +7,8 @@ export type Msg = { conv: string; author: Key; seq: number; ts: number; text: st
 export type Have = Record<Key, number> // highest seq held, per author
 // handle: the unique-ish ID friends type, username#1234. avatar: small image data URL, or ''.
 export type Profile = { handle: string; name: string; about: string; avatar: string }
-export type Settings = { audioKbps: number; mic: string; out: string }
+// Device labels are kept beside the ids, since an id can change while the name stays (see devices.ts).
+export type Settings = { audioKbps: number; mic: string; out: string; micLabel?: string; outLabel?: string }
 
 export type State = {
   me: Key
