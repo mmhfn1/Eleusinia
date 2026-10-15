@@ -727,10 +727,10 @@ function AudioSettings({ st }: { st: State }) {
   )
 }
 
-const HOTKEYS: { action: Action; name: string; hint?: string }[] = [
+const HOTKEYS: { action: Action; name: string }[] = [
   { action: 'mute', name: 'Mute' },
   { action: 'deafen', name: 'Deafen' },
-  { action: 'ptt', name: 'Push to talk', hint: 'While set, your microphone only sends while you hold it.' },
+  { action: 'ptt', name: 'Push to talk' },
 ]
 
 // Shortcuts for mute, deafen and push to talk, none bound until the user sets one. They work even while
@@ -758,12 +758,10 @@ function Hotkeys({ st }: { st: State }) {
   }
   return (
     <div className="hotkeys">
-      <p className="hint">They work even while Eleusinia is in the background or minimised. None are set unless you set them.</p>
-      {HOTKEYS.map(({ action, name, hint }) => (
+      {HOTKEYS.map(({ action, name }) => (
         <div className="hotkey" key={action}>
           <span className="row-text">
             <span className="row-title">{name}</span>
-            {hint && <span className="hint">{hint}</span>}
           </span>
           <kbd className={bound[action] ? '' : 'unset'} aria-live="polite">
             {recording === action ? 'Press keys… (Esc to cancel)' : (bound[action]?.label ?? 'Not set')}
@@ -792,14 +790,6 @@ function SettingsDialog({ st, close, edit, remove }: { st: State; close: () => v
     <Dialog label="Settings" close={close} className="settings-dialog">
       <h1>Settings</h1>
       <section className="settings-section">
-        <h2>Audio devices and quality</h2>
-        <AudioSettings st={st} />
-      </section>
-      <section className="settings-section">
-        <h2>Hotkeys</h2>
-        <Hotkeys st={st} />
-      </section>
-      <section className="settings-section">
         <h2>Profile</h2>
         <div className="settings-row">
           <Avatar k={st.me} p={st.profile} size={40} />
@@ -817,6 +807,14 @@ function SettingsDialog({ st, close, edit, remove }: { st: State; close: () => v
             Edit profile
           </button>
         </div>
+      </section>
+      <section className="settings-section">
+        <h2>Audio devices and quality</h2>
+        <AudioSettings st={st} />
+      </section>
+      <section className="settings-section">
+        <h2>Hotkeys</h2>
+        <Hotkeys st={st} />
       </section>
       <section className="settings-section">
         <h2>Account</h2>
