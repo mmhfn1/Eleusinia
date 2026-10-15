@@ -886,6 +886,15 @@ aside {
     0 0 0 1.5px color-mix(in srgb, var(--cyan) 70%, transparent),
     0 0 14px color-mix(in srgb, var(--cyan) 22%, transparent);
 }
+/* Speaking: the accent ring, after the connected glow so it wins while someone talks. */
+.caller.speaking .avatar img,
+.caller.speaking .avatar svg,
+.member.speaking .avatar img,
+.member.speaking .avatar svg {
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 0 12px var(--accent-glow);
+}
 .caller.state-disconnected .row-sub,
 .caller.state-failed .row-sub {
   color: var(--gold);

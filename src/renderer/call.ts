@@ -2,6 +2,7 @@ import { createCandidates, createWatchdog, lightOpus, offers, relayCandidate } f
 import { fellBack, nextDevice, usable } from '../shared/devices'
 import type { Event, Key, State } from '../shared/protocol'
 import { SAMPLE_EVERY, type Sample, grade, remember, worst } from '../shared/quality'
+import { hear, rms } from '../shared/speaking'
 import { type Level, type Quality, RAMP_MS, STARVED_AFTER, type Verdict, canStream, encodingFor, streamKbps, widthFor } from '../shared/video'
 
 // A screen or window offered by the system for sharing, with what it can deliver.
@@ -23,9 +24,13 @@ declare global {
 // Calls as a full mesh: one RTCPeerConnection per other participant, signaled over the control links.
 // Each connection carries voice, plus a video slot that is empty until someone shares their screen, so starting
 // or stopping a share never needs a new offer.
+// A voice through the shared AudioContext: its source, the analyser behind the speaking ring, and when it was last loud.
+type Listen = { source: MediaStreamAudioSourceNode; analyser: AnalyserNode; loudAt: number | null }
+
 type Peer = {
   pc: RTCPeerConnection
-  audio: HTMLAudioElement
+  audio: HTMLAudioElement // muted: it only keeps their stream flowing into Web Audio (see playVoice)
+  voice?: Listen & { gain: GainNode }
   relayed?: boolean
   candidates: ReturnType<typeof createCandidates>
   offer?: number
@@ -69,7 +74,8 @@ export const onChange = (fn: () => void) => void (notify = fn)
 
 const send = (c: string, to: Key | null, data: unknown) => window.api.call('signal', c, to, data)
 const membersOf = (c: string) => state.groups[c]?.members ?? c.split('_')
-export const volumeOf = (k: Key) => state.settings.volumes?.[k] ?? 1
+// 0 to 2 (200%); played through a GainNode, so above 100% is a real boost.
+export const volumeOf = (k: Key) => Math.min(2, Math.max(0, state.settings.volumes?.[k] ?? 1))
 const mic = (id: string) => navigator.mediaDevices.getUserMedia({ audio: id ? { deviceId: { exact: id } } : true })
 
 function bitrate(pc: RTCPeerConnection) {
@@ -82,10 +88,84 @@ function bitrate(pc: RTCPeerConnection) {
   }
 }
 
+// One AudioContext for the whole app. Each person plays through source → gain (their volume) → master (deafen)
+// → output, and feeds an analyser for the speaking ring. Your own microphone only feeds an analyser.
+let ctx: AudioContext | null = null
+let master: GainNode | null = null
+let own: Listen | null = null
+let listening: ReturnType<typeof setInterval> | null = null
+export const speaking = new Set<Key>() // people speaking right now, you included
+
+function context() {
+  if (!ctx) {
+    ctx = new AudioContext()
+    master = ctx.createGain()
+    master.connect(ctx.destination)
+  }
+  return ctx
+}
+// Output device for every voice at once. AudioContext.setSinkId is not in the DOM typings yet.
+const sinkTo = (id: string) => (context() as AudioContext & { setSinkId(id: string): Promise<void> }).setSinkId(id).catch(() => {})
+const applyDeafen = () => master && (master.gain.value = deafened ? 0 : 1)
+
+function listen(s: MediaStream): Listen {
+  const source = context().createMediaStreamSource(s)
+  const analyser = context().createAnalyser()
+  analyser.fftSize = 512
+  source.connect(analyser)
+  return { source, analyser, loudAt: null }
+}
+function unlisten(l: Listen | null | undefined) {
+  l?.source.disconnect()
+  l?.analyser.disconnect()
+}
+
+// Chromium only feeds a remote stream to Web Audio while a media element plays it, so the element plays it muted
+// and the sound itself comes out of the gain chain.
+function playVoice(k: Key, p: Peer, s: MediaStream) {
+  release(k, p)
+  p.audio.srcObject = s
+  const l = listen(s)
+  const gain = context().createGain()
+  gain.gain.value = volumeOf(k)
+  l.source.connect(gain).connect(master!)
+  p.voice = { ...l, gain }
+}
+function release(k: Key, p: Peer) {
+  unlisten(p.voice)
+  p.voice?.gain.disconnect()
+  p.voice = undefined
+  speaking.delete(k)
+}
+
+// Levels are read 20 times a second; the UI re-renders only when someone starts or stops speaking.
+const samplesBuf = new Float32Array(512)
+function listenAll() {
+  const now = performance.now()
+  let changed = false
+  const check = (k: Key, l: Listen | null | undefined, allowed: boolean) => {
+    let on = false
+    if (l) {
+      l.analyser.getFloatTimeDomainData(samplesBuf)
+      const r = hear(rms(samplesBuf), now, l.loudAt)
+      l.loudAt = r.loudAt
+      on = r.speaking && allowed
+    }
+    if (on === speaking.has(k)) return
+    changed = true
+    if (on) speaking.add(k)
+    else speaking.delete(k)
+  }
+  check(state.me, own, sending()) // your own ring stays off while muted, deafened or not holding push-to-talk
+  for (const [k, p] of peers) check(k, p.voice, true)
+  if (changed) notify()
+}
+
 function close(k: Key) {
   const p = peers.get(k)
   if (!p) return
   p.pc.close()
+  release(k, p)
   p.audio.srcObject = null
   peers.delete(k)
   window.api.call('relayClose', k)
@@ -108,14 +188,12 @@ function connect(k: Key) {
   const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
   const audio = new Audio()
   audio.autoplay = true
-  audio.muted = deafened
-  audio.volume = volumeOf(k)
-  if (outId) audio.setSinkId(outId).catch(() => {})
+  audio.muted = true
   for (const t of stream!.getTracks()) pc.addTrack(t, stream!)
   pc.onicecandidate = (e) => e.candidate && send(c, k, { k: 'ice', c: e.candidate.toJSON() })
   const peer: Peer = { pc, audio, candidates: createCandidates(pc) }
   pc.ontrack = (e) => {
-    if (e.track.kind === 'audio') audio.srcObject = e.streams[0] ?? new MediaStream([e.track])
+    if (e.track.kind === 'audio') playVoice(k, peer, e.streams[0] ?? new MediaStream([e.track]))
     else peer.screen = new MediaStream([e.track])
     notify()
   }
@@ -376,6 +454,8 @@ async function useMic(id: string) {
   stream.getTracks().forEach((t) => ((t.onended = null), t.stop()))
   stream = fresh
   micId = id
+  unlisten(own)
+  own = listen(fresh)
 }
 
 // Keeps the call on the chosen microphone and speakers while they are plugged in, and on the system
@@ -391,7 +471,7 @@ function followDevices(micEnded = false) {
       const out = nextDevice(chosenOut, outId, 'audiooutput', list, outLabel)
       if (out !== null) {
         outId = out
-        for (const p of peers.values()) p.audio.setSinkId(outId).catch(() => {})
+        await sinkTo(outId)
       }
       const m = nextDevice(chosenMic, micId, 'audioinput', list, micLabel)
       if (m !== null || micEnded) await useMic(m ?? micId)
@@ -426,6 +506,11 @@ export async function join(c: string) {
   conv = c
   muted = deafened = false
   relayMissing = false
+  await context().resume()
+  await sinkTo(outId)
+  applyDeafen()
+  own = listen(fresh)
+  listening = setInterval(listenAll, 50)
   navigator.mediaDevices.addEventListener('devicechange', onDeviceChange)
   send(c, null, { k: 'join' })
   followDevices() // device ids are only listed once the microphone is allowed
@@ -442,6 +527,12 @@ export function leave() {
   navigator.mediaDevices.removeEventListener('devicechange', onDeviceChange)
   if (sampler) clearInterval(sampler)
   sampler = null
+  if (listening) clearInterval(listening)
+  listening = null
+  unlisten(own)
+  own = null
+  speaking.clear()
+  ctx?.suspend()
   samples.clear()
   shares.clear()
   wants.clear()
@@ -478,7 +569,7 @@ const sendVoice = (k: Key | null) => conv && send(conv, k, { k: 'voice', muted, 
 export function toggleMute() {
   if (deafened) deafened = muted = false
   else muted = !muted
-  for (const p of peers.values()) p.audio.muted = deafened
+  applyDeafen()
   applyMic()
   sendVoice(null)
   notify()
@@ -486,7 +577,7 @@ export function toggleMute() {
 
 export function toggleDeafen() {
   deafened = !deafened
-  for (const p of peers.values()) p.audio.muted = deafened
+  applyDeafen()
   applyMic()
   sendVoice(null)
   notify()
@@ -575,7 +666,7 @@ export function onState(next: State) {
   if (a.audioKbps !== b.audioKbps) for (const p of peers.values()) bitrate(p.pc)
   if (!b.hotkeys?.ptt) talking = false
   applyMic()
-  for (const [k, p] of peers) p.audio.volume = volumeOf(k)
+  for (const [k, p] of peers) if (p.voice) p.voice.gain.gain.value = volumeOf(k)
   if (a.mic !== b.mic || a.out !== b.out || a.micLabel !== b.micLabel || a.outLabel !== b.outLabel) followDevices()
   notify()
 }

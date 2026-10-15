@@ -916,14 +916,14 @@ function VoiceMark({ muted, deafened }: { muted?: boolean; deafened?: boolean })
   )
 }
 
-// How loud one person plays for you. Saved with your settings, so it holds in every call and after a restart.
+// How loud one person plays for you, up to 200%. Saved with your settings, so it holds in every call and after a restart.
 function PersonVolume({ st, k, name }: { st: State; k: Key; name: string }) {
   const pct = Math.round(call.volumeOf(k) * 100)
   const set = (v: number) => api.call('setSettings', { volumes: { ...st.settings.volumes, [k]: v / 100 } })
   return (
     <label className="person-volume" title={`Volume for ${name}`}>
       <Icon name="volume" size={14} />
-      <input type="range" min={0} max={100} step={5} value={pct} aria-label={`Volume for ${name}`} onChange={(e) => set(Number(e.target.value))} />
+      <input type="range" min={0} max={200} step={5} value={pct} aria-label={`Volume for ${name}`} onChange={(e) => set(Number(e.target.value))} />
       <span className="person-volume-pct">{pct}%</span>
     </label>
   )
@@ -1168,8 +1168,10 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
   const title = group ? groupName(group) : name(other)
   const inCall = call.conv === conv
   const others = call.active.get(conv)?.size ?? 0
+  // A speaking ring wherever someone in this call appears.
+  const ring = (k: Key) => (inCall && call.speaking.has(k) ? ' speaking' : '')
   const member = (k: Key) => (
-    <div className="member" key={k}>
+    <div className={`member${ring(k)}`} key={k}>
       <Avatar k={k} p={prof(k)} size={32} online={isOnline(k)} />
       <span className="row-text">
         <span className="row-title">
@@ -1200,7 +1202,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
             <>
               <VoiceSignal name={name} />
               <div className="callers" aria-live="polite">
-                <div className="caller">
+                <div className={`caller${ring(st.me)}`}>
                   <Avatar k={st.me} p={st.profile} size={44} />
                   <span className="row-text">
                     <span className="row-title">
@@ -1214,7 +1216,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
                   </span>
                 </div>
                 {[...call.peers].map(([k, p]) => (
-                  <div className={`caller state-${p.pc.connectionState}`} key={k}>
+                  <div className={`caller state-${p.pc.connectionState}${ring(k)}`} key={k}>
                     <Avatar k={k} p={prof(k)} size={44} />
                     <span className="row-text">
                       <span className="row-title">

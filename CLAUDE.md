@@ -36,6 +36,7 @@ setup, also run both smoke modes.
 | `src/renderer/call.ts` | Calls: full-mesh `RTCPeerConnection` per participant, offer/answer/ICE over `signal`, mute/deafen, device and bitrate changes, connection sampling, and screen sharing (a video slot on every connection; `share`/`want` signals) |
 | `src/shared/video.ts` | Screen-share decisions: quality choices up to the source's limits, bitrate, per-viewer encodings, the soft cap (`canStream`). Plan for cameras and forwarding: `docs/roadmap-video.md` |
 | `src/shared/hotkeys.ts` | Global hotkeys from raw key codes: when mute/deafen fire and push to talk starts or stops, and recording a combination. `src/main/index.ts` feeds it from `uiohook-napi` (a native system-wide key hook with prebuilt binaries; it is needed because Electron's own global shortcuts cannot see key releases, which push to talk needs) |
+| `src/shared/speaking.ts` | Speaking ring decision: RMS level against a threshold, with 250 ms hang time. `call.ts` feeds it from an `AnalyserNode` per voice in one shared `AudioContext`, where voices also play through a per-person `GainNode` (0–200%) |
 | `src/preload/index.ts` | Exposes `window.api.call`, `window.api.on`, `screens`/`chooseScreen` for the screen picker and `recordHotkey`/`stopRecording` (both handled in `src/main/index.ts`) |
 
 Data lives in the app's data folder as `state.json` plus per-conversation `.jsonl` message logs.

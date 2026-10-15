@@ -85,6 +85,9 @@ const say = (text) => `(() => { const f = document.querySelector('form.send'); f
 const shows = (text) => `!!document.querySelector('.msgs')?.textContent.includes('${text}')`
 const pendingMark = `!!document.querySelector('.msgs')?.textContent.includes('pending')`
 const body = (text) => `document.body.innerText.includes('${text}')`
+// Watches the page for up to ms, true as soon as the condition holds: catches a state that comes and goes (a ring
+// that follows the fake microphone's beeps) without depending on when a poll lands.
+const seen = (cond, ms) => `new Promise((r) => { const t0 = Date.now(); const i = setInterval(() => { if (${cond}) (clearInterval(i), r(true)); else if (Date.now() - t0 > ${ms}) (clearInterval(i), r(false)) }, 20) })`
 const press = (label) => `[...document.querySelectorAll('aside.voice button')].find(x => x.textContent.includes('${label}')).click()`
 // A tiny real PNG, run through the same shrink path a picked file takes.
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
@@ -289,7 +292,18 @@ try {
   if (await a.ev(`!!document.querySelector('.callers .voice-mark')`)) throw new Error('a cleared hotkey still acted')
   console.log('ok   once cleared, the key does nothing')
 
+  // Chromium's fake microphone beeps, so both sides should see Ann's speaking ring.
+  const annSpeaking = `[...document.querySelectorAll('.caller.speaking')].some((x) => x.textContent.includes('Ann'))`
+  const ownSpeaking = `!!document.querySelector('.callers > .caller:first-child.speaking')`
+  if (!(await b.ev(seen(annSpeaking, 8000)))) throw new Error('B never saw Ann speaking')
+  console.log('ok   B sees the speaking ring on Ann')
+  if (!(await a.ev(seen(ownSpeaking, 8000)))) throw new Error('A never saw its own speaking ring')
+  console.log('ok   A sees its own speaking ring')
   await a.ev(press('Mute'))
+  await sleep(500) // a ring lit just before muting may hold for its hang time
+  if (await a.ev(seen(ownSpeaking, 3000))) throw new Error("A's own ring lit while muted")
+  if (await b.ev(seen(annSpeaking, 3000))) throw new Error('B saw Ann speaking while she is muted')
+  console.log('ok   muted: no ring for Ann on either side')
   await until('A shows muted', () => a.ev(`!!document.querySelector('.callers .voice-mark[title=Muted]')`))
   await until('B sees a muted mark to the right of Ann', () => b.ev(`(() => { const r = [...document.querySelectorAll('.caller')].find((x) => x.textContent.includes('Ann')); return !!r?.querySelector('.row-title .voice-mark[title=Muted]') })()`), 10)
   await a.ev(press('Deafen'))
