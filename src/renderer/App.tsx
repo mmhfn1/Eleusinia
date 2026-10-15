@@ -672,7 +672,7 @@ function NewGroup({ st, people, run, close, open }: { st: State; people: People;
   )
 }
 
-// Microphone, speakers and voice quality. Shown in Settings and inside the voice panel.
+// Microphone, speakers and voice quality, in Settings.
 function AudioSettings({ st }: { st: State }) {
   const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
   useEffect(() => {
@@ -730,7 +730,7 @@ function SettingsDialog({ st, close, edit, remove }: { st: State; close: () => v
     <Dialog label="Settings" close={close} className="settings-dialog">
       <h1>Settings</h1>
       <section className="settings-section">
-        <h2>Voice</h2>
+        <h2>Audio devices and quality</h2>
         <AudioSettings st={st} />
       </section>
       <section className="settings-section">
@@ -849,6 +849,19 @@ function VoiceMark({ muted, deafened }: { muted?: boolean; deafened?: boolean })
       <Icon name={deafened ? 'headphonesOff' : 'micOff'} size={14} />
       <span className="visually-hidden">{label}</span>
     </span>
+  )
+}
+
+// How loud one person plays for you. Saved with your settings, so it holds in every call and after a restart.
+function PersonVolume({ st, k, name }: { st: State; k: Key; name: string }) {
+  const pct = Math.round(call.volumeOf(k) * 100)
+  const set = (v: number) => api.call('setSettings', { volumes: { ...st.settings.volumes, [k]: v / 100 } })
+  return (
+    <label className="person-volume" title={`Volume for ${name}`}>
+      <Icon name="volume" size={14} />
+      <input type="range" min={0} max={100} step={5} value={pct} aria-label={`Volume for ${name}`} onChange={(e) => set(Number(e.target.value))} />
+      <span className="person-volume-pct">{pct}%</span>
+    </label>
   )
 }
 
@@ -1142,6 +1155,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
                         {STATE_WORDS[p.pc.connectionState] ?? p.pc.connectionState}
                         {p.relayed && p.pc.connectionState === 'connected' && ' · relayed through the chat link'}
                       </span>
+                      <PersonVolume st={st} k={k} name={name(k)} />
                     </span>
                   </div>
                 ))}
@@ -1189,10 +1203,6 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
             </>
           )}
         </section>
-        <details className="audio-panel">
-          <summary>Audio devices and quality</summary>
-          <AudioSettings st={st} />
-        </details>
       </aside>
       <Splitter label="Resize voice sidebar" width={left} set={setLeft} dir={1} />
 

@@ -67,6 +67,7 @@ export const onChange = (fn: () => void) => void (notify = fn)
 
 const send = (c: string, to: Key | null, data: unknown) => window.api.call('signal', c, to, data)
 const membersOf = (c: string) => state.groups[c]?.members ?? c.split('_')
+export const volumeOf = (k: Key) => state.settings.volumes?.[k] ?? 1
 const mic = (id: string) => navigator.mediaDevices.getUserMedia({ audio: id ? { deviceId: { exact: id } } : true })
 
 function bitrate(pc: RTCPeerConnection) {
@@ -106,6 +107,7 @@ function connect(k: Key) {
   const audio = new Audio()
   audio.autoplay = true
   audio.muted = deafened
+  audio.volume = volumeOf(k)
   if (outId) audio.setSinkId(outId).catch(() => {})
   for (const t of stream!.getTracks()) pc.addTrack(t, stream!)
   pc.onicecandidate = (e) => e.candidate && send(c, k, { k: 'ice', c: e.candidate.toJSON() })
@@ -553,6 +555,7 @@ export function onState(next: State) {
 
   const [a, b] = [prev.settings, next.settings]
   if (a.audioKbps !== b.audioKbps) for (const p of peers.values()) bitrate(p.pc)
+  for (const [k, p] of peers) p.audio.volume = volumeOf(k)
   if (a.mic !== b.mic || a.out !== b.out || a.micLabel !== b.micLabel || a.outLabel !== b.outLabel) followDevices()
   notify()
 }

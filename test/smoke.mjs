@@ -226,6 +226,13 @@ try {
   await until(`call is ${forced ? 'relayed through the chat link' : 'direct'}`, async () =>
     (await a.ev(`document.querySelector('.callers').textContent.includes('relayed')`)) === forced &&
     (await b.ev(`document.querySelector('.callers').textContent.includes('relayed')`)) === forced, 10)
+  // Per-person volume: B turns Ann down; it is saved, and checked again after B restarts below.
+  const annKey = await a.ev(`api.call('state').then((s) => s.me)`)
+  await b.ev(`(() => { const r = document.querySelector('.caller input[aria-label="Volume for Ann"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(r, '40'); r.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+  await until('B turns Ann down to 40%, and it is saved', () =>
+    b.ev(`api.call('state').then((s) => s.settings.volumes?.['${annKey}'] === 0.4 && document.querySelector('.caller .person-volume-pct').textContent === '40%')`), 10)
+  await until('the voice panel no longer holds the audio devices; they are in Settings', () =>
+    b.ev(`!document.querySelector('aside.voice').textContent.includes('Audio devices')`), 5)
   await a.ev(press('Mute'))
   await until('A shows muted', () => a.ev(`!!document.querySelector('.callers .voice-mark[title=Muted]')`))
   await until('B sees a muted mark to the right of Ann', () => b.ev(`(() => { const r = [...document.querySelectorAll('.caller')].find((x) => x.textContent.includes('Ann')); return !!r?.querySelector('.row-title .voice-mark[title=Muted]') })()`), 10)
@@ -298,6 +305,7 @@ try {
   console.log('--- Bob comes back')
   b = await launch(9234, b.dir)
   await until('B is straight on Home (profile kept)', () => b.ev(`!!document.querySelector('main.home')`))
+  await until("B still has Ann at 40% after restarting", () => b.ev(`api.call('state').then((s) => s.settings.volumes?.['${annKey}'] === 0.4)`), 5)
   // Each chat is opened once, then watched: new messages and receipts show live in an open chat.
   await b.ev(open('Ann'))
   await until('B received the offline DM', () => b.ev(shows('dm while offline')), 120)
