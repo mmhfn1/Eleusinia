@@ -1720,3 +1720,11 @@ hr {
   grid-column: 1 / -1;
   white-space: normal;
 }
+
+/* Muted or deafened, beside a name in the call */
+.voice-mark {
+  display: inline-flex;
+  vertical-align: -2px;
+  margin-left: 4px;
+  color: var(--danger);
+}

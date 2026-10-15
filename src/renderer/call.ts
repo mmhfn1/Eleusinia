@@ -54,6 +54,8 @@ let measuring = false
 // Theirs: what each sharer in the call told us. Wants: what each side is showing of the other's share.
 export type ShareInfo = { name: string; width: number; height: number; fps: number; starved: boolean }
 export const shares = new Map<Key, ShareInfo>()
+// Whether each person in the call has muted or deafened themselves, as they told us.
+export const voices = new Map<Key, { muted: boolean; deafened: boolean }>()
 let screen: { track: MediaStreamTrack; stream: MediaStream; src: ScreenSource; q: Quality; at: number } | null = null
 const wants = new Map<Key, Level>() // what each viewer shows of our share
 const shown = new Map<Key, Level>() // what we show of each sharer's
@@ -93,6 +95,7 @@ function drop(k: Key) {
   shares.delete(k)
   wants.delete(k)
   shown.delete(k)
+  voices.delete(k)
   close(k)
 }
 
@@ -118,6 +121,7 @@ function connect(k: Key) {
     watchdogs.get(k)?.update(pc.connectionState)
     if (pc.connectionState === 'connected') {
       bitrate(pc)
+      sendVoice(k)
       if (screen) sendShare(k)
       await applyLevel(k)
       peer.relayed = await isRelayed(pc)
@@ -438,6 +442,7 @@ export function leave() {
   shares.clear()
   wants.clear()
   shown.clear()
+  voices.clear()
   upload = null
   stream?.getTracks().forEach((t) => ((t.onended = null), t.stop()))
   stream = null
@@ -447,12 +452,15 @@ export function leave() {
 
 const applyMic = () => stream?.getAudioTracks().forEach((t) => (t.enabled = !muted && !deafened))
 
+const sendVoice = (k: Key | null) => conv && send(conv, k, { k: 'voice', muted, deafened })
+
 // Unmuting while deafened also undeafens, since you cannot talk without hearing the reply.
 export function toggleMute() {
   if (deafened) deafened = muted = false
   else muted = !muted
   for (const p of peers.values()) p.audio.muted = deafened
   applyMic()
+  sendVoice(null)
   notify()
 }
 
@@ -460,6 +468,7 @@ export function toggleDeafen() {
   deafened = !deafened
   for (const p of peers.values()) p.audio.muted = deafened
   applyMic()
+  sendVoice(null)
   notify()
 }
 
@@ -506,6 +515,8 @@ async function handle(from: Key, c: string, d: any) {
     const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Math.round(Number(v)) || 0))
     if (d.on) shares.set(from, { name: String(d.name ?? '').slice(0, 100), width: n(d.width, 8192), height: n(d.height, 8192), fps: n(d.fps, 480), starved: !!d.starved })
     else (shares.delete(from), shown.delete(from))
+  } else if (d.k === 'voice') {
+    voices.set(from, { muted: !!d.muted, deafened: !!d.deafened })
   } else if (d.k === 'want') {
     if (['off', 'thumb', 'full'].includes(d.level)) {
       wants.set(from, d.level)

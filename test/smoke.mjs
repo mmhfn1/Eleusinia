@@ -227,12 +227,15 @@ try {
     (await a.ev(`document.querySelector('.callers').textContent.includes('relayed')`)) === forced &&
     (await b.ev(`document.querySelector('.callers').textContent.includes('relayed')`)) === forced, 10)
   await a.ev(press('Mute'))
-  await until('A shows muted', () => a.ev(`document.querySelector('.callers').textContent.includes('Muted')`))
+  await until('A shows muted', () => a.ev(`!!document.querySelector('.callers .voice-mark[title=Muted]')`))
+  await until('B sees a muted mark to the right of Ann', () => b.ev(`(() => { const r = [...document.querySelectorAll('.caller')].find((x) => x.textContent.includes('Ann')); return !!r?.querySelector('.row-title .voice-mark[title=Muted]') })()`), 10)
   await a.ev(press('Deafen'))
   await until('A deafened: Deafened shown, both buttons pressed, Bob silenced locally', () =>
     a.ev(`document.querySelector('.callers').textContent.includes('Deafened') && [...document.querySelectorAll('aside.voice button[aria-pressed=true]')].length === 2 && [...document.querySelectorAll('audio')].every(x => x.muted)`), 5)
+  await until('B sees a deafened mark instead', () => b.ev(`!!document.querySelector('.caller .row-title .voice-mark[title=Deafened]')`), 10)
   await a.ev(press('Undeafen'))
   await until('A undeafened: back to muted only', () => a.ev(`!document.querySelector('.callers').textContent.includes('Deafened') && document.querySelector('.callers').textContent.includes('Muted')`), 5)
+  await until('B sees muted again', () => b.ev(`!!document.querySelector('.caller .row-title .voice-mark[title=Muted]') && !document.querySelector('.caller .voice-mark[title=Deafened]')`), 10)
   await a.ev(press('Leave call'))
   await until('B sees Ann leave', () => b.ev(`document.querySelector('.callers')?.textContent.includes('Waiting')`))
   await b.ev(press('Leave call'))

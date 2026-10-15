@@ -840,6 +840,18 @@ function VoiceSignal({ name }: { name: (k: Key) => string }) {
   )
 }
 
+// A muted or deafened mark to the right of a name in the call; deafened wins, since it also mutes.
+function VoiceMark({ muted, deafened }: { muted?: boolean; deafened?: boolean }) {
+  if (!muted && !deafened) return null
+  const label = deafened ? 'Deafened' : 'Muted'
+  return (
+    <span className="voice-mark" title={label}>
+      <Icon name={deafened ? 'headphonesOff' : 'micOff'} size={14} />
+      <span className="visually-hidden">{label}</span>
+    </span>
+  )
+}
+
 const STATE_WORDS: Record<string, string> = {
   new: 'Connecting…',
   connecting: 'Connecting…',
@@ -1114,16 +1126,18 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
                 <div className="caller">
                   <Avatar k={st.me} p={st.profile} size={44} />
                   <span className="row-text">
-                    <span className="row-title">You</span>
-                    {(call.muted || call.deafened) && <span className="row-sub">{call.deafened ? 'Deafened' : 'Muted'}</span>}
+                    <span className="row-title">
+                      You <VoiceMark muted={call.muted} deafened={call.deafened} />
+                    </span>
                   </span>
-                  {call.deafened ? <Icon name="headphonesOff" size={16} /> : call.muted && <Icon name="micOff" size={16} />}
                 </div>
                 {[...call.peers].map(([k, p]) => (
                   <div className={`caller state-${p.pc.connectionState}`} key={k}>
                     <Avatar k={k} p={prof(k)} size={44} />
                     <span className="row-text">
-                      <span className="row-title">{name(k)}</span>
+                      <span className="row-title">
+                        {name(k)} <VoiceMark {...call.voices.get(k)} />
+                      </span>
                       <span className="row-sub">
                         {STATE_WORDS[p.pc.connectionState] ?? p.pc.connectionState}
                         {p.relayed && p.pc.connectionState === 'connected' && ' · relayed through the chat link'}
