@@ -13,7 +13,9 @@ const children = []
 setTimeout(() => (console.error('FAIL overall timeout'), children.forEach((c) => c.kill()), process.exit(2)), 420000)
 
 async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-'))) {
-  const flags = [`--remote-debugging-port=${port}`, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream']
+  // The windows overlap, and Windows reports a covered window as hidden; the app then (rightly) asks not to be sent
+  // video. Occlusion detection is off so every window counts as visible.
+  const flags = [`--remote-debugging-port=${port}`, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--disable-features=CalculateNativeWinOcclusion']
   const child = spawn(exe, [app, ...flags], { env: { ...process.env, ELEUSINIA_DATA: dir }, stdio: 'ignore' })
   children.push(child)
   let page
@@ -181,6 +183,44 @@ try {
   }, 20)
   console.log('     ', JSON.stringify(both))
   await a.ev(`document.activeElement.blur()`)
+
+  console.log('--- Screen sharing')
+  await a.ev(press('Share screen'))
+  const src = await until('A sees the screens and windows it can share', () =>
+    a.ev(`(() => { const b = [...document.querySelectorAll('dialog[open] .source')]; return b.length > 0 && b.map((x) => x.textContent) })()`), 20)
+  console.log('     ', src.length, 'sources, first:', src[0])
+  await a.ev(`document.querySelector('dialog[open] .source').click()`)
+  const menu = await until('the streaming menu defaults to 720p at 30 fps, and offers what the system allows', () =>
+    a.ev(`(() => { const s = [...document.querySelectorAll('dialog[open] .quality select')]; return s.length === 3 && [s[0].value, s[1].value, [...s[0].options].map((o) => o.textContent), [...s[1].options].map((o) => o.value)] })()`), 10)
+  console.log('     ', JSON.stringify(menu))
+  if (menu[0] !== '720' || menu[1] !== '30') throw new Error('stream quality did not default to 720p at 30 fps')
+  await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Share').click()`)
+  await until('B shows A screen large, at 720p', () => b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight === 720`), 30)
+  await until('A sees that it is sharing, with a stop button', () => a.ev(`document.querySelector('.stage .sharing-badge')?.textContent.includes('You are sharing') && !!document.querySelector('.stage .button.danger')`))
+  if (menu[2].some((t) => t.startsWith('1080p'))) {
+    await a.ev(press('Stream settings'))
+    await until('the quality menu opens on the current choice', () => a.ev(`document.querySelector('dialog[open] .quality select')?.value === '720'`), 5)
+    await a.ev(`(() => { const s = document.querySelector('dialog[open] .quality select'); s.value = '1080'; s.dispatchEvent(new Event('change', { bubbles: true })) })()`)
+    await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Apply').click()`)
+    await until('B now receives 1080p, as the streamer chose', () => b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight === 1080`), 30)
+  }
+  if (src.length > 1) {
+    const height = await b.ev(`document.querySelector('.stage .screen.big video').videoHeight`)
+    await a.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent.includes('Switch screen')).click()`)
+    await until('the switch dialog lists the sources, marking the one being shared', () =>
+      a.ev(`(() => { const l = [...document.querySelectorAll('dialog[open] .source')]; return l.length > 1 && l.some((x) => x.textContent.startsWith('Now sharing')) })()`), 10)
+    await a.ev(`document.querySelectorAll('dialog[open] .source')[1].click()`)
+    await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Switch').click()`)
+    await until(`A switched to "${src[1]}" without stopping, keeping its quality, and B still sees it`, async () =>
+      (await a.ev(`document.querySelector('.stage .sharing-badge')?.textContent.includes(${JSON.stringify(src[1])})`)) &&
+      (await b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight === ${height} && document.querySelector('.stage .screen.big figcaption').textContent.includes(${JSON.stringify(src[1])})`)), 30)
+  }
+  await b.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Hide screens').click()`)
+  await until('B hides the screens (so A stops sending them)', () => b.ev(`!document.querySelector('.stage .screen') && document.querySelector('.stage').classList.contains('collapsed')`), 5)
+  await b.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Show screens').click()`)
+  await until('B shows them again and frames flow', () => b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight > 0`), 30)
+  await a.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Stop sharing').click()`)
+  await until('A stops; the stage closes for B', () => b.ev(`!document.querySelector('.stage')`), 10)
   // ELEUSINIA_NO_DIRECT=1 withholds direct routes, as two strict routers would; the call must then go through the relay.
   const forced = process.env.ELEUSINIA_NO_DIRECT === '1'
   await until(`call is ${forced ? 'relayed through the chat link' : 'direct'}`, async () =>

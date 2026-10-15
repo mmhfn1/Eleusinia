@@ -2,6 +2,7 @@ import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useLayou
 import { type Offset, clampOffset, cropRect } from '../shared/crop'
 import { usable } from '../shared/devices'
 import { type Group, type Key, type Msg, type Profile, type State, MAX_TEXT, dmId, keyTail, stack } from '../shared/protocol'
+import { type Quality, type Verdict, choices, defaultQuality, fitQuality, heightLabel, streamKbps } from '../shared/video'
 import * as call from './call'
 import { Avatar, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Info, Splitter, Wordmark, useWidth } from './ui'
 
@@ -848,8 +849,228 @@ const STATE_WORDS: Record<string, string> = {
   closed: 'Disconnected',
 }
 
+const mbps = (kbps: number) => (kbps / 1000).toFixed(kbps < 10000 ? 1 : 0)
+
+// Picking a screen or window and its quality, or, while sharing, switching to another one or changing the quality.
+// The streamer's choice is final: anything up to what the system can deliver. Starting a stream checks it fits the
+// call (see canStream); switching or changing quality does not add a stream, so it is not checked.
+function ShareDialog({ close }: { close: () => void }) {
+  const current = call.sharing()
+  const [sources, setSources] = useState<call.ScreenSource[] | null>(current ? [current.src] : null)
+  const [src, setSrc] = useState<call.ScreenSource | null>(current?.src ?? null)
+  const [q, setQ] = useState<Quality | null>(current?.q ?? null)
+  const [verdict, setVerdict] = useState<Verdict | null>(null)
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  useEffect(() => {
+    window.api.screens().then(setSources, () => !current && setSources([]))
+  }, [])
+  const viewers = [...call.peers.values()].filter((p) => p.pc.connectionState === 'connected').length
+  const kbps = src && q ? streamKbps(src, q) : 0
+  // A new share starts at the default; switching keeps the quality already chosen, as far as the new source allows.
+  const pick = (s: call.ScreenSource) => {
+    setSrc(s)
+    setQ(q && current ? fitQuality(s, q) : defaultQuality(s))
+    setVerdict(null)
+  }
+  const change = (p: Partial<Quality>) => {
+    setQ({ ...q!, ...p })
+    setVerdict(null)
+  }
+
+  async function go() {
+    if (!src || !q) return
+    setBusy(true)
+    setErr('')
+    try {
+      if (current && src.id !== current.src.id) await call.switchShare(src, q)
+      else if (current) await call.setQuality(q)
+      else {
+        const v = await call.checkShare(src, q)
+        if (!v.ok) return setVerdict(v)
+        await call.startShare(src, q)
+      }
+      close()
+    } catch (e: any) {
+      setErr(`Sharing could not start: ${String(e?.message ?? e)}`)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const { heights, rates } = src ? choices(src) : { heights: [], rates: [] }
+  return (
+    <Dialog label={current ? 'Stream settings' : 'Share your screen'} close={close} className="share-dialog">
+      <h1>{current ? 'Stream settings' : 'Share your screen'}</h1>
+      {current && <p className="hint">Choose another screen or window to switch to it without stopping.</p>}
+      <div className="sources" role="group" aria-label="Screens and windows">
+        {sources === null && <p className="quiet">Looking for screens and windows…</p>}
+        {sources?.length === 0 && <p className="quiet">No screens or windows are available to share.</p>}
+        {sources?.map((s) => (
+          <button key={s.id} type="button" className={`source ${src?.id === s.id ? 'chosen' : ''}`} aria-pressed={src?.id === s.id} onClick={() => pick(s)}>
+            <img src={s.thumb} alt="" />
+            <span>
+              {current?.src.id === s.id && <b>Now sharing: </b>}
+              {s.name}
+            </span>
+          </button>
+        ))}
+      </div>
+      {src && q && (
+        <div className="quality">
+          <label className="field-label">
+            Resolution
+            <select value={q.height} onChange={(e) => change({ height: Number(e.target.value) })}>
+              {heights.map((h) => (
+                <option key={h} value={h}>
+                  {heightLabel(h)}
+                  {h === src.height ? ' (full size)' : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field-label">
+            Frame rate
+            <select value={q.fps} onChange={(e) => change({ fps: Number(e.target.value) })}>
+              {rates.map((f) => (
+                <option key={f} value={f}>
+                  {f} fps
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="field-label">
+            Optimise for
+            <select value={q.motion ? 'motion' : 'detail'} onChange={(e) => change({ motion: e.target.value === 'motion' })}>
+              <option value="detail">Text and detail</option>
+              <option value="motion">Motion (video, games)</option>
+            </select>
+          </label>
+          <p className="row-sub estimate">
+            About {mbps(kbps)} Mbps per viewer
+            {viewers > 0 && ` · about ${mbps(kbps * viewers)} Mbps of upload to ${viewers} ${viewers === 1 ? 'person' : 'people'}`}
+          </p>
+        </div>
+      )}
+      {verdict && !verdict.ok && (
+        <p role="alert" className="form-error">
+          {verdict.reason === 'upload'
+            ? `You can't start streaming right now. Your upload is about ${mbps(verdict.uploadKbps)} Mbps, and ${heightLabel(q!.height)} at ${q!.fps} fps to ${viewers} ${viewers === 1 ? 'person' : 'people'} needs about ${mbps(verdict.needKbps)} Mbps, so it would lower the quality of the call for others. Choose a lower quality, or try again when fewer people are in the call.`
+            : "You can't start streaming right now. Someone already streaming is short of bandwidth, and another stream would lower the quality of the call for everyone. Try again shortly."}
+        </p>
+      )}
+      {err && (
+        <p role="alert" className="form-error">
+          {err}
+        </p>
+      )}
+      <div className="form-actions">
+        <button type="button" className="button" onClick={close}>
+          Cancel
+        </button>
+        <button type="button" className="button primary" disabled={!src || !q || busy} onClick={go}>
+          {busy ? (current ? 'Applying…' : 'Checking…') : !current ? 'Share' : src && src.id !== current.src.id ? 'Switch' : 'Apply'}
+        </button>
+      </div>
+    </Dialog>
+  )
+}
+
+function Screen({ stream, label, big }: { stream?: MediaStream; label: string; big?: boolean }) {
+  const ref = useRef<HTMLVideoElement>(null)
+  useEffect(() => {
+    if (ref.current) ref.current.srcObject = stream ?? null
+  }, [stream])
+  return (
+    <figure className={`screen ${big ? 'big' : ''}`}>
+      <video ref={ref} autoPlay playsInline muted />
+      <figcaption>{label}</figcaption>
+      {big && (
+        <button className="icon-button screen-full" aria-label="Full screen" title="Full screen" onClick={() => ref.current?.parentElement?.requestFullscreen()}>
+          <Icon name="expand" size={16} />
+        </button>
+      )}
+    </figure>
+  )
+}
+
+// Screens shared in this call: one large, the rest as thumbnails, ours as a small preview. Each sharer is told what
+// we show, so they send only that: nothing while hidden or minimised, a thumbnail, or their full stream.
+function Stage({ name, settings }: { name: (k: Key) => string; settings: () => void }) {
+  const [focus, setFocus] = useState<Key | null>(null)
+  const [hidden, setHidden] = useState(false)
+  const [away, setAway] = useState(document.hidden)
+  useEffect(() => {
+    const on = () => setAway(document.hidden)
+    document.addEventListener('visibilitychange', on)
+    return () => {
+      document.removeEventListener('visibilitychange', on)
+      for (const k of call.shares.keys()) call.show(k, 'off')
+    }
+  }, [])
+  const sharers = [...call.shares.keys()].filter((k) => call.peers.has(k))
+  const main = focus && sharers.includes(focus) ? focus : (sharers[0] ?? null)
+  const mine = call.sharing()
+  useEffect(() => {
+    for (const k of sharers) call.show(k, hidden || away ? 'off' : k === main ? 'full' : 'thumb')
+  })
+  if (!sharers.length && !mine) return null
+  const info = (k: Key) => call.shares.get(k)!
+  return (
+    <section className={`stage ${hidden ? 'collapsed' : ''}`} aria-label="Shared screens">
+      <div className="stage-bar">
+        {mine ? (
+          <span className="sharing-badge">
+            <span className="live-dot" aria-hidden="true" /> You are sharing <b>{mine.src.name}</b> · {heightLabel(mine.q.height)}, {mine.q.fps} fps
+          </span>
+        ) : (
+          <span className="row-sub">
+            {sharers.length} {sharers.length === 1 ? 'person is' : 'people are'} sharing
+          </span>
+        )}
+        {mine && (
+          <button className="button" onClick={settings}>
+            <Icon name="screen" size={16} /> Switch screen
+          </button>
+        )}
+        {mine && (
+          <button className="button danger" onClick={call.stopShare}>
+            Stop sharing
+          </button>
+        )}
+        {sharers.length > 0 && (
+          <button className="button subtle" aria-pressed={hidden} onClick={() => setHidden(!hidden)}>
+            {hidden ? 'Show screens' : 'Hide screens'}
+          </button>
+        )}
+      </div>
+      {!hidden && main && (
+        <Screen key={main} stream={call.peers.get(main)?.screen} label={`${name(main)}: ${info(main).name} · ${heightLabel(info(main).height)}, ${info(main).fps} fps`} big />
+      )}
+      {!hidden && (sharers.length > 1 || (mine && sharers.length > 0)) && (
+        <div className="stage-strip">
+          {sharers
+            .filter((k) => k !== main)
+            .map((k) => (
+              <button key={k} className="stage-thumb" aria-label={`Show ${name(k)}'s screen`} onClick={() => setFocus(k)}>
+                <Screen stream={call.peers.get(k)?.screen} label={name(k)} />
+              </button>
+            ))}
+          {mine && (
+            <div className="stage-thumb own">
+              <Screen stream={mine.stream} label="Your screen" />
+            </div>
+          )}
+        </div>
+      )}
+      {!hidden && mine && !sharers.length && <Screen stream={mine.stream} label="Your screen (preview)" />}
+    </section>
+  )
+}
+
 // A group or direct chat: the voice chamber on the left, text in the middle, group members on the right.
 function Conversation({ st, conv, people, run, home }: ConvProps) {
+  const [shareDialog, setShareDialog] = useState(false)
   const [left, setLeft] = useWidth('voice', 320)
   const [right, setRight] = useWidth('members', 230)
   const { prof, name, user, isOnline } = people
@@ -928,6 +1149,23 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
                   <Icon name="phone" size={16} /> Leave call
                 </button>
               </div>
+              <div className="call-controls">
+                {call.sharing() ? (
+                  <>
+                    <button className="button" onClick={() => setShareDialog(true)}>
+                      <Icon name="screen" size={16} /> Stream settings
+                    </button>
+                    <button className="button" onClick={call.stopShare}>
+                      Stop sharing
+                    </button>
+                  </>
+                ) : (
+                  <button className="button" onClick={() => setShareDialog(true)}>
+                    <Icon name="screen" size={16} /> Share screen
+                  </button>
+                )}
+              </div>
+              {shareDialog && <ShareDialog close={() => setShareDialog(false)} />}
             </>
           ) : (
             <>
@@ -944,7 +1182,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
       </aside>
       <Splitter label="Resize voice sidebar" width={left} set={setLeft} dir={1} />
 
-      <Chat st={st} conv={conv} title={title} people={people} run={run} home={home} />
+      <Chat st={st} conv={conv} title={title} people={people} run={run} home={home} stage={inCall ? <Stage name={name} settings={() => setShareDialog(true)} /> : null} />
 
       {group && (
         <>
@@ -967,7 +1205,9 @@ const dayLabel = (ts: number) =>
   sameDay(ts, Date.now()) ? 'Today' : sameDay(ts, Date.now() - 864e5) ? 'Yesterday' : new Date(ts).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
 const clock = (ts: number) => new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 
-function Chat({ st, conv, title, people, run, home }: { st: State; conv: string; title: string; people: People; run: Run; home: () => void }) {
+type ChatProps = { st: State; conv: string; title: string; people: People; run: Run; home: () => void; stage: ReactNode }
+
+function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   const [leaving, setLeaving] = useState(false)
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [acked, setAcked] = useState(0)
@@ -1110,6 +1350,7 @@ function Chat({ st, conv, title, people, run, home }: { st: State; conv: string;
         </Dialog>
       )}
 
+      {stage}
       <div className="msgs" ref={list} onScroll={(e) => (atBottom.current = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 40)}>
         {loaded && !sorted.length && (
           <div className="empty-state">

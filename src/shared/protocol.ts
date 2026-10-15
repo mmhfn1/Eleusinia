@@ -30,6 +30,8 @@ export type Wire =
   | { t: 'call'; conv: string; data: unknown }
   | { t: 'pkt'; d: string } // a relayed call packet too big for a datagram, base64
   | { t: 'gone' } // the sender deleted their account
+  | { t: 'probe'; id: number; d?: string; end?: boolean } // filler for measuring the sender's upload speed
+  | { t: 'probed'; id: number } // all of that probe arrived
 
 export type Event =
   | { type: 'state'; state: State }

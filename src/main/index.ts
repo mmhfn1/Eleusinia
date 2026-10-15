@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { BrowserWindow, app, ipcMain, safeStorage } from 'electron'
+import { BrowserWindow, app, desktopCapturer, ipcMain, safeStorage, screen, session } from 'electron'
 import DHT from 'hyperdht'
 import { createNode } from './node'
 
@@ -55,6 +55,36 @@ app.whenReady().then(() => {
       app.exit(0)
     }
     return result
+  })
+
+  // Screen sharing: the page lists screens and windows (never this app's own), the user picks one in our own
+  // picker, and the next getDisplayMedia call captures exactly that source. Anything else is refused.
+  let chosen: string | null = null
+  ipcMain.handle('screens', async () => {
+    const own = win.getMediaSourceId()
+    const displays = screen.getAllDisplays()
+    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 180 } })
+    return sources
+      .filter((s) => s.id !== own)
+      .map((s) => {
+        // A window can be moved to any display, so it may go as high as the display it is listed on or the primary one.
+        const d = displays.find((x) => String(x.id) === s.display_id) ?? screen.getPrimaryDisplay()
+        return {
+          id: s.id,
+          name: s.name,
+          thumb: s.thumbnail.toDataURL(),
+          width: Math.round(d.size.width * d.scaleFactor),
+          height: Math.round(d.size.height * d.scaleFactor),
+          fps: Math.round(d.displayFrequency) || 60,
+        }
+      })
+  })
+  ipcMain.handle('chooseScreen', (_e, id: unknown) => void (chosen = typeof id === 'string' ? id : null))
+  session.defaultSession.setDisplayMediaRequestHandler(async (_req, grant) => {
+    const id = chosen
+    chosen = null
+    const source = id ? (await desktopCapturer.getSources({ types: ['screen', 'window'] })).find((s) => s.id === id) : undefined
+    grant(source ? { video: source } : {})
   })
 
   if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL)

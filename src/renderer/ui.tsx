@@ -57,6 +57,13 @@ const ICONS: Record<string, ReactNode> = {
   trash: <path d="M4 7h16M9 7V4.5h6V7M6.5 7l1 13h9l1-13M10 11v6M14 11v6" />,
   wifi: <path d="M2.5 9a13.5 13.5 0 0 1 19 0M5.5 12.5a9 9 0 0 1 13 0M8.6 15.9a4.6 4.6 0 0 1 6.8 0M12 19.5h.01" />,
   rotate: <path d="M20 11a8 8 0 1 0-2.3 5.7M20 4.5V11h-6.5" />,
+  screen: (
+    <>
+      <rect x="3" y="4" width="18" height="12" rx="1.5" />
+      <path d="M8 20h8M12 16v4" />
+    </>
+  ),
+  expand: <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />,
   info: (
     <>
       <circle cx="12" cy="12" r="9" />

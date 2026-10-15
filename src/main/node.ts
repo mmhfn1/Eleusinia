@@ -221,8 +221,23 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       changed()
     } else if (w.t === 'pkt') {
       if (typeof w.d === 'string') relay.deliver(key, Buffer.from(w.d, 'base64'))
+    } else if (w.t === 'probe') {
+      // Answer a finished probe, unless this peer has been sending probes far beyond what a measurement needs.
+      const used = (probed.get(key) ?? 0) + (typeof w.d === 'string' ? w.d.length : 0)
+      probed.set(key, used)
+      if (w.end && used <= PROBE_LIMIT && Number.isSafeInteger(w.id)) net.send(key, { t: 'probed', id: w.id })
+    } else if (w.t === 'probed') {
+      probes.get(w.id)?.()
     }
   }
+
+  // Upload measurement: bytes of probe filler received per peer (reset every minute), and our probes awaiting an answer.
+  const PROBE_BYTES = 1 << 20
+  const PROBE_LIMIT = 4 * PROBE_BYTES
+  const probed = new Map<Key, number>()
+  const probes = new Map<number, () => void>()
+  let probeId = 0
+  const probeReset = setInterval(() => probed.clear(), 60000)
 
   const net = createNet(
     keyPair,
@@ -377,6 +392,26 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     relayOpen: (key: Key) => (known(key) ? relay.open(key) : null),
     relayClose: (key: Key) => relay.close(key),
     ping: () => net.ping(),
+    // Upload speed in kbps: about 1 MB of filler sent to a call member over the chat link, timed until they confirm
+    // it all arrived. Bounded by their download too, which is what a stream to them would face. Null if they do not answer.
+    async probe(key: Key) {
+      if (!known(key) || !net.linked(key)) return null
+      const id = ++probeId
+      const chunk = randomBytes(48 * 1024).toString('base64')
+      const start = performance.now()
+      const done = new Promise<boolean>((resolve) => {
+        const timer = setTimeout(() => (probes.delete(id), resolve(false)), 15000)
+        probes.set(id, () => (clearTimeout(timer), probes.delete(id), resolve(true)))
+      })
+      let sent = 0
+      while (sent < PROBE_BYTES) {
+        net.send(key, { t: 'probe', id, d: chunk })
+        sent += chunk.length
+      }
+      net.send(key, { t: 'probe', id, end: true })
+      if (!(await done)) return null
+      return Math.round((sent * 8) / (performance.now() - start))
+    },
     setSettings(p: Partial<Settings>) {
       Object.assign(s.settings, p)
       changed()
@@ -384,6 +419,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     async destroy() {
       clearInterval(timer)
       clearInterval(announcer)
+      clearInterval(probeReset)
       relay.closeAll()
       await net.destroy()
     },

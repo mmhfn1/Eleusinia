@@ -323,6 +323,17 @@ test('messages are shown in time order, stacked per person while each follows th
   expect(shown.map(({ m, first }) => (first ? '+' : '') + m.text)).toEqual(['+a1', 'a2', '+b1', 'b2', '+b3', '+a3'])
 })
 
+test('upload is measured by sending filler to a call member, who answers only within a sane amount', async () => {
+  const a = start()
+  const b = start()
+  await befriend(a, b)
+  const kbps = await a.node.probe(b.key)
+  expect(kbps).toBeGreaterThan(1000) // a local test network is fast
+  expect(await a.node.probe('ff'.repeat(32))).toBe(null) // not someone we know
+  for (let i = 0; i < 3; i++) expect(await a.node.probe(b.key)).toBeGreaterThan(0) // 4 measurements a minute are fine
+  expect(await a.node.probe(b.key)).toBe(null) // past 4 MB a minute they stop answering
+}, 120000)
+
 test('the network ping gives a round trip in ms', async () => {
   const ms = await start().node.ping()
   expect(ms).toBeGreaterThanOrEqual(0)

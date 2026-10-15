@@ -1,54 +1,68 @@
-# Roadmap: screen sharing and camera
+# Roadmap: screen sharing and cameras
 
-Status: plan only, nothing built yet. Quality controls are open to everyone: no tiers or locked settings. The only limits shown are the honest physical ones (your upload speed, the other person's download).
+Goals: peer-to-peer (no server), lightweight, secure, calls of up to 15 to 20 people, and **no fixed limit** on how many people share a screen or camera.
 
-## Where we start
+**Status:** phase 1 (screen sharing in the mesh) is built. Phases 2 to 5 are planned.
 
-- Calls are a full mesh: everyone sends their audio straight to everyone else (`src/renderer/call.ts`), with no host.
-- Each call has offer/answer/ICE signaling, reconnect logic (`src/shared/callstate.ts`), a relay fallback over the chat link (`src/main/relay.ts`) and an in-memory quality sampler (`src/shared/quality.ts`).
-- Video changes the maths. In a mesh each sender uploads one copy per viewer: a 2.5 Mbps screen share to 4 people is 10 Mbps of upload. That is fine for small calls and is the reason a host appears in phase 5.
+## Rules
 
-## Phase 1: screen share in the mesh
+- **The streamer has the final say on quality.** Streams default to 720p at 30 fps. The streaming menu offers every resolution and frame rate the streamer's system can deliver (for example 1080p at 60 fps, or 4K at 120 fps), and whatever they choose is applied as chosen, including mid-stream.
+- **Soft cap, worked out on the fly.** When someone starts a stream, the app checks two things:
+  - **Their upload:** it must carry their chosen quality to everyone in the call. The upload is measured live by sending about 1 MB to the best-connected person in the call and timing its arrival.
+  - **Nobody already streaming may be short of bandwidth.** This is read from WebRTC's own report of what limits each stream.
 
-- **Picking what to share:** a picker for whole screens or single windows, using Electron's `desktopCapturer` with `session.setDisplayMediaRequestHandler`. System audio is shared on Windows when chosen.
-- **Sending:** the shared screen is a video track added to each existing connection. Adding a track means renegotiating; keep the current rule that the smaller key makes offers, so two people starting a share at once cannot collide.
-- **Watching:** a stage area that takes over the middle of the conversation while someone shares, with chat collapsible beside it, plus full screen and pop-out window.
-- **Controls:** a Share screen button in the voice panel, a Stop sharing button, and a visible "You are sharing" marker.
-- **Quality controls (sender side, changed live without restarting the share):**
-  - Presets: Text and detail (high resolution, 5 to 15 fps), Balanced, Smooth motion (lower resolution, 30 to 60 fps).
-  - Custom: resolution cap (720p, 1080p, 1440p, source), frame rate (5, 15, 30, 60) and max bitrate slider.
-  - Applied with `RTCRtpSender.setParameters` (`maxBitrate`, `maxFramerate`, `scaleResolutionDownBy`) and the track's `contentHint` ('detail' or 'motion').
-  - An estimate of your upload ("about 7.5 Mbps to 3 viewers") next to the controls, using the bitrate times the number of viewers.
-- **Tests:** pure logic (preset to parameters, upload estimate) in `src/shared/` with unit tests; the smoke run gains a screen share using Chromium's fake capture devices, checking resolution and frame rate through `getStats`.
+  If either fails, the stream does not start, and a notification explains why: the numbers for their upload, or that another stream would lower the quality of the call for others. They can pick a lower quality or try again later.
+- **Viewers only receive what they show.** A stream shown large gets exactly the streamer's chosen quality. A thumbnail gets a small copy, and a hidden, minimised or fully covered window gets nothing. This never changes what the streamer picked; it only avoids sending video nobody is looking at.
 
-## Phase 2: camera
+## The core problem
 
-- Camera on/off in the voice panel, a camera picker in Audio and video settings, and unplug/replug following like microphones (reuse `src/shared/devices.ts`).
-- Video tiles for people with cameras on; people without show their portrait as today.
-- The same quality controls as screen share, with camera presets (360p, 720p, 1080p at 15 or 30 fps).
-- Only visible tiles are rendered, and receiving is paused (transceiver direction) for tiles that are off screen or while the window is minimised, to keep memory and CPU low.
+Calls are a full mesh: everyone sends their audio straight to everyone else (`src/renderer/call.ts`). Video in a mesh means each sender uploads one copy per viewer, and also encodes one copy per viewer, since each connection has its own encoder.
 
-## Phase 3: keeping big calls usable in the mesh
+| Stream | Typical bitrate | 1 sender to 19 viewers |
+|---|---|---|
+| Camera thumbnail (180p) | ~150 kbps | ~2.9 Mbps upload |
+| Camera (360p) | ~400 kbps | ~7.6 Mbps |
+| Camera (720p) | ~1.2 Mbps | ~23 Mbps |
+| Screen, sharp text (720p, 30 fps) | ~1.4 Mbps | ~26 Mbps |
 
-- A cap on simultaneous video senders per call (default 3, changeable by anyone in the call), first come first served. Audio stays uncapped.
-- Use the quality sampler to step a sender's video down automatically when a link turns orange or red, and back up when it recovers. The user's chosen setting remains the ceiling.
-- Prefer VP9 for screen content (sharp text at low bitrates) and let Chromium pick hardware codecs for camera where available.
+A pure mesh therefore holds up to about 6 to 8 full-quality streams on ordinary home connections. Beyond that, the soft cap stops new streams unless peers forward (phase 5).
 
-## Phase 4: video over the relay
+## Phases
 
-- The relay sends packets of up to 1000 bytes as datagrams and larger ones over the reliable chat stream. Video packets are about 1200 bytes, so relayed video would mostly travel the reliable path and stutter on loss.
-- Measure first. If needed, raise the datagram limit to what HyperDHT's UDX carries (around 1200 bytes) or cap relayed video at a lower resolution and say so in the call panel.
+1. **Screen sharing in the mesh. Built.**
+   - **Picker:** screens and windows, never Eleusinia's own window.
+   - **Streaming menu:** resolution, frame rate, and "optimise for text or motion", up to the system's limits, with the upload estimate shown.
+   - **While sharing:** switch to another screen or window without stopping (the quality carries over as far as the new source allows), a "You are sharing" bar with switch and stop buttons, and a stage above the chat (one share large, others as thumbnails).
+   - **Saving bandwidth:** per-viewer levels, as in Rules.
+   - **Soft-cap check** on start, as in Rules.
+   - **Streamer notices:** a note when their computer or connection cannot keep up with the quality they chose. The choice is never changed for them.
+   - **How it fits the call:** every call connection carries a video slot from the start, so starting or stopping a share needs no new offer. VP9 is preferred, then H.264, then VP8.
+2. **Cameras in the mesh:** on/off, a camera picker that follows unplugging (reuse `src/shared/devices.ts`), the same streaming menu (default 720p), and a tile grid that only receives visible tiles. They count towards the same soft cap.
+3. **Shared screen audio:** system audio with a share, without sending the call's own audio back into it.
+4. **Forwarder spike (go/no-go, 2 to 3 days):** forwarding needs a WebRTC stack in the main process. The candidate is `werift`, a pure-TypeScript library with no native module and the one new dependency. It must forward Chromium VP8/VP9 simulcast between 3 machines before anything is built on it.
+5. **Peer forwarding with end-to-end frame encryption:**
+   - **Who forwards and how:** when the soft cap would block a stream, the best-connected participants (ranked by `src/shared/quality.ts`) forward it. The sender uploads one copy as three quality layers (simulcast), and the forwarder picks a layer per viewer without decoding.
+   - **Hand-over:** if a forwarder's connection stays poor for about 90 s, or it leaves, a replacement is chosen by the same rule on every member.
+   - **Encryption:** every video frame is encrypted end to end (WebRTC encoded transforms, AES-GCM). Keys are sent over the encrypted chat link and rotated on join and leave, so a forwarder only handles ciphertext.
+   - **Audio:** stays in the mesh.
 
-## Phase 5: a host for large calls, with automatic hand-over
+## Security
 
-Only if real use shows the mesh is not enough (roughly more than 5 or 6 people with video on).
+- **Encryption:** the chat link is encrypted (the DHT's Noise streams) and media is encrypted (WebRTC DTLS-SRTP). Phase 5 adds frame encryption before any forwarding exists.
+- **Sharing:**
+  - always goes through an explicit picker; the main process only grants capture of the source the user picked, and refuses any other request;
+  - shows a persistent sharing bar;
+  - excludes the app's own window;
+  - is never recorded.
+- **Messages from other people are untrusted:** share announcements are capped, and an upload measurement is answered for at most 4 MB per peer per minute.
 
-- One participant's app receives each stream once and forwards it to the others (an SFU running in the Electron main process). Senders then upload one copy instead of one per viewer.
-- **Choosing the host:** the sampler already measures each link every 2 seconds. Members share a small fitness score (median round trip, loss, upload headroom), kept in memory only as now. The best-scoring member hosts.
-- **Hand-over:** if the host's score stays below the threshold for about 90 seconds, or the host leaves, every member computes the same next host from the shared scores (ties broken by key order, as elsewhere) and reconnects to them. Expect a brief freeze during the switch.
-- Audio can stay in the mesh even then, so a host problem never silences the call.
+## Lightweight
+
+- **Codecs:** hardware encoding and decoding where Chromium has it.
+- **Nothing is sent to hidden views:** off-screen thumbnails, minimised and fully covered windows, and a stage hidden with "Hide screens" receive nothing.
+- **Upload measurement:** happens only when someone starts a stream, at most once a minute.
 
 ## Open questions
 
-- Should viewers be able to ask a sharer for higher or lower quality, or is the sender's choice final?
 - Recording is out of scope unless asked for.
+- A music bot (YouTube listen-along) is planned separately and waits until video is settled.

@@ -4,7 +4,7 @@
 
 Peer-to-peer chat and voice calls for desktop, with no central server. A Discord/TeamSpeak-style app where every message and call goes directly between the people involved.
 
-**Status:** early. Friends, direct and group text chat (including delivery to people who were offline) and voice calls work. Camera and screen sharing are not built yet.
+**Status:** early. Friends, direct and group text chat (including delivery to people who were offline), voice calls and screen sharing work. Cameras are not built yet.
 
 ## Features
 
@@ -14,6 +14,7 @@ Peer-to-peer chat and voice calls for desktop, with no central server. A Discord
 - **Direct and group chat.** Text messages, signed by their author.
 - **Offline delivery.** You can send while the recipient is offline; it shows as pending and arrives when they are next online with you. In groups, any member who has a message passes it on.
 - **Voice calls.** 1:1 and group, audio sent directly between participants, with mute, deafen, a bitrate slider and microphone/speaker selection. A call that drops after a network blip or switch reconnects by itself. If your chosen headset or speakers are unplugged mid-call, the call moves to the system default and back when they return. A wifi sign next to **Voice Connected** shows your connection: green when good and stable, orange when degraded, red when poor; hover or focus it to see your ping to each person (or to the network when you are alone in the call). Measurements are kept in memory only. Audio stays light: Opus sends almost nothing while you are silent, with its error correction kept on.
+- **Screen sharing.** Share a screen or window in any call. Streams start at 720p and 30 fps; the streaming menu goes as high as your system allows (for example 4K at 120 fps), and your choice is always applied. You can switch to another screen or window mid-stream without stopping; your quality carries over as far as the new source allows. A stream only starts if your measured upload can carry it to everyone and nobody already streaming is short of bandwidth; otherwise a notice explains why. Viewers receive full quality for the stream they show large, a small copy for thumbnails, and nothing while the window is hidden or the screens are hidden.
 - **Resizable layout.** Groups sidebar, friends list split into online and offline, and in a conversation a voice sidebar, the chat and a members sidebar.
 
 ## How it works
@@ -73,9 +74,10 @@ Both people must have the app open when one searches for the other's ID.
 - **Strict networks.** When routers block a direct call connection, the call is carried over the same encrypted link chat uses (shown as "relayed through the chat link"). This adds a little delay, and a call still fails if the two people cannot reach each other for chat either. The fallback needs a network address on your machine (IPv4, or IPv6 when there is no IPv4); without one, the call panel says the fallback is unavailable.
 - **Groups have no admin or kick.** Any member can add their own friends. Members can leave; leaving is permanent and that person cannot be added back.
 - **Deleting an account only erases it from your computer.** Friends who are offline at the time keep you in their list, and everyone keeps the messages you already sent them.
+- **Screen sharing is video only** (no system sound yet), and calls of more than about 6 to 8 full-quality streams need peer forwarding, which is not built yet (see the roadmap).
 - **Text only:** no attachments, edits, deletes, reactions or unread markers.
 - **Desktop only, one device per identity,** and no installer yet.
 
 ## Roadmap
 
-Screen sharing and camera, with quality controls open to everyone, then a host with automatic hand-over if large video calls need one. See [docs/roadmap-video.md](docs/roadmap-video.md).
+Screen sharing and cameras for calls of up to 15 to 20 people with no cap on sharers: per-viewer quality in the peer-to-peer mesh, and well-connected participants forwarding end-to-end encrypted video when needed. See [docs/roadmap-video.md](docs/roadmap-video.md).
