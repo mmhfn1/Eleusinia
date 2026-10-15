@@ -1738,3 +1738,30 @@ hr {
   text-align: right;
   font-size: 11px;
 }
+
+/* Hotkeys in Settings */
+.hotkeys {
+  display: grid;
+  gap: 10px;
+}
+.hotkey {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.hotkey kbd {
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--abyss-2);
+  font: 500 12px/1.4 var(--mono);
+  color: var(--silver);
+  white-space: nowrap;
+}
+.hotkey kbd.unset {
+  color: var(--mist-2);
+  font-family: var(--sans);
+}
+.ptt.on {
+  color: var(--good);
+}

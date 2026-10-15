@@ -1,3 +1,5 @@
+import type { Action, Bindings } from './hotkeys'
+
 export type Key = string // 64 hex chars: ed25519 public key, also the friend code
 export type FriendStatus = 'friend' | 'outgoing' | 'incoming'
 export type Add = { by: Key; sig: string } // proof that `by` added a member to a group
@@ -9,7 +11,8 @@ export type Have = Record<Key, number> // highest seq held, per author
 export type Profile = { handle: string; name: string; about: string; avatar: string }
 // Device labels are kept beside the ids, since an id can change while the name stays (see devices.ts).
 // volumes: how loud each person is played in calls, 0 to 1, kept between sessions.
-export type Settings = { audioKbps: number; mic: string; out: string; micLabel?: string; outLabel?: string; volumes?: Record<Key, number> }
+// hotkeys: only those the user bound; none by default.
+export type Settings = { audioKbps: number; mic: string; out: string; micLabel?: string; outLabel?: string; volumes?: Record<Key, number>; hotkeys?: Bindings }
 
 export type State = {
   me: Key
@@ -39,6 +42,7 @@ export type Event =
   | { type: 'msg'; m: Msg }
   | { type: 'acked'; conv: string; seq: number }
   | { type: 'call'; from: Key; conv: string; data: any }
+  | { type: 'hotkey'; action: Action; down: boolean } // from the main process's system-wide key hook
 
 export const MAX_TEXT = 4000
 export const isKey = (s: unknown): s is Key => typeof s === 'string' && /^[0-9a-f]{64}$/.test(s)

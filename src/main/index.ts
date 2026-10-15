@@ -2,6 +2,8 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BrowserWindow, app, desktopCapturer, ipcMain, safeStorage, screen, session } from 'electron'
 import DHT from 'hyperdht'
+import { UiohookKey, uIOhook } from 'uiohook-napi'
+import { type Bindings, type Hotkey, createMatcher, createRecorder } from '../shared/hotkeys'
 import { createNode } from './node'
 
 // Lets several instances run side by side on one machine, each with its own identity.
@@ -50,6 +52,7 @@ app.whenReady().then(() => {
   ipcMain.handle('call', async (_e, method: string, ...args: unknown[]) => {
     if (!Object.hasOwn(node, method)) throw new Error('Unknown method')
     const result = await (node as any)[method](...args)
+    if (method === 'setSettings') hook()
     if (method === 'deleteAccount') {
       app.relaunch()
       app.exit(0)
@@ -90,7 +93,61 @@ app.whenReady().then(() => {
   if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else win.loadFile(join(__dirname, '../renderer/index.html'))
 
+  // Hotkeys: a system-wide key hook, so they work while the app is in the background or minimised. Unlike
+  // Electron's global shortcuts it sees keys being released (push to talk needs that) and never takes a key away
+  // from other apps. It runs only while a hotkey is bound or being recorded, and key codes are only compared in
+  // memory, never stored or sent anywhere.
+  const names: Record<number, string> = {}
+  for (const [name, code] of Object.entries(UiohookKey)) names[code] ??= name.replace(/^(\w+)Right$/, 'Right $1')
+  const label = (keys: number[]) => {
+    const mod = (k: number) => /^(Right )?(Ctrl|Shift|Alt|Meta)$/.test(names[k] ?? '')
+    return [...keys.filter(mod), ...keys.filter((k) => !mod(k))].map((k) => names[k] ?? `Key ${k}`).join(' + ')
+  }
+  const bindings = () => node.state().settings.hotkeys ?? ({} as Bindings)
+  const matcher = createMatcher(bindings)
+  let recorder: ReturnType<typeof createRecorder> | null = null
+  let recorded: ((h: Hotkey | null) => void) | null = null
+  let hooked = false
+  const fire = (events: { action: string; down: boolean }[]) =>
+    events.forEach((e) => !win.isDestroyed() && win.webContents.send('event', { type: 'hotkey', ...e }))
+  function hook() {
+    const need = !!recorder || Object.values(bindings()).some((h) => h?.keys?.length)
+    if (need === hooked) return
+    hooked = need
+    if (need) uIOhook.start()
+    else {
+      fire(matcher.reset())
+      uIOhook.stop()
+    }
+  }
+  const finish = (h: Hotkey | null) => {
+    const done = recorded
+    recorder = recorded = null
+    done?.(h)
+    hook()
+  }
+  uIOhook.on('keydown', (e) => (recorder ? recorder.down(e.keycode) : fire(matcher.down(e.keycode))))
+  uIOhook.on('keyup', (e) => {
+    if (!recorder) return fire(matcher.up(e.keycode))
+    const keys = recorder.up(e.keycode)
+    if (keys) finish(keys === 'cancel' ? null : { keys, label: label(keys) })
+  })
+  // The next combination pressed anywhere, or null if cancelled (Escape) or nothing comes within 15 s.
+  ipcMain.handle('recordHotkey', () => {
+    finish(null)
+    fire(matcher.reset())
+    return new Promise<Hotkey | null>((resolve) => {
+      recorder = createRecorder()
+      recorded = resolve
+      hook()
+      setTimeout(() => recorded === resolve && finish(null), 15000)
+    })
+  })
+  ipcMain.handle('stopRecording', () => finish(null))
+  hook()
+
   app.on('window-all-closed', async () => {
+    if (hooked) uIOhook.stop()
     await node.destroy()
     app.quit()
   })

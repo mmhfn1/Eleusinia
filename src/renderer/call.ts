@@ -14,6 +14,8 @@ declare global {
       on(fn: (e: Event) => void): () => void
       screens(): Promise<ScreenSource[]>
       chooseScreen(id: string): Promise<void>
+      recordHotkey(): Promise<import('../shared/hotkeys').Hotkey | null>
+      stopRecording(): Promise<void>
     }
   }
 }
@@ -368,7 +370,7 @@ async function useMic(id: string) {
   const fresh = await mic(id).catch(() => mic((id = '')))
   if (!stream) return fresh.getTracks().forEach((t) => t.stop()) // the call ended meanwhile
   const track = fresh.getAudioTracks()[0]
-  track.enabled = !muted && !deafened
+  track.enabled = sending()
   track.onended = () => followDevices(true) // unplugged, or the system took it away
   for (const p of peers.values()) p.pc.getSenders().forEach((s) => s.track?.kind === 'audio' && s.replaceTrack(track))
   stream.getTracks().forEach((t) => ((t.onended = null), t.stop()))
@@ -452,7 +454,23 @@ export function leave() {
   notify()
 }
 
-const applyMic = () => stream?.getAudioTracks().forEach((t) => (t.enabled = !muted && !deafened))
+// With a push-to-talk key bound, the microphone only sends while it is held.
+export let talking = false
+export const pushToTalk = () => state.settings.hotkeys?.ptt
+const sending = () => !muted && !deafened && (!pushToTalk() || talking)
+const applyMic = () => stream?.getAudioTracks().forEach((t) => (t.enabled = sending()))
+
+// A hotkey pressed anywhere, even with the app in the background. They only act during a call.
+export function onHotkey(action: string, down: boolean) {
+  if (action === 'ptt') {
+    talking = down
+    applyMic()
+    return notify()
+  }
+  if (!down || !conv) return
+  if (action === 'mute') toggleMute()
+  if (action === 'deafen') toggleDeafen()
+}
 
 const sendVoice = (k: Key | null) => conv && send(conv, k, { k: 'voice', muted, deafened })
 
@@ -555,6 +573,8 @@ export function onState(next: State) {
 
   const [a, b] = [prev.settings, next.settings]
   if (a.audioKbps !== b.audioKbps) for (const p of peers.values()) bitrate(p.pc)
+  if (!b.hotkeys?.ptt) talking = false
+  applyMic()
   for (const [k, p] of peers) p.audio.volume = volumeOf(k)
   if (a.mic !== b.mic || a.out !== b.out || a.micLabel !== b.micLabel || a.outLabel !== b.outLabel) followDevices()
   notify()

@@ -11,8 +11,8 @@ See `README.md` for features, known limits and the roadmap.
 | `npm install` | Install; the postinstall also downloads the Electron binary (~100 MB). If `npm run dev` says `Electron uninstall`, run `npx install-electron` |
 | `npm run dev` | Run with hot reload |
 | `npm run typecheck` | `tsc --noEmit` over `src` and `test` |
-| `npm test` | Vitest: `test/node.test.ts` runs the whole node layer against a local test DHT, no Electron; `test/callstate.test.ts` covers call reconnect decisions with a fake connection; `video.test.ts`, `quality.test.ts`, `devices.test.ts`, `relay.test.ts` cover the other pure logic |
-| `npm run smoke` | Builds, then drives three real app windows over the **public** DHT: setup, friend search, chat, a voice call, screen sharing, offline delivery (~50 s, opens windows; screen capture uses Chromium's fake device) |
+| `npm test` | Vitest: `test/node.test.ts` runs the whole node layer against a local test DHT, no Electron; `test/callstate.test.ts` covers call reconnect decisions with a fake connection; `video.test.ts`, `quality.test.ts`, `devices.test.ts`, `relay.test.ts`, `hotkeys.test.ts` cover the other pure logic |
+| `npm run smoke` | Builds, then drives three real app windows over the **public** DHT: setup, friend search, chat, a voice call, hotkeys, screen sharing, offline delivery (~50 s, opens windows; screen capture uses Chromium's fake device; hotkeys are tested by injecting F23/F24 key presses system-wide, keys no ordinary keyboard has) |
 | `ELEUSINIA_NO_DIRECT=1 npm run smoke` | Same, but direct call routes are withheld so the call must go through the relay |
 
 Two identities on one machine: give each its own data folder with `ELEUSINIA_DATA`
@@ -35,7 +35,8 @@ setup, also run both smoke modes.
 | `src/renderer/App.tsx`, `ui.tsx` | React UI |
 | `src/renderer/call.ts` | Calls: full-mesh `RTCPeerConnection` per participant, offer/answer/ICE over `signal`, mute/deafen, device and bitrate changes, connection sampling, and screen sharing (a video slot on every connection; `share`/`want` signals) |
 | `src/shared/video.ts` | Screen-share decisions: quality choices up to the source's limits, bitrate, per-viewer encodings, the soft cap (`canStream`). Plan for cameras and forwarding: `docs/roadmap-video.md` |
-| `src/preload/index.ts` | Exposes `window.api.call`, `window.api.on`, and `screens`/`chooseScreen` for the screen picker (handled in `src/main/index.ts`) |
+| `src/shared/hotkeys.ts` | Global hotkeys from raw key codes: when mute/deafen fire and push to talk starts or stops, and recording a combination. `src/main/index.ts` feeds it from `uiohook-napi` (a native system-wide key hook with prebuilt binaries; it is needed because Electron's own global shortcuts cannot see key releases, which push to talk needs) |
+| `src/preload/index.ts` | Exposes `window.api.call`, `window.api.on`, `screens`/`chooseScreen` for the screen picker and `recordHotkey`/`stopRecording` (both handled in `src/main/index.ts`) |
 
 Data lives in the app's data folder as `state.json` plus per-conversation `.jsonl` message logs.
 

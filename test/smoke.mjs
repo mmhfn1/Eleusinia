@@ -3,6 +3,7 @@
 import { spawn } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
+import { createRequire } from 'node:module'
 import { join } from 'node:path'
 
 const app = process.argv[2]
@@ -47,7 +48,16 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
     title = await ev(`document.readyState === 'complete' ? document.title : ''`).catch(() => '')
     if (!title) await sleep(200)
   }
-  return { child, ev, dir, title }
+  // Minimised or normal, through the operating system (Electron does not offer this over DevTools). Windows only;
+  // elsewhere the window simply stays in the background.
+  const windowState = async (state) => {
+    if (process.platform !== 'win32') return false
+    const show = state === 'minimized' ? 6 : 9 // SW_MINIMIZE, SW_RESTORE
+    const ps = `Add-Type -Name W -Namespace U -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h, int c);'; [U.W]::ShowWindow((Get-Process -Id ${child.pid}).MainWindowHandle, ${show}) | Out-Null`
+    await new Promise((r) => spawn('powershell', ['-NoProfile', '-Command', ps], { stdio: 'ignore' }).on('exit', r))
+    return true
+  }
+  return { child, ev, dir, title, windowState }
 }
 
 async function until(label, fn, secs = 90) {
@@ -233,6 +243,52 @@ try {
     b.ev(`api.call('state').then((s) => s.settings.volumes?.['${annKey}'] === 0.4 && document.querySelector('.caller .person-volume-pct').textContent === '40%')`), 10)
   await until('the voice panel no longer holds the audio devices; they are in Settings', () =>
     b.ev(`!document.querySelector('aside.voice').textContent.includes('Audio devices')`), 5)
+  // Hotkeys, pressed as real system-wide key events while A's window is minimised. F23 and F24 exist on no ordinary
+  // keyboard, so injecting them cannot type into anything else on this machine.
+  console.log('--- Hotkeys (none bound by default)')
+  const { uIOhook, UiohookKey } = createRequire(import.meta.url)('uiohook-napi')
+  const key = async (code, down) => (uIOhook.keyToggle(code, down ? 'down' : 'up'), sleep(150))
+  const you = () => a.ev(`[...document.querySelectorAll('.caller')][0].textContent`)
+  if (await a.ev(`api.call('state').then((s) => !!Object.keys(s.settings.hotkeys ?? {}).length)`)) throw new Error('a hotkey was bound by default')
+  console.log('ok   no hotkeys are bound by default')
+  // Set them the way a person would: Settings, Set, press the keys.
+  await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
+  const row = (name) => `[...document.querySelectorAll('.hotkey')].find((x) => x.querySelector('.row-title').textContent === '${name}')`
+  const setKey = async (name, code) => {
+    await a.ev(`${row(name)}.querySelector('button').click()`)
+    await until(`${name}: waiting for keys`, () => a.ev(`${row(name)}.querySelector('kbd').textContent.startsWith('Press keys')`), 5)
+    await key(code, true)
+    await key(code, false)
+  }
+  await setKey('Mute', UiohookKey.F23)
+  await until('Mute recorded as F23', () => a.ev(`${row('Mute')}.querySelector('kbd').textContent === 'F23'`), 5)
+  await setKey('Push to talk', UiohookKey.F24)
+  await until('Push to talk recorded as F24', () => a.ev(`${row('Push to talk')}.querySelector('kbd').textContent === 'F24'`), 5)
+  await setKey('Deafen', UiohookKey.F23)
+  await until('the same key for Deafen is refused, naming Mute', () =>
+    a.ev(`document.querySelector('.hotkeys [role=alert]')?.textContent.includes('F23 is already the hotkey for Mute') && ${row('Deafen')}.querySelector('kbd').textContent === 'Not set'`), 5)
+  await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
+  await until('A shows push to talk with its key', async () => (await you()).includes('Push to talk: hold F24'), 5)
+  if (await a.windowState('minimized')) await until('A is minimised', () => a.ev('document.hidden'), 10)
+  await key(UiohookKey.F24, true)
+  await until('holding F24 with A minimised: Talking', async () => (await you()).includes('Talking'), 5)
+  await key(UiohookKey.F24, false)
+  await until('releasing it: back to push to talk', async () => (await you()).includes('Push to talk: hold F24'), 5)
+  await key(UiohookKey.F23, true)
+  await key(UiohookKey.F23, false)
+  await until('F23 mutes A while minimised, and B sees it', async () =>
+    (await a.ev(`!!document.querySelector('.callers .voice-mark[title=Muted]')`)) && b.ev(`!!document.querySelector('.caller .row-title .voice-mark[title=Muted]')`), 5)
+  await key(UiohookKey.F23, true)
+  await key(UiohookKey.F23, false)
+  await until('F23 again unmutes', () => a.ev(`!document.querySelector('.callers .voice-mark')`), 5)
+  await a.windowState('normal')
+  await a.ev(`api.call('setSettings', { hotkeys: {} })`)
+  await key(UiohookKey.F23, true)
+  await key(UiohookKey.F23, false)
+  await sleep(500)
+  if (await a.ev(`!!document.querySelector('.callers .voice-mark')`)) throw new Error('a cleared hotkey still acted')
+  console.log('ok   once cleared, the key does nothing')
+
   await a.ev(press('Mute'))
   await until('A shows muted', () => a.ev(`!!document.querySelector('.callers .voice-mark[title=Muted]')`))
   await until('B sees a muted mark to the right of Ann', () => b.ev(`(() => { const r = [...document.querySelectorAll('.caller')].find((x) => x.textContent.includes('Ann')); return !!r?.querySelector('.row-title .voice-mark[title=Muted]') })()`), 10)

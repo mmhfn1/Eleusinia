@@ -17,7 +17,8 @@
   "dependencies": {
     "@fontsource/cormorant-garamond": "^5.3.0",
     "hypercore-crypto": "^3.7.0",
-    "hyperdht": "^6.34.1"
+    "hyperdht": "^6.34.1",
+    "uiohook-napi": "^1.5.5"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

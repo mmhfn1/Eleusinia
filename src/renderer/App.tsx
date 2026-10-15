@@ -1,6 +1,7 @@
 import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react'
 import { type Offset, clampOffset, cropRect } from '../shared/crop'
 import { usable } from '../shared/devices'
+import { type Action, type Hotkey, sameKeys } from '../shared/hotkeys'
 import { type Group, type Key, type Msg, type Profile, type State, MAX_TEXT, dmId, keyTail, stack } from '../shared/protocol'
 import { type Quality, type Verdict, choices, defaultQuality, fitQuality, heightLabel, streamKbps } from '../shared/video'
 import * as call from './call'
@@ -34,6 +35,7 @@ export default function App() {
     return api.on((e) => {
       if (e.type === 'state') got(e.state)
       if (e.type === 'call') call.onSignal(e.from, e.conv, e.data)
+      if (e.type === 'hotkey') call.onHotkey(e.action, e.down)
     })
   }, [])
 
@@ -725,6 +727,66 @@ function AudioSettings({ st }: { st: State }) {
   )
 }
 
+const HOTKEYS: { action: Action; name: string; hint?: string }[] = [
+  { action: 'mute', name: 'Mute' },
+  { action: 'deafen', name: 'Deafen' },
+  { action: 'ptt', name: 'Push to talk', hint: 'While set, your microphone only sends while you hold it.' },
+]
+
+// Shortcuts for mute, deafen and push to talk, none bound until the user sets one. They work even while
+// Eleusinia is in the background or minimised.
+function Hotkeys({ st }: { st: State }) {
+  const [recording, setRecording] = useState<Action | null>(null)
+  const [err, setErr] = useState('')
+  const bound = st.settings.hotkeys ?? {}
+  useEffect(() => () => void window.api.stopRecording(), []) // closing Settings mid-recording
+  const save = (action: Action, h: Hotkey | undefined) => {
+    const next = { ...bound }
+    if (h) next[action] = h
+    else delete next[action]
+    return api.call('setSettings', { hotkeys: next })
+  }
+  async function record(action: Action) {
+    setErr('')
+    setRecording(action)
+    const h = await window.api.recordHotkey()
+    setRecording(null)
+    if (!h) return
+    const taken = HOTKEYS.find((x) => x.action !== action && bound[x.action] && sameKeys(bound[x.action]!.keys, h.keys))
+    if (taken) return setErr(`${h.label} is already the hotkey for ${taken.name}.`)
+    await save(action, h)
+  }
+  return (
+    <div className="hotkeys">
+      <p className="hint">They work even while Eleusinia is in the background or minimised. None are set unless you set them.</p>
+      {HOTKEYS.map(({ action, name, hint }) => (
+        <div className="hotkey" key={action}>
+          <span className="row-text">
+            <span className="row-title">{name}</span>
+            {hint && <span className="hint">{hint}</span>}
+          </span>
+          <kbd className={bound[action] ? '' : 'unset'} aria-live="polite">
+            {recording === action ? 'Press keys… (Esc to cancel)' : (bound[action]?.label ?? 'Not set')}
+          </kbd>
+          <button className="button" disabled={!!recording} onClick={() => record(action)}>
+            {bound[action] ? 'Change' : 'Set'}
+          </button>
+          {bound[action] && (
+            <button className="button subtle" disabled={!!recording} onClick={() => save(action, undefined)} aria-label={`Clear the ${name} hotkey`}>
+              Clear
+            </button>
+          )}
+        </div>
+      ))}
+      {err && (
+        <p role="alert" className="form-error">
+          {err}
+        </p>
+      )}
+    </div>
+  )
+}
+
 function SettingsDialog({ st, close, edit, remove }: { st: State; close: () => void; edit: () => void; remove: () => void }) {
   return (
     <Dialog label="Settings" close={close} className="settings-dialog">
@@ -732,6 +794,10 @@ function SettingsDialog({ st, close, edit, remove }: { st: State; close: () => v
       <section className="settings-section">
         <h2>Audio devices and quality</h2>
         <AudioSettings st={st} />
+      </section>
+      <section className="settings-section">
+        <h2>Hotkeys</h2>
+        <Hotkeys st={st} />
       </section>
       <section className="settings-section">
         <h2>Profile</h2>
@@ -1142,6 +1208,11 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
                     <span className="row-title">
                       You <VoiceMark muted={call.muted} deafened={call.deafened} />
                     </span>
+                    {call.pushToTalk() && !call.muted && !call.deafened && (
+                      <span className={`row-sub ptt ${call.talking ? 'on' : ''}`}>
+                        {call.talking ? 'Talking' : `Push to talk: hold ${call.pushToTalk()!.label}`}
+                      </span>
+                    )}
                   </span>
                 </div>
                 {[...call.peers].map(([k, p]) => (
