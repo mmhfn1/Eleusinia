@@ -16,13 +16,17 @@ export function createNet(keyPair: { publicKey: Buffer; secretKey: Buffer }, on:
     const key: Key = sock.remotePublicKey.toString('hex')
     const old = links.get(key)
     if (old) {
-      // Both sides dialed at once: both keep the stream dialed by the smaller key.
-      if (old.initiator <= initiator) return sock.destroy()
+      // Both sides dialed at once: both keep the stream dialed by the smaller key. The same side dialing again
+      // means it lost the old stream, which is only half alive here, so the new one replaces it.
+      if (old.initiator < initiator || (old.initiator === initiator && initiator === me)) return sock.destroy()
       links.delete(key)
       old.sock.destroy()
     }
     links.set(key, { sock, initiator })
     sock.setKeepAlive(5000)
+    // Both sides send a keepalive every 5 s, so a stream that hears nothing for 20 s is dead (a dropped
+    // connection that was never closed); closing it lets the peer show offline and be redialed.
+    sock.setTimeout(20000)
     let buf = ''
     sock.on('data', (d: Buffer) => {
       buf += d.toString()

@@ -118,7 +118,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     emit({ type: 'msg', m })
   }
 
-  const hi = (key: Key) => net.send(key, { t: 'hello', ...s.profile })
+  const hi = (key: Key) => net.send(key, { t: 'hello', ...s.profile, friend: s.friends[key] === 'friend' || s.friends[key] === 'outgoing' })
   const sendHave = (key: Key, conv: string, re?: boolean) =>
     net.send(key, { t: 'have', conv, have: log(conv).have, re })
 
@@ -164,13 +164,21 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     if (w.t === 'hello') {
       if (typeof w.name !== 'string') return
       const st = s.friends[key]
-      if (st === 'outgoing') {
-        s.friends[key] = 'friend'
+      // Older versions do not say; they greeted only friends and people they asked, plus fellow group members.
+      const said = typeof w.friend === 'boolean'
+      const asks = said ? w.friend : !inGroupWith(key)
+      if (asks && st === 'outgoing') {
+        s.friends[key] = 'friend' // they accepted, or asked us at the same time
         greet(key)
-      } else if (!st && !known(key)) {
+      } else if (asks && !st) {
         if (Object.values(s.friends).filter((f) => f === 'incoming').length >= 50) return
         s.friends[key] = 'incoming'
+      } else if (said && !asks && st === 'friend') {
+        s.friends[key] = 'outgoing' // they removed us: still wanted on our side, but no longer mutual
+      } else if (said && !asks && st === 'incoming') {
+        delete s.friends[key] // they cancelled their request
       }
+      if (!known(key) && !s.friends[key]) return // a stranger who is not asking anything
       s.profiles[key] = cleanProfile(w)
       return changed()
     }
@@ -332,7 +340,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (!known(key)) {
         delete s.profiles[key]
         net.drop(key)
-      }
+      } else hi(key) // still linked through a group: tell them, so they stop treating us as a friend
       changed()
     },
     createGroup(name: string, others: Key[]) {

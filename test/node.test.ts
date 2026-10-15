@@ -274,6 +274,57 @@ test('a profile card nobody asked for is ignored, while a stranger may ask for o
   await got.raw.destroy()
 }, 120000)
 
+test('a friend request between people already in a group together arrives as a request, not as a friendship', async () => {
+  // Giri and Enane share a group (made by rkZ) but are not friends: their apps are already linked and greet each other.
+  const rkz = start()
+  const giri = start()
+  const enane = start()
+  await befriend(rkz, giri)
+  await befriend(rkz, enane)
+  const gid = rkz.node.createGroup('Meh', [giri.key, enane.key])
+  await until(() => !!giri.node.state().groups[gid] && !!enane.node.state().groups[gid])
+  await until(() => giri.node.state().online.includes(enane.key) && enane.node.state().online.includes(giri.key))
+
+  giri.node.addFriend(enane.key)
+  await until(() => enane.node.state().friends[giri.key] === 'incoming') // Enane sees the request
+  await new Promise((r) => setTimeout(r, 1000))
+  expect(giri.node.state().friends[enane.key]).toBe('outgoing') // a group hello is not an acceptance
+  expect(() => giri.node.send(dmId(giri.key, enane.key), 'too early')).toThrow()
+
+  enane.node.addFriend(giri.key) // accept
+  await until(() => giri.node.state().friends[enane.key] === 'friend')
+  const dm = dmId(giri.key, enane.key)
+  giri.node.send(dm, 'hello Enane')
+  enane.node.send(dm, 'hello Giri')
+  await until(() => texts(enane, dm).includes('hello Enane') && texts(giri, dm).includes('hello Giri'))
+  await until(() => giri.node.history(dm).acked === 1 && enane.node.history(dm).acked === 1) // delivered, not pending
+}, 120000)
+
+test('when both send a request at once they become friends, and both can message straight away', async () => {
+  const a = start()
+  const b = start()
+  a.node.addFriend(b.key)
+  b.node.addFriend(a.key)
+  await until(() => a.node.state().friends[b.key] === 'friend' && b.node.state().friends[a.key] === 'friend')
+  const dm = dmId(a.key, b.key)
+  a.node.send(dm, 'hi')
+  await until(() => texts(b, dm).includes('hi') && a.node.history(dm).acked === 1)
+}, 120000)
+
+test('removing a friend who shares a group puts them back to a request, so neither side sends into a void', async () => {
+  const c = start()
+  const a = start()
+  const b = start()
+  await befriend(c, a)
+  await befriend(c, b)
+  await befriend(a, b)
+  const gid = c.node.createGroup('G', [a.key, b.key])
+  await until(() => !!a.node.state().groups[gid] && !!b.node.state().groups[gid])
+  b.node.removeFriend(a.key)
+  await until(() => a.node.state().friends[b.key] === 'outgoing')
+  expect(b.node.state().friends[a.key]).toBeUndefined()
+}, 120000)
+
 test('one person in several groups: each group keeps its own members and messages', async () => {
   const a = start()
   const b = start()

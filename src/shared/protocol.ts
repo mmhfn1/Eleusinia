@@ -25,7 +25,9 @@ export type State = {
 }
 
 export type Wire =
-  | ({ t: 'hello' } & Profile)
+  // friend: whether the sender counts us as a friend or has asked to be one. Group members who are not friends
+  // greet each other too, so a hello alone is not a friend request. Older versions leave it out.
+  | ({ t: 'hello'; friend?: boolean } & Profile)
   | { t: 'who' } // a stranger asking for our profile, to show it in friend search
   | ({ t: 'card' } & Profile)
   | { t: 'group'; g: Group }
