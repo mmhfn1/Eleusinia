@@ -101,6 +101,12 @@ try {
   console.log('--- Profile setup')
   console.log('     window title:', a.title)
   if (a.title !== 'Eleusinia') throw new Error('wrong title')
+  // Titles unique to this run, so the share step can pick a window of its own and never another app (or another
+  // Eleusinia the person has open). The window title is what the share picker lists as the source name.
+  const run = Date.now().toString(36)
+  const ownTitles = [`Eleusinia smoke ${run} B`, `Eleusinia smoke ${run} C`]
+  await b.ev(`document.title = ${JSON.stringify(ownTitles[0])}`)
+  await c.ev(`document.title = ${JSON.stringify(ownTitles[1])}`)
   for (const [p, n] of [[a, 'Ann'], [b, 'Bob'], [c, 'Cy']]) {
     await until(`${n} sees setup first, with a generated picture`, () => p.ev(`${body('Create your account')} && !document.querySelector('aside') && !!document.querySelector('.portrait-pick .avatar svg rect')`))
     // Cy keeps the generated picture; Ann and Bob upload one.
@@ -239,17 +245,23 @@ try {
     await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Apply').click()`)
     await until('B now receives 1080p, as the streamer chose', () => b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight === 1080`), 30)
   }
-  // Switching to an application window: a window is often smaller than the chosen quality, so this checks that its
-  // frames arrive rather than their height.
-  if (apps.length) {
+  // Switching to an application window, always one of this test's own: a window is often smaller than the chosen
+  // quality, so this checks that its frames arrive rather than their height.
+  {
     await a.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent.includes('Switch screen')).click()`)
     await until('the switch dialog opens on Screens, marking the one being shared', () =>
       a.ev(`document.querySelector('dialog[open] #share-tab-screen')?.getAttribute('aria-selected') === 'true' && [...document.querySelectorAll('dialog[open] .source')].some((x) => x.textContent.startsWith('Now sharing'))`), 10)
     await a.ev(`(() => { const t = document.querySelector('dialog[open] #share-tab-screen'); t.focus(); t.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })) })()`)
     await until('the arrow key moves to Applications and focuses it; the current screen no longer counts as chosen; windows listed', () =>
       a.ev(`document.activeElement?.id === 'share-tab-window' && document.activeElement.getAttribute('aria-selected') === 'true' && !document.querySelector('dialog[open] .source.chosen') && document.querySelector('dialog[open] .button.primary').disabled && !!document.querySelector('dialog[open] [role=tabpanel] .source')`), 10)
-    await a.ev(`document.querySelector('dialog[open] .source').click()`)
-    const target = await a.ev(`document.querySelector('dialog[open] .source.chosen span').textContent`)
+    const own = JSON.stringify(ownTitles)
+    const target = await until("the Applications tab offers one of the test's own windows", () =>
+      a.ev(`(() => { const s = [...document.querySelectorAll('dialog[open] [role=tabpanel] .source')].find((x) => ${own}.includes(x.textContent.trim())); return s ? (s.click(), s.textContent.trim()) : false })()`), 10)
+      .catch(async () => {
+        const listed = await a.ev(`[...document.querySelectorAll('dialog[open] [role=tabpanel] .source')].map((x) => x.textContent.trim())`)
+        throw new Error(`none of the test's own windows (${ownTitles.join(', ')}) is offered under Applications, so nothing else is shared instead; listed: ${JSON.stringify(listed)}`)
+      })
+    if (!(await a.ev(`document.querySelector('dialog[open] .source.chosen span')?.textContent.trim() === ${JSON.stringify(target)}`))) throw new Error('the own window was not selected')
     await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Switch').click()`)
     await until(`A switched to the window "${target}" without stopping, and B still sees it`, async () =>
       (await a.ev(`document.querySelector('.stage .sharing-badge')?.textContent.includes(${JSON.stringify(target)})`)) &&
