@@ -2,11 +2,12 @@ import { createCandidates, createWatchdog, lightOpus, offers, relayCandidate } f
 import { fellBack, nextDevice, usable } from '../shared/devices'
 import type { Event, Key, State } from '../shared/protocol'
 import { SAMPLE_EVERY, type Sample, grade, remember, worst } from '../shared/quality'
+import type { SourceKind } from '../shared/sources'
 import { hear, rms } from '../shared/speaking'
 import { type Level, type Quality, RAMP_MS, STARVED_AFTER, type Verdict, canStream, encodingFor, streamKbps, widthFor } from '../shared/video'
 
 // A screen or window offered by the system for sharing, with what it can deliver.
-export type ScreenSource = { id: string; name: string; thumb: string; width: number; height: number; fps: number }
+export type ScreenSource = { id: string; kind: SourceKind; name: string; thumb: string; width: number; height: number; fps: number }
 
 declare global {
   interface Window {

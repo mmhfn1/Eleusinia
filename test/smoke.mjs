@@ -34,13 +34,14 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
     if (m.method === 'Runtime.exceptionThrown') console.error(port, m.params.exceptionDetails.exception?.description)
     pending.get(m.id)?.(m)
   }
-  const ev = (expression) =>
+  // gesture: run as if the user clicked, which full screen requires.
+  const ev = (expression, gesture = false) =>
     new Promise((resolve, reject) => {
       pending.set(++id, (m) => {
         const ex = m.result?.exceptionDetails
         ex ? reject(new Error(ex.exception?.description ?? ex.text)) : resolve(m.result.result.value)
       })
-      ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true } }))
+      ws.send(JSON.stringify({ id, method: 'Runtime.evaluate', params: { expression, awaitPromise: true, returnByValue: true, userGesture: gesture } }))
     })
   // DevTools lists the page before it has loaded, when its title is still empty; read it once loading is done.
   let title = ''
@@ -201,7 +202,16 @@ try {
   await a.ev(press('Share screen'))
   const src = await until('A sees the screens and windows it can share', () =>
     a.ev(`(() => { const b = [...document.querySelectorAll('dialog[open] .source')]; return b.length > 0 && b.map((x) => x.textContent) })()`), 20)
-  console.log('     ', src.length, 'sources, first:', src[0])
+  console.log('     ', src.length, 'screens, first:', src[0])
+  const tabs = await a.ev(`[...document.querySelectorAll('dialog[open] [role=tab]')].map((t) => t.textContent + ':' + t.getAttribute('aria-selected'))`)
+  if (JSON.stringify(tabs) !== '["Screens:true","Applications:false"]') throw new Error('picker tabs wrong: ' + JSON.stringify(tabs))
+  await a.ev(`document.querySelector('dialog[open] #share-tab-window').click()`)
+  const apps = await until('the Applications tab lists windows, or says there are none', () =>
+    a.ev(`(() => { const d = document.querySelector('dialog[open] [role=tabpanel]'); const l = [...d.querySelectorAll('.source')].map((x) => x.textContent); return l.length ? l : d.textContent.includes('No application windows open') && [] })()`), 10)
+  const hiddenNames = ['nvidia geforce overlay', 'nvidia overlay', 'xbox game bar', 'steam overlay', 'program manager', 'windows input experience', 'microsoft text input application']
+  if ([...src, ...apps].some((n) => hiddenNames.includes(n.trim().toLowerCase()))) throw new Error('an overlay or system window is offered')
+  console.log('ok   two tabs, Screens first;', apps.length, 'application windows; no overlays or system windows')
+  await a.ev(`document.querySelector('dialog[open] #share-tab-screen').click()`)
   await a.ev(`document.querySelector('dialog[open] .source').click()`)
   const menu = await until('the streaming menu defaults to 720p at 30 fps, and offers what the system allows', () =>
     a.ev(`(() => { const s = [...document.querySelectorAll('dialog[open] .quality select')]; return s.length === 3 && [s[0].value, s[1].value, [...s[0].options].map((o) => o.textContent), [...s[1].options].map((o) => o.value)] })()`), 10)
@@ -209,6 +219,18 @@ try {
   if (menu[0] !== '720' || menu[1] !== '30') throw new Error('stream quality did not default to 720p at 30 fps')
   await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Share').click()`)
   await until('B shows A screen large, at 720p', () => b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight === 720`), 30)
+  // Full screen: the button enters it, and follows the document when it ends another way (Esc, F11).
+  const fullBtn = `document.querySelector('.stage .screen.big .screen-full')`
+  await b.ev(`${fullBtn}.click()`, true)
+  await until('B enters full screen from the button, which now offers to exit', () =>
+    b.ev(`!!document.fullscreenElement && ${fullBtn}.getAttribute('aria-label') === 'Exit full screen' && ${fullBtn}.title === 'Exit full screen'`), 5)
+  await b.ev(`document.exitFullscreen()`)
+  await until('B leaves full screen another way, and the button offers full screen again', () =>
+    b.ev(`!document.fullscreenElement && ${fullBtn}.getAttribute('aria-label') === 'Full screen'`), 5)
+  await b.ev(`${fullBtn}.click()`, true)
+  await until('B enters again', () => b.ev(`!!document.fullscreenElement && ${fullBtn}.getAttribute('aria-label') === 'Exit full screen'`), 5)
+  await b.ev(`${fullBtn}.click()`)
+  await until('the same button exits', () => b.ev(`!document.fullscreenElement && ${fullBtn}.getAttribute('aria-label') === 'Full screen'`), 5)
   await until('A sees that it is sharing, with a stop button', () => a.ev(`document.querySelector('.stage .sharing-badge')?.textContent.includes('You are sharing') && !!document.querySelector('.stage .button.danger')`))
   if (menu[2].some((t) => t.startsWith('1080p'))) {
     await a.ev(press('Stream settings'))
@@ -217,16 +239,21 @@ try {
     await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Apply').click()`)
     await until('B now receives 1080p, as the streamer chose', () => b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight === 1080`), 30)
   }
-  if (src.length > 1) {
-    const height = await b.ev(`document.querySelector('.stage .screen.big video').videoHeight`)
+  // Switching to an application window: a window is often smaller than the chosen quality, so this checks that its
+  // frames arrive rather than their height.
+  if (apps.length) {
     await a.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent.includes('Switch screen')).click()`)
-    await until('the switch dialog lists the sources, marking the one being shared', () =>
-      a.ev(`(() => { const l = [...document.querySelectorAll('dialog[open] .source')]; return l.length > 1 && l.some((x) => x.textContent.startsWith('Now sharing')) })()`), 10)
-    await a.ev(`document.querySelectorAll('dialog[open] .source')[1].click()`)
+    await until('the switch dialog opens on Screens, marking the one being shared', () =>
+      a.ev(`document.querySelector('dialog[open] #share-tab-screen')?.getAttribute('aria-selected') === 'true' && [...document.querySelectorAll('dialog[open] .source')].some((x) => x.textContent.startsWith('Now sharing'))`), 10)
+    await a.ev(`(() => { const t = document.querySelector('dialog[open] #share-tab-screen'); t.focus(); t.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })) })()`)
+    await until('the arrow key moves to Applications and focuses it; the current screen no longer counts as chosen; windows listed', () =>
+      a.ev(`document.activeElement?.id === 'share-tab-window' && document.activeElement.getAttribute('aria-selected') === 'true' && !document.querySelector('dialog[open] .source.chosen') && document.querySelector('dialog[open] .button.primary').disabled && !!document.querySelector('dialog[open] [role=tabpanel] .source')`), 10)
+    await a.ev(`document.querySelector('dialog[open] .source').click()`)
+    const target = await a.ev(`document.querySelector('dialog[open] .source.chosen span').textContent`)
     await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Switch').click()`)
-    await until(`A switched to "${src[1]}" without stopping, keeping its quality, and B still sees it`, async () =>
-      (await a.ev(`document.querySelector('.stage .sharing-badge')?.textContent.includes(${JSON.stringify(src[1])})`)) &&
-      (await b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight === ${height} && document.querySelector('.stage .screen.big figcaption').textContent.includes(${JSON.stringify(src[1])})`)), 30)
+    await until(`A switched to the window "${target}" without stopping, and B still sees it`, async () =>
+      (await a.ev(`document.querySelector('.stage .sharing-badge')?.textContent.includes(${JSON.stringify(target)})`)) &&
+      (await b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight > 0 && document.querySelector('.stage .screen.big figcaption').textContent.includes(${JSON.stringify(target)})`)), 30)
   }
   await b.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Hide screens').click()`)
   await until('B hides the screens (so A stops sending them)', () => b.ev(`!document.querySelector('.stage .screen') && document.querySelector('.stage').classList.contains('collapsed')`), 5)

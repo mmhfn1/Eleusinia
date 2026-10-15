@@ -3,6 +3,7 @@ import { type Offset, clampOffset, cropRect } from '../shared/crop'
 import { usable } from '../shared/devices'
 import { type Action, type Hotkey, sameKeys } from '../shared/hotkeys'
 import { type Group, type Key, type Msg, type Profile, type State, MAX_TEXT, dmId, keyTail, stack } from '../shared/protocol'
+import type { SourceKind } from '../shared/sources'
 import { type Quality, type Verdict, choices, defaultQuality, fitQuality, heightLabel, streamKbps } from '../shared/video'
 import * as call from './call'
 import { Avatar, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Info, Splitter, Wordmark, useWidth } from './ui'
@@ -943,10 +944,18 @@ const mbps = (kbps: number) => (kbps / 1000).toFixed(kbps < 10000 ? 1 : 0)
 // Picking a screen or window and its quality, or, while sharing, switching to another one or changing the quality.
 // The streamer's choice is final: anything up to what the system can deliver. Starting a stream checks it fits the
 // call (see canStream); switching or changing quality does not add a stream, so it is not checked.
+const SOURCE_TABS: { kind: SourceKind; label: string; empty: string }[] = [
+  { kind: 'screen', label: 'Screens', empty: 'No screens are available to share.' },
+  { kind: 'window', label: 'Applications', empty: 'No application windows open' },
+]
+
 function ShareDialog({ close }: { close: () => void }) {
   const current = call.sharing()
   const [sources, setSources] = useState<call.ScreenSource[] | null>(current ? [current.src] : null)
-  const [src, setSrc] = useState<call.ScreenSource | null>(current?.src ?? null)
+  // Opens on Screens, or on the tab of what is being shared when changing it.
+  const [tab, setTab] = useState<SourceKind>(current?.src.kind ?? 'screen')
+  const [picked, setPicked] = useState<call.ScreenSource | null>(current?.src ?? null)
+  const src = picked?.kind === tab ? picked : null // a selection counts only while its tab is showing
   const [q, setQ] = useState<Quality | null>(current?.q ?? null)
   const [verdict, setVerdict] = useState<Verdict | null>(null)
   const [err, setErr] = useState('')
@@ -958,7 +967,7 @@ function ShareDialog({ close }: { close: () => void }) {
   const kbps = src && q ? streamKbps(src, q) : 0
   // A new share starts at the default; switching keeps the quality already chosen, as far as the new source allows.
   const pick = (s: call.ScreenSource) => {
-    setSrc(s)
+    setPicked(s)
     setQ(q && current ? fitQuality(s, q) : defaultQuality(s))
     setVerdict(null)
   }
@@ -988,14 +997,42 @@ function ShareDialog({ close }: { close: () => void }) {
   }
 
   const { heights, rates } = src ? choices(src) : { heights: [], rates: [] }
+  const listed = sources?.filter((s) => s.kind === tab)
+  // Arrow keys move between tabs (and select them), as tabs do everywhere else.
+  const tabKey = (e: KeyboardEvent<HTMLDivElement>) => {
+    const i = SOURCE_TABS.findIndex((t) => t.kind === tab)
+    const to = ({ ArrowRight: i + 1, ArrowLeft: i - 1, Home: 0, End: SOURCE_TABS.length - 1 } as Record<string, number>)[e.key]
+    if (to === undefined) return
+    e.preventDefault()
+    const next = SOURCE_TABS[(to + SOURCE_TABS.length) % SOURCE_TABS.length].kind
+    setTab(next)
+    document.getElementById(`share-tab-${next}`)?.focus()
+  }
   return (
     <Dialog label={current ? 'Stream settings' : 'Share your screen'} close={close} className="share-dialog">
       <h1>{current ? 'Stream settings' : 'Share your screen'}</h1>
       {current && <p className="hint">Choose another screen or window to switch to it without stopping.</p>}
-      <div className="sources" role="group" aria-label="Screens and windows">
+      <div className="tabs" role="tablist" aria-label="What to share" onKeyDown={tabKey}>
+        {SOURCE_TABS.map((t) => (
+          <button
+            key={t.kind}
+            id={`share-tab-${t.kind}`}
+            type="button"
+            role="tab"
+            className="tab"
+            aria-selected={tab === t.kind}
+            aria-controls="share-sources"
+            tabIndex={tab === t.kind ? 0 : -1}
+            onClick={() => setTab(t.kind)}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      <div className="sources" id="share-sources" role="tabpanel" aria-labelledby={`share-tab-${tab}`}>
         {sources === null && <p className="quiet">Looking for screens and windows…</p>}
-        {sources?.length === 0 && <p className="quiet">No screens or windows are available to share.</p>}
-        {sources?.map((s) => (
+        {listed?.length === 0 && <p className="quiet">{SOURCE_TABS.find((t) => t.kind === tab)!.empty}</p>}
+        {listed?.map((s) => (
           <button key={s.id} type="button" className={`source ${src?.id === s.id ? 'chosen' : ''}`} aria-pressed={src?.id === s.id} onClick={() => pick(s)}>
             <img src={s.thumb} alt="" />
             <span>
@@ -1067,16 +1104,27 @@ function ShareDialog({ close }: { close: () => void }) {
 
 function Screen({ stream, label, big }: { stream?: MediaStream; label: string; big?: boolean }) {
   const ref = useRef<HTMLVideoElement>(null)
+  const fig = useRef<HTMLElement>(null)
+  // Follows the document rather than the button, so leaving full screen any other way (Esc, F11) shows up too.
+  const [full, setFull] = useState(false)
   useEffect(() => {
     if (ref.current) ref.current.srcObject = stream ?? null
   }, [stream])
+  useEffect(() => {
+    const on = () => setFull(!!fig.current && document.fullscreenElement === fig.current)
+    document.addEventListener('fullscreenchange', on)
+    return () => document.removeEventListener('fullscreenchange', on)
+  }, [])
+  // Asks the document, not the state: the state only catches up once fullscreenchange has fired.
+  const toggle = () => (document.fullscreenElement === fig.current ? document.exitFullscreen() : fig.current?.requestFullscreen())?.catch(() => {})
+  const word = full ? 'Exit full screen' : 'Full screen'
   return (
-    <figure className={`screen ${big ? 'big' : ''}`}>
-      <video ref={ref} autoPlay playsInline muted />
+    <figure ref={fig} className={`screen ${big ? 'big' : ''}`}>
+      <video ref={ref} autoPlay playsInline muted onDoubleClick={big ? toggle : undefined} />
       <figcaption>{label}</figcaption>
       {big && (
-        <button className="icon-button screen-full" aria-label="Full screen" title="Full screen" onClick={() => ref.current?.parentElement?.requestFullscreen()}>
-          <Icon name="expand" size={16} />
+        <button className="icon-button screen-full" aria-label={word} title={word} onClick={toggle}>
+          <Icon name={full ? 'collapse' : 'expand'} size={16} />
         </button>
       )}
     </figure>

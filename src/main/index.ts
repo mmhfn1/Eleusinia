@@ -4,6 +4,7 @@ import { BrowserWindow, app, desktopCapturer, ipcMain, safeStorage, screen, sess
 import DHT from 'hyperdht'
 import { UiohookKey, uIOhook } from 'uiohook-napi'
 import { type Bindings, type Hotkey, createMatcher, createRecorder } from '../shared/hotkeys'
+import { kindOf, shareable } from '../shared/sources'
 import { createNode } from './node'
 
 // Lets several instances run side by side on one machine, each with its own identity.
@@ -68,12 +69,13 @@ app.whenReady().then(() => {
     const displays = screen.getAllDisplays()
     const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 180 } })
     return sources
-      .filter((s) => s.id !== own)
+      .filter((s) => s.id !== own && shareable({ id: s.id, name: s.name, emptyThumb: s.thumbnail.isEmpty() }))
       .map((s) => {
         // A window can be moved to any display, so it may go as high as the display it is listed on or the primary one.
         const d = displays.find((x) => String(x.id) === s.display_id) ?? screen.getPrimaryDisplay()
         return {
           id: s.id,
+          kind: kindOf(s.id),
           name: s.name,
           thumb: s.thumbnail.toDataURL(),
           width: Math.round(d.size.width * d.scaleFactor),

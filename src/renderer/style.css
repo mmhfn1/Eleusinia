@@ -1679,6 +1679,34 @@ hr {
 .share-dialog .dialog-body {
   width: 620px;
 }
+/* Tabs: built from the same tokens as .button, with the selected one marked like .button.active. */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 10px;
+  border-bottom: 1px solid var(--line);
+}
+.tab {
+  height: var(--control-h);
+  padding: 0 14px;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: var(--r-md) var(--r-md) 0 0;
+  background: none;
+  color: var(--mist);
+  font: inherit;
+  cursor: pointer;
+}
+.tab:hover {
+  color: var(--silver);
+  background: var(--obsidian-3);
+}
+.tab[aria-selected='true'] {
+  color: var(--silver);
+  border-color: var(--line-strong);
+  background: var(--accent-veil);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
 .sources {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
