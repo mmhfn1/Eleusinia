@@ -44,11 +44,15 @@ app.whenReady().then(() => {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', (e) => e.preventDefault())
 
+  // Testing only: join this DHT instead of the public one, as "host:port,host:port" (test/smoke.mjs runs a local
+  // one). Unset in normal use, which keeps the public DHT.
+  const bootstrap = (process.env.ELEUSINIA_BOOTSTRAP ?? '').split(',').map((s) => s.trim()).filter((s) => /^[\w.-]+:\d{1,5}$/.test(s))
   const node = createNode({
     dir,
     keyPair: loadIdentity(dir),
     emit: (e) => !win.isDestroyed() && win.webContents.send('event', e),
     noDirect: process.env.ELEUSINIA_NO_DIRECT === '1',
+    dht: bootstrap.length ? { bootstrap } : undefined,
   })
   ipcMain.handle('call', async (_e, method: string, ...args: unknown[]) => {
     if (!Object.hasOwn(node, method)) throw new Error('Unknown method')

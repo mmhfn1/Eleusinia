@@ -65,7 +65,9 @@ Both people must have the app open when one searches for the other's ID.
 | `npm start` | Run the built app |
 | `npm test` | Unit and integration tests on a local test DHT |
 | `npm run typecheck` | TypeScript check |
-| `npm run smoke` | Builds, then drives three real app windows over the public DHT through setup, friend search, chat, a voice call and offline delivery (about 40 seconds, opens windows) |
+| `npm run smoke` | Builds, then drives three real app windows on a local test DHT through setup, friend search, chat, a voice call, screen sharing (of its own windows only) and offline delivery (about a minute, opens windows) |
+| `ELEUSINIA_NO_DIRECT=1 npm run smoke` | Same, but direct call routes are withheld, so the call must go through the relay |
+| `ELEUSINIA_SMOKE_PUBLIC=1 npm run smoke` | Same, over the public DHT: an occasional real-network check, slower and sometimes flaky when the DHT is |
 
 ## Known limits
 

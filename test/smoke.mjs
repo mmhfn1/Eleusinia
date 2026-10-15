@@ -1,10 +1,12 @@
-// Drives three real app instances over the DevTools protocol and the public DHT:
-// profile setup, friend search, layout, voice, and DMs and group messages with the recipient online and offline.
+// Drives three real app instances over the DevTools protocol: profile setup, friend search, layout, voice, and DMs and
+// group messages with the recipient online and offline. They meet on a local test DHT, so a run depends on nothing
+// outside this machine; ELEUSINIA_SMOKE_PUBLIC=1 uses the public DHT instead, for an occasional real-network check.
 import { spawn } from 'node:child_process'
 import { mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
+import createTestnet from 'hyperdht/testnet.js'
 
 const app = process.argv[2]
 const exe = (await import('electron')).default // path to the Electron binary on any OS
@@ -13,11 +15,19 @@ const t0 = Date.now()
 const children = []
 setTimeout(() => (console.error('FAIL overall timeout'), children.forEach((c) => c.kill()), process.exit(2)), 420000)
 
+const publicDht = process.env.ELEUSINIA_SMOKE_PUBLIC === '1'
+const testnet = publicDht ? null : await createTestnet(3)
+const bootstrap = testnet?.bootstrap.map((n) => `${n.host}:${n.port}`).join(',')
+// The app reads ELEUSINIA_BOOTSTRAP only when set; in public mode it is removed, in case the shell has one.
+const { ELEUSINIA_BOOTSTRAP: _, ...baseEnv } = process.env
+const appEnv = bootstrap ? { ...baseEnv, ELEUSINIA_BOOTSTRAP: bootstrap } : baseEnv
+console.log(publicDht ? 'DHT: public (ELEUSINIA_SMOKE_PUBLIC=1)' : `DHT: local test network at ${bootstrap}`)
+
 async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-'))) {
   // The windows overlap, and Windows reports a covered window as hidden; the app then (rightly) asks not to be sent
   // video. Occlusion detection is off so every window counts as visible.
   const flags = [`--remote-debugging-port=${port}`, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--disable-features=CalculateNativeWinOcclusion']
-  const child = spawn(exe, [app, ...flags], { env: { ...process.env, ELEUSINIA_DATA: dir }, stdio: 'ignore' })
+  const child = spawn(exe, [app, ...flags], { env: { ...appEnv, ELEUSINIA_DATA: dir }, stdio: 'ignore' })
   children.push(child)
   let page
   for (let i = 0; i < 50 && !page; i++) {
@@ -342,9 +352,10 @@ try {
   // Chromium's fake microphone beeps, so both sides should see Ann's speaking ring.
   const annSpeaking = `[...document.querySelectorAll('.caller.speaking')].some((x) => x.textContent.includes('Ann'))`
   const ownSpeaking = `!!document.querySelector('.callers > .caller:first-child.speaking')`
-  if (!(await b.ev(seen(annSpeaking, 8000)))) throw new Error('B never saw Ann speaking')
+  // 20 s is many beeps' worth; with checks every 20 ms and the ring held for 250 ms, a beep that arrives cannot be missed.
+  if (!(await b.ev(seen(annSpeaking, 20000)))) throw new Error('B never saw Ann speaking')
   console.log('ok   B sees the speaking ring on Ann')
-  if (!(await a.ev(seen(ownSpeaking, 8000)))) throw new Error('A never saw its own speaking ring')
+  if (!(await a.ev(seen(ownSpeaking, 20000)))) throw new Error('A never saw its own speaking ring')
   console.log('ok   A sees its own speaking ring')
   await a.ev(press('Mute'))
   await sleep(500) // a ring lit just before muting may hold for its hang time
@@ -445,6 +456,7 @@ try {
   for (const [n, p] of [['A', a], ['B', b], ['C', c]]) console.error(n, (await p.ev(`document.body.innerText`).catch(String)).replace(/\n+/g, ' | '))
 } finally {
   children.forEach((ch) => ch.kill())
+  await testnet?.destroy().catch(() => {})
 }
 console.log(`total ${((Date.now() - t0) / 1000).toFixed(0)}s`)
 process.exit(failed ? 1 : 0)

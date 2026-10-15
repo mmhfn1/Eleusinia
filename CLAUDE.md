@@ -12,8 +12,9 @@ See `README.md` for features, known limits and the roadmap.
 | `npm run dev` | Run with hot reload |
 | `npm run typecheck` | `tsc --noEmit` over `src` and `test` |
 | `npm test` | Vitest: `test/node.test.ts` runs the whole node layer against a local test DHT, no Electron; `test/callstate.test.ts` covers call reconnect decisions with a fake connection; `video.test.ts`, `quality.test.ts`, `devices.test.ts`, `relay.test.ts`, `hotkeys.test.ts` cover the other pure logic |
-| `npm run smoke` | Builds, then drives three real app windows over the **public** DHT: setup, friend search, chat, a voice call, hotkeys, screen sharing, offline delivery (~50 s, opens windows; screen capture uses Chromium's fake device; hotkeys are tested by injecting F23/F24 key presses system-wide, keys no ordinary keyboard has) |
+| `npm run smoke` | Builds, then drives three real app windows on a **local test DHT** (passed to the app as `ELEUSINIA_BOOTSTRAP`, which is off unless set): setup, friend search, chat, a voice call, hotkeys, screen sharing, offline delivery (~1 min, opens windows; the microphone is Chromium's fake device, and screen sharing only ever captures the test's own windows; hotkeys are tested by injecting F23/F24 key presses system-wide, keys no ordinary keyboard has) |
 | `ELEUSINIA_NO_DIRECT=1 npm run smoke` | Same, but direct call routes are withheld so the call must go through the relay |
+| `ELEUSINIA_SMOKE_PUBLIC=1 npm run smoke` | Same, over the **public** DHT, for an occasional real-network check (slower, and flaky when the DHT is) |
 
 Two identities on one machine: give each its own data folder with `ELEUSINIA_DATA`
 (PowerShell: `$env:ELEUSINIA_DATA = "C:\temp\eleusinia-b"; npm run dev`).
