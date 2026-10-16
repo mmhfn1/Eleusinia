@@ -12,7 +12,7 @@ export type Profile = { handle: string; name: string; about: string; avatar: str
 // Device labels are kept beside the ids, since an id can change while the name stays (see devices.ts).
 // volumes: how loud each person is played in calls, 0 to 1, kept between sessions.
 // hotkeys: only those the user bound; none by default.
-export type Settings = { audioKbps: number; mic: string; out: string; micLabel?: string; outLabel?: string; volumes?: Record<Key, number>; hotkeys?: Bindings }
+export type Settings = { audioKbps: number; mic: string; out: string; micLabel?: string; outLabel?: string; volumes?: Record<Key, number>; hotkeys?: Bindings; cam?: string; camLabel?: string }
 
 export type State = {
   me: Key

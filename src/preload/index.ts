@@ -3,7 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 contextBridge.exposeInMainWorld('api', {
   call: (method: string, ...args: unknown[]) => ipcRenderer.invoke('call', method, ...args),
   screens: () => ipcRenderer.invoke('screens'),
-  chooseScreen: (id: string) => ipcRenderer.invoke('chooseScreen', id),
+  chooseScreen: (id: string, sound?: boolean) => ipcRenderer.invoke('chooseScreen', id, sound),
   recordHotkey: () => ipcRenderer.invoke('recordHotkey'),
   stopRecording: () => ipcRenderer.invoke('stopRecording'),
   on(fn: (e: unknown) => void) {

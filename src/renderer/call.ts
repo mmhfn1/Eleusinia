@@ -4,10 +4,26 @@ import type { Event, Key, State } from '../shared/protocol'
 import { SAMPLE_EVERY, type Sample, grade, remember, worst } from '../shared/quality'
 import type { SourceKind } from '../shared/sources'
 import { hear, rms } from '../shared/speaking'
-import { type Level, type Quality, RAMP_MS, STARVED_AFTER, type Verdict, canStream, encodingFor, streamKbps, widthFor } from '../shared/video'
+import {
+  type Level,
+  type Quality,
+  RAMP_MS,
+  SOUND_KBPS,
+  STARVED_AFTER,
+  type Source,
+  type Verdict,
+  canStream,
+  cameraSource,
+  encodingFor,
+  streamKbps,
+  widthFor,
+} from '../shared/video'
 
 // A screen or window offered by the system for sharing, with what it can deliver.
 export type ScreenSource = { id: string; kind: SourceKind; name: string; thumb: string; width: number; height: number; fps: number }
+// A camera, with what it can deliver.
+export type CameraSource = Source & { id: string; name: string }
+export type Slot = 'screen' | 'camera'
 
 declare global {
   interface Window {
@@ -15,7 +31,7 @@ declare global {
       call(method: string, ...args: any[]): Promise<any>
       on(fn: (e: Event) => void): () => void
       screens(): Promise<ScreenSource[]>
-      chooseScreen(id: string): Promise<void>
+      chooseScreen(id: string, sound?: boolean): Promise<void>
       recordHotkey(): Promise<import('../shared/hotkeys').Hotkey | null>
       stopRecording(): Promise<void>
     }
@@ -23,8 +39,8 @@ declare global {
 }
 
 // Calls as a full mesh: one RTCPeerConnection per other participant, signaled over the control links.
-// Each connection carries voice, plus a video slot that is empty until someone shares their screen, so starting
-// or stopping a share never needs a new offer.
+// Each connection carries voice, plus slots that stay empty until used: a screen, a camera, and the sound of a shared
+// screen. They are all set up with the first offer, so starting or stopping a share or a camera never needs a new one.
 // A voice through the shared AudioContext: its source, the analyser behind the speaking ring, and when it was last loud.
 type Listen = { source: MediaStreamAudioSourceNode; analyser: AnalyserNode; loudAt: number | null }
 
@@ -35,8 +51,9 @@ type Peer = {
   relayed?: boolean
   candidates: ReturnType<typeof createCandidates>
   offer?: number
-  video?: RTCRtpTransceiver
   screen?: MediaStream // their shared screen, once frames arrive
+  camera?: MediaStream // their camera
+  sound?: { source: MediaStreamAudioSourceNode; gain: GainNode; el: HTMLAudioElement } // their shared screen's sound
 }
 
 export const active = new Map<string, Set<Key>>() // conversation -> peers we know are in its call
@@ -60,13 +77,18 @@ let measuring = false
 
 // Screen sharing. Ours: the captured track, its source and the quality the user chose (always final).
 // Theirs: what each sharer in the call told us. Wants: what each side is showing of the other's share.
-export type ShareInfo = { name: string; width: number; height: number; fps: number; starved: boolean }
+export type ShareInfo = { name: string; width: number; height: number; fps: number; starved: boolean; sound?: boolean }
 export const shares = new Map<Key, ShareInfo>()
+export const cameras = new Map<Key, ShareInfo>()
 // Whether each person in the call has muted or deafened themselves, as they told us.
 export const voices = new Map<Key, { muted: boolean; deafened: boolean }>()
-let screen: { track: MediaStreamTrack; stream: MediaStream; src: ScreenSource; q: Quality; at: number } | null = null
-const wants = new Map<Key, Level>() // what each viewer shows of our share
-const shown = new Map<Key, Level>() // what we show of each sharer's
+type Out<S> = { track: MediaStreamTrack; stream: MediaStream; src: S; q: Quality; at: number }
+let screen: (Out<ScreenSource> & { sound?: MediaStreamTrack }) | null = null
+let camera: Out<CameraSource> | null = null
+// Keyed `${slot}:${person}`: what each viewer shows of our screen and camera, and what we show of theirs.
+const wants = new Map<string, Level>()
+const shown = new Map<string, Level>()
+const want = (slot: Slot, k: Key) => wants.get(`${slot}:${k}`) ?? 'full'
 let starved = 0 // samples in a row where our stream to someone was held back by their or our bandwidth
 let cpuBound = 0 // ... or by our computer not encoding fast enough
 let upload: { kbps: number | null; at: number } | null = null
@@ -79,14 +101,25 @@ const membersOf = (c: string) => state.groups[c]?.members ?? c.split('_')
 export const volumeOf = (k: Key) => Math.min(2, Math.max(0, state.settings.volumes?.[k] ?? 1))
 const mic = (id: string) => navigator.mediaDevices.getUserMedia({ audio: id ? { deviceId: { exact: id } } : true })
 
-function bitrate(pc: RTCPeerConnection) {
-  for (const sender of pc.getSenders()) {
-    if (sender.track?.kind !== 'audio') continue
-    const p = sender.getParameters()
-    if (!p.encodings?.length) continue
-    p.encodings[0].maxBitrate = state.settings.audioKbps * 1000
-    sender.setParameters(p).catch(() => {})
-  }
+// A connection's transceivers by role, from their order (the same on both sides): voice is the first audio, then the
+// screen and camera videos, then the screen's sound. Connections with older versions have only voice and screen.
+function slotsOf(pc: RTCPeerConnection) {
+  const ts = pc.getTransceivers()
+  const video = ts.filter((t) => t.receiver.track.kind === 'video')
+  const audio = ts.filter((t) => t.receiver.track.kind === 'audio')
+  return { voice: audio[0], screen: video[0], camera: video[1], sound: audio[1] }
+}
+
+async function setEncoding(sender: RTCRtpSender, e: object) {
+  const p = sender.getParameters()
+  if (!p.encodings?.length) return // not negotiated yet; applied again once connected
+  Object.assign(p.encodings[0], e)
+  await sender.setParameters(p).catch(() => {})
+}
+
+const bitrate = (pc: RTCPeerConnection) => {
+  const voice = slotsOf(pc).voice
+  if (voice) setEncoding(voice.sender, { maxBitrate: state.settings.audioKbps * 1000 })
 }
 
 // One AudioContext for the whole app. Each person plays through source → gain (their volume) → master (deafen)
@@ -139,6 +172,25 @@ function release(k: Key, p: Peer) {
   speaking.delete(k)
 }
 
+// A shared screen's sound: played at the sharer's volume, but never counted as them speaking.
+function playSound(k: Key, p: Peer, s: MediaStream) {
+  stopSound(p)
+  const el = new Audio()
+  el.autoplay = el.muted = true // as for voices, the element only keeps the stream flowing into Web Audio
+  el.srcObject = s
+  const source = context().createMediaStreamSource(s)
+  const gain = context().createGain()
+  gain.gain.value = volumeOf(k)
+  source.connect(gain).connect(master!)
+  p.sound = { source, gain, el }
+}
+function stopSound(p: Peer) {
+  p.sound?.source.disconnect()
+  p.sound?.gain.disconnect()
+  if (p.sound) p.sound.el.srcObject = null
+  p.sound = undefined
+}
+
 // Levels are read 20 times a second; the UI re-renders only when someone starts or stops speaking.
 const samplesBuf = new Float32Array(512)
 function listenAll() {
@@ -167,6 +219,7 @@ function close(k: Key) {
   if (!p) return
   p.pc.close()
   release(k, p)
+  stopSound(p)
   p.audio.srcObject = null
   peers.delete(k)
   window.api.call('relayClose', k)
@@ -177,8 +230,8 @@ function drop(k: Key) {
   watchdogs.get(k)?.stop()
   watchdogs.delete(k)
   shares.delete(k)
-  wants.delete(k)
-  shown.delete(k)
+  cameras.delete(k)
+  for (const slot of ['screen', 'camera']) wants.delete(`${slot}:${k}`), shown.delete(`${slot}:${k}`)
   voices.delete(k)
   close(k)
 }
@@ -194,8 +247,11 @@ function connect(k: Key) {
   pc.onicecandidate = (e) => e.candidate && send(c, k, { k: 'ice', c: e.candidate.toJSON() })
   const peer: Peer = { pc, audio, candidates: createCandidates(pc) }
   pc.ontrack = (e) => {
-    if (e.track.kind === 'audio') playVoice(k, peer, e.streams[0] ?? new MediaStream([e.track]))
-    else peer.screen = new MediaStream([e.track])
+    const s = slotsOf(pc)
+    if (e.transceiver === s.screen) peer.screen = new MediaStream([e.track])
+    else if (e.transceiver === s.camera) peer.camera = new MediaStream([e.track])
+    else if (e.transceiver === s.sound) playSound(k, peer, new MediaStream([e.track]))
+    else if (e.track.kind === 'audio') playVoice(k, peer, e.streams[0] ?? new MediaStream([e.track]))
     notify()
   }
   if (!watchdogs.has(k)) watchdogs.set(k, createWatchdog(state.me, k, { restart: () => serial(() => restart(k)), rebuild: () => serial(() => offer(k)) }))
@@ -206,6 +262,7 @@ function connect(k: Key) {
       bitrate(pc)
       sendVoice(k)
       if (screen) sendShare(k)
+      if (camera) sendCamera(k)
       await applyLevel(k)
       peer.relayed = await isRelayed(pc)
     }
@@ -233,25 +290,29 @@ async function local(pc: RTCPeerConnection, d: RTCSessionDescriptionInit) {
   await pc.setLocalDescription({ type: d.type, sdp: lightOpus(d.sdp ?? '') })
 }
 
-// The connection's video slot: VP9 first (sharp text at low bitrates), then H.264 and VP8. If we are sharing,
-// our screen goes straight into it.
-async function useVideo(k: Key, t: RTCRtpTransceiver) {
+// A connection's slots once they exist: video prefers VP9 (sharp text at low bitrates), then H.264 and VP8, and
+// whatever we are already sharing goes straight in.
+async function useSlots(k: Key) {
   const p = peers.get(k)
   if (!p) return
-  p.video = t
+  const s = slotsOf(p.pc)
   const rank = (m: string) => ((i) => (i < 0 ? 9 : i))(['video/VP9', 'video/H264', 'video/VP8'].indexOf(m))
   const codecs = [...(RTCRtpReceiver.getCapabilities('video')?.codecs ?? [])].sort((a, b) => rank(a.mimeType) - rank(b.mimeType))
-  try {
-    t.setCodecPreferences(codecs)
-  } catch {} // the order is a preference; the default list works too
-  if (screen) await t.sender.replaceTrack(screen.track)
+  for (const t of [s.screen, s.camera])
+    try {
+      t?.setCodecPreferences(codecs)
+    } catch {} // the order is a preference; the default list works too
+  if (screen) await s.screen?.sender.replaceTrack(screen.track)
+  if (screen?.sound) await s.sound?.sender.replaceTrack(screen.sound)
+  if (camera) await s.camera?.sender.replaceTrack(camera.track)
 }
 
 async function offer(k: Key) {
   if (!conv) return
   const c = conv
   const pc = connect(k)
-  await useVideo(k, pc.addTransceiver('video', { direction: 'sendrecv' }))
+  for (const kind of ['video', 'video', 'audio']) pc.addTransceiver(kind, { direction: 'sendrecv' }) // screen, camera, sound
+  await useSlots(k)
   const id = (peers.get(k)!.offer = ++offerId)
   await local(pc, await pc.createOffer())
   send(c, k, { k: 'offer', sdp: pc.localDescription!.toJSON(), id })
@@ -281,73 +342,104 @@ async function isRelayed(pc: RTCPeerConnection) {
   return stats.get(pair?.remoteCandidateId)?.candidateType === 'relay'
 }
 
-// Sends one viewer what they are showing of our share: nothing, a thumbnail, or our chosen quality (see encodingFor).
+// Sends one viewer what they are showing of our screen and camera: nothing, a thumbnail, or our chosen quality (see
+// encodingFor). The screen's sound follows its picture, so nobody is sent sound for a screen they have hidden.
 async function applyLevel(k: Key) {
-  const t = peers.get(k)?.video
-  if (!t || !screen) return
-  const p = t.sender.getParameters()
-  if (!p.encodings?.length) return // not negotiated yet; applied again once connected
-  Object.assign(p.encodings[0], encodingFor(wants.get(k) ?? 'full', screen.q, streamKbps(screen.src, screen.q)))
-  await t.sender.setParameters(p).catch(() => {})
+  const p = peers.get(k)
+  if (!p) return
+  const s = slotsOf(p.pc)
+  if (screen && s.screen) await setEncoding(s.screen.sender, encodingFor(want('screen', k), screen.q, streamKbps(screen.src, screen.q)))
+  if (screen?.sound && s.sound) await setEncoding(s.sound.sender, { active: want('screen', k) !== 'off', maxBitrate: SOUND_KBPS * 1000 })
+  if (camera && s.camera) await setEncoding(s.camera.sender, encodingFor(want('camera', k), camera.q, streamKbps(camera.src, camera.q)))
 }
 
+const describeOut = (o: Out<Source & { name: string }>) => ({
+  on: true,
+  name: o.src.name,
+  width: widthFor(o.src, o.q.height),
+  height: o.q.height,
+  fps: o.q.fps,
+  starved: starved >= STARVED_AFTER,
+})
 function sendShare(k: Key | null) {
-  if (!conv) return
-  const info = screen && { on: true, name: screen.src.name, width: widthFor(screen.src, screen.q.height), height: screen.q.height, fps: screen.q.fps, starved: starved >= STARVED_AFTER }
-  send(conv, k, { k: 'share', ...(info ?? { on: false }) })
+  if (conv) send(conv, k, { k: 'share', ...(screen ? { ...describeOut(screen), sound: !!screen.sound } : { on: false }) })
+}
+function sendCamera(k: Key | null) {
+  if (conv) send(conv, k, { k: 'camera', ...(camera ? describeOut(camera) : { on: false }) })
 }
 
 const captureLimits = (src: ScreenSource, q: Quality) => ({ width: { max: widthFor(src, q.height) }, height: { max: q.height }, frameRate: { max: q.fps } })
 
-export const sharing = () => screen && { src: screen.src, q: screen.q, stream: screen.stream }
+export const sharing = () => screen && { src: screen.src, q: screen.q, stream: screen.stream, sound: !!screen.sound }
+export const filming = () => camera && { src: camera.src, q: camera.q, stream: camera.stream }
 
-// Whether a new stream fits the call (see canStream). Upload is measured against the best-connected person in the
-// call and remembered for a minute.
-export async function checkShare(src: ScreenSource, q: Quality): Promise<Verdict> {
+// What our other streams already send each viewer, which a new one adds to.
+const sendingKbps = (besides: Slot) =>
+  (screen && besides !== 'screen' ? streamKbps(screen.src, screen.q) + (screen.sound ? SOUND_KBPS : 0) : 0) +
+  (camera && besides !== 'camera' ? streamKbps(camera.src, camera.q) : 0)
+
+// Whether a new stream fits the call (see canStream), on top of what we already send. Upload is measured against
+// the best-connected person in the call and remembered for a minute.
+export async function checkStream(slot: Slot, src: Source, q: Quality, sound = false): Promise<Verdict> {
   const live = [...peers].filter(([, p]) => p.pc.connectionState === 'connected')
   if (!upload || Date.now() - upload.at > 60000) {
     const best = live.map(([k]) => k).sort((a, b) => (samples.get(a)?.at(-1)?.rtt ?? 1e9) - (samples.get(b)?.at(-1)?.rtt ?? 1e9))[0]
     upload = best ? { kbps: await window.api.call('probe', best).catch(() => null), at: Date.now() } : null
   }
-  return canStream({ kbps: streamKbps(src, q), viewers: live.length, uploadKbps: upload?.kbps ?? null, starved: [...shares.values()].some((s) => s.starved) })
+  return canStream({
+    kbps: streamKbps(src, q) + (sound ? SOUND_KBPS : 0) + sendingKbps(slot),
+    viewers: live.length,
+    uploadKbps: upload?.kbps ?? null,
+    starved: [...shares.values(), ...cameras.values()].some((s) => s.starved),
+  })
 }
 
-async function capture(src: ScreenSource, q: Quality) {
-  await window.api.chooseScreen(src.id)
-  const media = await navigator.mediaDevices.getDisplayMedia({ video: captureLimits(src, q), audio: false })
+// Computer sound is every app's audio except Eleusinia's own (Windows only): otherwise the people in the call would
+// hear themselves back. If the system cannot leave our own audio out, no sound is shared rather than an echo.
+let soundRefused = false
+async function capture(src: ScreenSource, q: Quality, sound: boolean) {
+  await window.api.chooseScreen(src.id, sound)
+  const audio = sound && ({ restrictOwnAudio: true, echoCancellation: false, noiseSuppression: false, autoGainControl: false } as MediaTrackConstraints)
+  const media = await navigator.mediaDevices.getDisplayMedia({ video: captureLimits(src, q), audio })
   const track = media.getVideoTracks()[0]
   track.contentHint = q.motion ? 'motion' : 'detail'
-  return track
+  let heard: MediaStreamTrack | undefined = media.getAudioTracks()[0]
+  soundRefused = sound && !(heard?.getSettings() as { restrictOwnAudio?: boolean } | undefined)?.restrictOwnAudio
+  if (soundRefused) heard?.stop()
+  if (heard) heard.contentHint = 'music'
+  return { track, sound: soundRefused ? undefined : heard }
 }
 
-// Puts a captured screen on every connection, replacing whatever was shared before.
-async function use(track: MediaStreamTrack, src: ScreenSource, q: Quality) {
-  const old = screen?.track
-  track.onended = () => stopShare() // the shared window was closed
-  screen = { track, stream: new MediaStream([track]), src, q, at: Date.now() }
+// Puts a captured screen (and its sound) on every connection, replacing whatever was shared before.
+async function use(cap: { track: MediaStreamTrack; sound?: MediaStreamTrack }, src: ScreenSource, q: Quality) {
+  const old = screen
+  cap.track.onended = () => stopShare() // the shared window was closed
+  screen = { track: cap.track, stream: new MediaStream([cap.track]), src, q, at: Date.now(), sound: cap.sound }
   starved = cpuBound = 0
   for (const [k, p] of peers) {
-    await p.video?.sender.replaceTrack(track)
+    const s = slotsOf(p.pc)
+    await s.screen?.sender.replaceTrack(cap.track)
+    await s.sound?.sender.replaceTrack(cap.sound ?? null)
     await applyLevel(k)
   }
-  if (old) (old.onended = null), old.stop()
+  if (old) (old.track.onended = null), old.track.stop(), old.sound?.stop()
   sendShare(null)
   notify()
 }
 
-export async function startShare(src: ScreenSource, q: Quality) {
+export async function startShare(src: ScreenSource, q: Quality, sound = false) {
   if (!conv) return
-  const track = await capture(src, q)
-  if (!conv) return track.stop() // the call ended meanwhile
-  await use(track, src, q)
+  const cap = await capture(src, q, sound)
+  if (!conv) return cap.track.stop(), cap.sound?.stop() // the call ended meanwhile
+  await use(cap, src, q)
 }
 
-// Shares another screen or window without stopping: viewers keep watching, the picture just changes.
-export async function switchShare(src: ScreenSource, q: Quality) {
+// Shares another screen or window, or turns its sound on or off, without stopping: viewers keep watching.
+export async function switchShare(src: ScreenSource, q: Quality, sound = false) {
   if (!screen) return
-  const track = await capture(src, q)
-  if (!screen) return track.stop() // stopped meanwhile
-  await use(track, src, q)
+  const cap = await capture(src, q, sound)
+  if (!screen) return cap.track.stop(), cap.sound?.stop() // stopped meanwhile
+  await use(cap, src, q)
 }
 
 // The streamer's choice is final: applied as asked, never second-guessed.
@@ -366,37 +458,88 @@ export function stopShare() {
   if (!screen) return
   screen.track.onended = null
   screen.track.stop()
+  screen.sound?.stop()
   screen = null
-  for (const p of peers.values()) p.video?.sender.replaceTrack(null)
+  soundRefused = false
+  for (const p of peers.values()) {
+    const s = slotsOf(p.pc)
+    s.screen?.sender.replaceTrack(null)
+    s.sound?.sender.replaceTrack(null)
+  }
   sendShare(null)
   notify()
 }
 
-// What we show of a sharer's screen; they then send only that. Unchanged levels are not resent.
-export function show(k: Key, level: Level) {
-  if (!conv || shown.get(k) === level) return
-  shown.set(k, level)
-  send(conv, k, { k: 'want', level })
+// Cameras. A camera is opened first for its preview in Camera settings, then handed over as it is; what it can
+// deliver comes from the camera itself.
+export async function openCamera(id: string) {
+  const media = await navigator.mediaDevices.getUserMedia({ video: id ? { deviceId: { exact: id } } : true })
+  const track = media.getVideoTracks()[0]
+  const now = track.getSettings()
+  const src: CameraSource = { id: now.deviceId ?? id, name: track.label || 'Camera', ...cameraSource(track.getCapabilities(), now) }
+  return { track, src }
+}
+export const cameraLimits = (src: CameraSource, q: Quality) => ({ width: { ideal: widthFor(src, q.height) }, height: { ideal: q.height }, frameRate: { ideal: q.fps } })
+
+// Puts a camera on every connection, replacing any camera in use. The streamer's quality is applied as chosen.
+export async function useCamera(track: MediaStreamTrack, src: CameraSource, q: Quality) {
+  if (!conv) return track.stop()
+  await track.applyConstraints(cameraLimits(src, q)).catch(() => {})
+  track.contentHint = 'motion'
+  const old = camera?.track
+  track.onended = () => stopCamera() // unplugged, or the system took it away
+  camera = { track, stream: new MediaStream([track]), src, q, at: Date.now() }
+  starved = cpuBound = 0
+  for (const [k, p] of peers) {
+    await slotsOf(p.pc).camera?.sender.replaceTrack(track)
+    await applyLevel(k)
+  }
+  if (old && old !== track) (old.onended = null), old.stop()
+  sendCamera(null)
+  notify()
+}
+
+export function stopCamera() {
+  if (!camera) return
+  camera.track.onended = null
+  camera.track.stop()
+  camera = null
+  for (const p of peers.values()) slotsOf(p.pc).camera?.sender.replaceTrack(null)
+  sendCamera(null)
+  notify()
+}
+
+// What we show of someone's screen or camera; they then send only that. Unchanged levels are not resent.
+export function show(k: Key, slot: Slot, level: Level) {
+  const id = `${slot}:${k}`
+  if (!conv || shown.get(id) === level) return
+  shown.set(id, level)
+  send(conv, k, { k: 'want', level, slot })
 }
 
 // Whether our stream is held back, by bandwidth (towards someone showing it full size) or by our own computer.
 // Ignored while a stream ramps up after starting or changing quality.
 async function checkLimits() {
-  if (!screen || Date.now() - screen.at < RAMP_MS) return
+  const outs = ([['screen', screen], ['camera', camera]] as const).filter(([, o]) => o && Date.now() - o.at >= RAMP_MS)
+  if (!outs.length) return
   let bandwidth = false
   let cpu = false
   for (const [k, p] of peers) {
-    if (!p.video || p.pc.connectionState !== 'connected' || (wants.get(k) ?? 'full') !== 'full') continue
-    ;(await p.video.sender.getStats()).forEach((r: any) => {
-      if (r.type !== 'outbound-rtp') return
-      bandwidth ||= r.qualityLimitationReason === 'bandwidth'
-      cpu ||= r.qualityLimitationReason === 'cpu'
-    })
+    if (p.pc.connectionState !== 'connected') continue
+    for (const [slot] of outs) {
+      const t = slotsOf(p.pc)[slot]
+      if (!t || want(slot, k) !== 'full') continue
+      ;(await t.sender.getStats()).forEach((r: any) => {
+        if (r.type !== 'outbound-rtp') return
+        bandwidth ||= r.qualityLimitationReason === 'bandwidth'
+        cpu ||= r.qualityLimitationReason === 'cpu'
+      })
+    }
   }
   const was = starved >= STARVED_AFTER
   starved = bandwidth ? starved + 1 : 0
   cpuBound = cpu ? cpuBound + 1 : 0
-  if (was !== starved >= STARVED_AFTER) sendShare(null)
+  if (was !== starved >= STARVED_AFTER) sendShare(null), sendCamera(null)
 }
 
 // Round trip, loss and jitter of what we send, as the other side reports it; the route's round trip until it has.
@@ -451,7 +594,7 @@ async function useMic(id: string) {
   const track = fresh.getAudioTracks()[0]
   track.enabled = sending()
   track.onended = () => followDevices(true) // unplugged, or the system took it away
-  for (const p of peers.values()) p.pc.getSenders().forEach((s) => s.track?.kind === 'audio' && s.replaceTrack(track))
+  for (const p of peers.values()) slotsOf(p.pc).voice?.sender.replaceTrack(track)
   stream.getTracks().forEach((t) => ((t.onended = null), t.stop()))
   stream = fresh
   micId = id
@@ -491,8 +634,10 @@ export function notices() {
   // Only worth saying while it matters: someone is not connected and the fallback could have helped.
   const struggling = [...peers.values()].some((p) => p.pc.connectionState !== 'connected')
   if (relayMissing && struggling) out.push('No network address for the fallback route, so a call works only where a direct connection does.')
-  if (screen && cpuBound >= STARVED_AFTER) out.push('Your computer cannot encode your stream at this quality fast enough. You can lower it in Stream quality.')
-  if (screen && starved >= STARVED_AFTER) out.push('Your connection cannot carry your stream at this quality to everyone. You can lower it in Stream quality.')
+  const video = screen || camera
+  if (video && cpuBound >= STARVED_AFTER) out.push('Your computer cannot encode your video at this quality fast enough. You can lower it in Stream settings or Camera settings.')
+  if (video && starved >= STARVED_AFTER) out.push('Your connection cannot carry your video at this quality to everyone. You can lower it in Stream settings or Camera settings.')
+  if (screen && soundRefused) out.push("Your computer's sound is not being shared: this system cannot leave Eleusinia's own audio out, so the call would hear itself back.")
   return out
 }
 
@@ -523,6 +668,7 @@ export async function join(c: string) {
 export function leave() {
   if (!conv) return
   stopShare()
+  stopCamera()
   send(conv, null, { k: 'leave' })
   for (const k of [...peers.keys()]) drop(k)
   navigator.mediaDevices.removeEventListener('devicechange', onDeviceChange)
@@ -536,6 +682,7 @@ export function leave() {
   ctx?.suspend()
   samples.clear()
   shares.clear()
+  cameras.clear()
   wants.clear()
   shown.clear()
   voices.clear()
@@ -606,13 +753,14 @@ async function handle(from: Key, c: string, d: any) {
   } else if (d.k === 'offer') {
     // An ICE restart reuses the connection; any other offer starts a new one.
     const p = d.restart && peers.get(from)
-    const pc = p && p.pc.signalingState !== 'closed' ? p.pc : connect(from)
+    const reused = !!p && p.pc.signalingState !== 'closed'
+    const pc: RTCPeerConnection = reused ? p.pc : connect(from)
     await describe(from, pc, d.sdp)
-    // A new connection: take up the video slot the offer brought, so we can send our screen on it too.
-    const slot = !peers.get(from)?.video && pc.getTransceivers().find((t: RTCRtpTransceiver) => t.receiver.track.kind === 'video')
-    if (slot) {
-      slot.direction = 'sendrecv'
-      await useVideo(from, slot)
+    // A new connection: take up the slots the offer brought, so we can send our screen, camera and sound on them too.
+    if (!reused) {
+      const s = slotsOf(pc)
+      for (const t of [s.screen, s.camera, s.sound]) if (t) t.direction = 'sendrecv'
+      await useSlots(from)
     }
     await local(pc, await pc.createAnswer())
     send(c, from, { k: 'answer', sdp: pc.localDescription!.toJSON(), id: d.id })
@@ -625,13 +773,17 @@ async function handle(from: Key, c: string, d: any) {
   } else if (d.k === 'share') {
     // From another app, so every field is checked and capped.
     const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Math.round(Number(v)) || 0))
-    if (d.on) shares.set(from, { name: String(d.name ?? '').slice(0, 100), width: n(d.width, 8192), height: n(d.height, 8192), fps: n(d.fps, 480), starved: !!d.starved })
-    else (shares.delete(from), shown.delete(from))
+    if (d.on) shares.set(from, { name: String(d.name ?? '').slice(0, 100), width: n(d.width, 8192), height: n(d.height, 8192), fps: n(d.fps, 480), starved: !!d.starved, sound: !!d.sound })
+    else (shares.delete(from), shown.delete(`screen:${from}`))
+  } else if (d.k === 'camera') {
+    const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Math.round(Number(v)) || 0))
+    if (d.on) cameras.set(from, { name: String(d.name ?? '').slice(0, 100), width: n(d.width, 8192), height: n(d.height, 8192), fps: n(d.fps, 480), starved: !!d.starved })
+    else (cameras.delete(from), shown.delete(`camera:${from}`))
   } else if (d.k === 'voice') {
     voices.set(from, { muted: !!d.muted, deafened: !!d.deafened })
   } else if (d.k === 'want') {
     if (['off', 'thumb', 'full'].includes(d.level)) {
-      wants.set(from, d.level)
+      wants.set(`${d.slot === 'camera' ? 'camera' : 'screen'}:${from}`, d.level)
       await applyLevel(from)
     }
   }
@@ -667,7 +819,7 @@ export function onState(next: State) {
   if (a.audioKbps !== b.audioKbps) for (const p of peers.values()) bitrate(p.pc)
   if (!b.hotkeys?.ptt) talking = false
   applyMic()
-  for (const [k, p] of peers) if (p.voice) p.voice.gain.gain.value = volumeOf(k)
+  for (const [k, p] of peers) for (const g of [p.voice?.gain, p.sound?.gain]) if (g) g.gain.value = volumeOf(k)
   if (a.mic !== b.mic || a.out !== b.out || a.micLabel !== b.micLabel || a.outLabel !== b.outLabel) followDevices()
   notify()
 }

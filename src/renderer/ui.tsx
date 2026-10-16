@@ -71,6 +71,12 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11" />
     </>
   ),
+  camera: (
+    <>
+      <rect x="2.5" y="6" width="13" height="12" rx="2" />
+      <path d="M15.5 10.5 21.5 7v10l-6-3.5" />
+    </>
+  ),
   info: (
     <>
       <circle cx="12" cy="12" r="9" />

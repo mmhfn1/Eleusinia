@@ -1802,3 +1802,31 @@ hr {
 .ptt.on {
   color: var(--good);
 }
+
+/* Cameras: your own picture is shown mirrored, as in a mirror; others see it the right way round. */
+.screen.mirror video {
+  transform: scaleX(-1);
+}
+.video-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+}
+.video-grid > .stage-thumb,
+.video-grid > .screen {
+  width: auto;
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
+.camera-preview {
+  aspect-ratio: 16 / 9;
+  max-height: 320px;
+}
+.camera-preview .screen {
+  height: 100%;
+}
+.sound-row {
+  grid-column: 1 / -1;
+}

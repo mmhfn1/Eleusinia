@@ -68,8 +68,20 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
     await new Promise((r) => spawn('powershell', ['-NoProfile', '-Command', ps], { stdio: 'ignore' }).on('exit', r))
     return true
   }
+  // Lets the test read what each call connection actually receives (getStats), without the app exposing anything.
+  await ev(`(() => { window.__pcs = []; const P = RTCPeerConnection; window.RTCPeerConnection = class extends P { constructor(...a) { super(...a); window.__pcs.push(this) } } })()`)
   return { child, ev, dir, title, windowState }
 }
+
+// Packets received on one of the live connection's slots (see slotsOf in call.ts): 'sound' is the second audio.
+const received = (slot) => `(async () => {
+  const pc = window.__pcs.find((p) => p.connectionState === 'connected')
+  const ts = pc?.getTransceivers() ?? []
+  const t = { camera: ts.filter((x) => x.receiver.track.kind === 'video')[1], sound: ts.filter((x) => x.receiver.track.kind === 'audio')[1] }['${slot}']
+  let n = 0
+  if (t) (await t.receiver.getStats()).forEach((r) => r.type === 'inbound-rtp' && (n = r.packetsReceived))
+  return n
+})()`
 
 // Picks one of the test's own windows in the open share picker's visible tab, matched by exact title. Never falls
 // back to anything else on the machine: if it is not offered, the run fails and says what was.
@@ -285,12 +297,46 @@ try {
   await until(`A switched to "${ownTitles[0]}" without stopping, and B still sees it`, async () =>
     (await a.ev(`document.querySelector('.stage .sharing-badge')?.textContent.includes(${JSON.stringify(ownTitles[0])})`)) &&
     (await b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight > 0 && document.querySelector('.stage .screen.big figcaption').textContent.includes(${JSON.stringify(ownTitles[0])})`)), 30)
-  await b.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Hide screens').click()`)
+  await b.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Hide video').click()`)
   await until('B hides the screens (so A stops sending them)', () => b.ev(`!document.querySelector('.stage .screen') && document.querySelector('.stage').classList.contains('collapsed')`), 5)
-  await b.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Show screens').click()`)
+  await b.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Show video').click()`)
   await until('B shows them again and frames flow', () => b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight > 0`), 30)
   await a.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Stop sharing').click()`)
   await until('A stops; the stage closes for B', () => b.ev(`!document.querySelector('.stage')`), 10)
+
+  console.log('--- Camera')
+  await b.ev(press('Turn on camera'))
+  const camMenu = await until('the camera dialog previews the camera, defaulting to 720p and 30 fps', () =>
+    b.ev(`(() => { const s = [...document.querySelectorAll('dialog[open] .quality select')]; const v = document.querySelector('dialog[open] .camera-preview video'); return s.length === 3 && v?.videoHeight > 0 && [s[1].value, s[2].value, v.videoWidth + 'x' + v.videoHeight, [...s[1].options].map((o) => o.value), [...s[2].options].map((o) => +o.value)] })()`), 15)
+  console.log('     ', JSON.stringify(camMenu))
+  // 720p and 30 fps, or the closest the camera offers (Chromium's test camera stops below 30 fps).
+  const fps = Math.max(camMenu[4][0], ...camMenu[4].filter((f) => f <= 30))
+  if (camMenu[0] !== (camMenu[3].includes('720') ? '720' : camMenu[3][0]) || +camMenu[1] !== fps) throw new Error('the camera did not default to 720p at 30 fps, or the closest it offers')
+  await b.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Turn on camera').click()`)
+  await until("A sees Bob's camera in the stage grid", () => a.ev(`document.querySelector('.stage .video-grid video')?.videoHeight > 0`), 30)
+  // A camera starts small while the connection measures its bandwidth, then climbs to the chosen quality.
+  await until("Bob's camera reaches A at the chosen 720p", () => a.ev(`document.querySelector('.stage .video-grid video')?.videoHeight === 720`), 30)
+  if (!(await a.ev(received('camera')))) throw new Error('no camera packets arrived')
+  await until('B sees itself, mirrored', () => b.ev(`!!document.querySelector('.stage .screen.mirror video')`), 5)
+  await b.ev(press('Turn off camera'))
+  await until("Bob turns his camera off; A's stage closes", () => a.ev(`!document.querySelector('.stage')`), 10)
+
+  if (process.platform === 'win32') {
+    console.log('--- Computer sound with a share (Windows)')
+    await a.ev(press('Share screen'))
+    await a.ev(`document.querySelector('dialog[open] #share-tab-window').click()`)
+    await pickOwn(a, ownTitles[1])
+    await a.ev(`document.querySelector('dialog[open] .sound-row input').click()`)
+    await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Share').click()`)
+    const how = await until('A shares with computer sound, or says why it cannot', () =>
+      a.ev(`(() => { const badge = document.querySelector('.stage .sharing-badge')?.textContent ?? ''; const note = [...document.querySelectorAll('.call-notice')].some((n) => n.textContent.includes('sound is not being shared')); return badge.includes('with sound') ? 'sound' : note ? 'refused' : false })()`), 20)
+    if (how === 'sound') {
+      await until('B sees the share is with sound, and its sound arrives on its own slot', async () =>
+        (await b.ev(`!!document.querySelector('.stage .screen.big figcaption')?.textContent.includes('with sound')`)) && (await b.ev(received('sound'))) > 0, 20)
+    } else console.log("      this system could not leave Eleusinia's own audio out, so no sound was shared, as intended")
+    await a.ev(press('Stop sharing'))
+    await until('A stops; the stage closes for B', () => b.ev(`!document.querySelector('.stage')`), 10)
+  }
   // ELEUSINIA_NO_DIRECT=1 withholds direct routes, as two strict routers would; the call must then go through the relay.
   const forced = process.env.ELEUSINIA_NO_DIRECT === '1'
   await until(`call is ${forced ? 'relayed through the chat link' : 'direct'}`, async () =>

@@ -2,7 +2,7 @@
 
 Goals: peer-to-peer (no server), lightweight, secure, calls of up to 15 to 20 people, and **no fixed limit** on how many people share a screen or camera.
 
-**Status:** phase 1 (screen sharing in the mesh) is built. Phases 2 to 5 are planned.
+**Status:** phases 1 to 3 (screen sharing, cameras and shared screen sound, in the mesh) are built. Phases 4 and 5 are planned.
 
 ## Rules
 
@@ -37,8 +37,8 @@ A pure mesh therefore holds up to about 6 to 8 full-quality streams on ordinary 
    - **Soft-cap check** on start, as in Rules.
    - **Streamer notices:** a note when their computer or connection cannot keep up with the quality they chose. The choice is never changed for them.
    - **How it fits the call:** every call connection carries a video slot from the start, so starting or stopping a share needs no new offer. VP9 is preferred, then H.264, then VP8.
-2. **Cameras in the mesh:** on/off, a camera picker that follows unplugging (reuse `src/shared/devices.ts`), the same streaming menu (default 720p), and a tile grid that only receives visible tiles. They count towards the same soft cap.
-3. **Shared screen audio:** system audio with a share, without sending the call's own audio back into it.
+2. **Cameras in the mesh. Built.** Camera settings with a live preview: camera, resolution and frame rate up to what the camera offers (default 720p at 30 fps, or the closest it offers). Cameras join the stage: a grid when no screen is shared (each tile at full quality up to 4 cameras, thumbnails beyond), or the strip beside a shared screen; your own picture is mirrored. They count towards the same soft cap, on top of anything you already send. A camera that is unplugged turns off; it does not yet switch to another one.
+3. **Shared screen sound. Built (Windows).** "Share computer sound" in the share dialog sends every app's sound except Eleusinia's own (Chromium's `restrictOwnAudio`, which Windows supports), so nobody hears themselves back; if the system cannot leave our own audio out, no sound is shared and the call panel says why. It travels on its own slot at 128 kbps Opus, plays at the sharer's volume, and is not sent to anyone who has hidden the screens. Mono for now; on macOS and Linux the option is not offered.
 4. **Forwarder spike (go/no-go, 2 to 3 days):** forwarding needs a WebRTC stack in the main process. The candidate is `werift`, a pure-TypeScript library with no native module and the one new dependency. It must forward Chromium VP8/VP9 simulcast between 3 machines before anything is built on it.
 5. **Peer forwarding with end-to-end frame encryption:**
    - **Who forwards and how:** when the soft cap would block a stream, the best-connected participants (ranked by `src/shared/quality.ts`) forward it. The sender uploads one copy as three quality layers (simulcast), and the forwarder picks a layer per viewer without decoding.

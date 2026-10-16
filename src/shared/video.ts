@@ -47,6 +47,21 @@ export function encodingFor(level: Level, q: Quality, kbps: number) {
   return { active: true, scaleResolutionDownBy: 1, maxBitrate: kbps * 1000, maxFramerate: q.fps }
 }
 
+// A shared screen's sound (games, video, music): Opus at a rate where music holds up.
+export const SOUND_KBPS = 128
+
+// What a camera can deliver, from its track's capabilities, falling back to what it is doing now.
+export function cameraSource(
+  caps: { width?: { max?: number }; height?: { max?: number }; frameRate?: { max?: number } },
+  now: { width?: number; height?: number; frameRate?: number },
+) {
+  return {
+    width: caps.width?.max ?? now.width ?? 1280,
+    height: caps.height?.max ?? now.height ?? 720,
+    fps: Math.round(caps.frameRate?.max ?? now.frameRate ?? 30),
+  }
+}
+
 // Room left for voice and everything else on the connection.
 export const UPLOAD_SHARE = 0.8
 // A stream counts as starved only when it lasts this many samples in a row (2 s each)...

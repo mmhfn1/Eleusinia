@@ -88,12 +88,18 @@ app.whenReady().then(() => {
         }
       })
   })
-  ipcMain.handle('chooseScreen', (_e, id: unknown) => void (chosen = typeof id === 'string' ? id : null))
+  // With sound, the computer's audio is captured too (Windows only); the page asks Chromium to leave this app's own
+  // audio out of it, and shares no sound if it cannot.
+  let sound = false
+  ipcMain.handle('chooseScreen', (_e, id: unknown, withSound: unknown) => {
+    chosen = typeof id === 'string' ? id : null
+    sound = withSound === true && process.platform === 'win32'
+  })
   session.defaultSession.setDisplayMediaRequestHandler(async (_req, grant) => {
     const id = chosen
     chosen = null
     const source = id ? (await desktopCapturer.getSources({ types: ['screen', 'window'] })).find((s) => s.id === id) : undefined
-    grant(source ? { video: source } : {})
+    grant(source ? { video: source, ...(sound ? { audio: 'loopback' as const } : {}) } : {})
   })
 
   if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL)

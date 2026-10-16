@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { canStream, choices, defaultQuality, encodingFor, fitQuality, streamKbps, widthFor } from '../src/shared/video'
+import { cameraSource, canStream, choices, defaultQuality, encodingFor, fitQuality, streamKbps, widthFor } from '../src/shared/video'
 
 const fourK = { width: 3840, height: 2160, fps: 120 }
 const laptop = { width: 1920, height: 1080, fps: 60 }
@@ -49,4 +49,10 @@ test('the soft cap: a stream must fit the streamer upload, and nobody already st
   expect(canStream({ kbps: 1400, viewers: 4, uploadKbps: 6000, starved: false })).toEqual({ ok: false, reason: 'upload', needKbps: 5600, uploadKbps: 6000 })
   expect(canStream({ kbps: 1400, viewers: 4, uploadKbps: 10000, starved: true })).toEqual({ ok: false, reason: 'call' })
   expect(canStream({ kbps: 1400, viewers: 4, uploadKbps: null, starved: false })).toEqual({ ok: true }) // unmeasured: never blocks
+})
+
+test('a camera offers what it can do, falling back to what it is doing now', () => {
+  expect(cameraSource({ width: { max: 1920 }, height: { max: 1080 }, frameRate: { max: 60 } }, { width: 640, height: 480, frameRate: 30 })).toEqual({ width: 1920, height: 1080, fps: 60 })
+  expect(cameraSource({}, { width: 640, height: 480, frameRate: 29.97 })).toEqual({ width: 640, height: 480, fps: 30 })
+  expect(choices(cameraSource({}, { width: 640, height: 480, frameRate: 30 })).heights).toEqual([480]) // an old webcam: its own size only
 })
