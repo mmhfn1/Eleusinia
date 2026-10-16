@@ -816,6 +816,7 @@ function SettingsDialog({ st, close, edit, remove }: { st: State; close: () => v
       <section className="settings-section">
         <h2>Hotkeys</h2>
         <Hotkeys st={st} />
+        {WINDOWS && <RunAsAdmin />}
       </section>
       <section className="settings-section">
         <h2>Account</h2>
@@ -830,6 +831,44 @@ function SettingsDialog({ st, close, edit, remove }: { st: State; close: () => v
         </div>
       </section>
     </Dialog>
+  )
+}
+
+const WINDOWS = navigator.userAgent.includes('Windows')
+
+// Windows keeps key presses in a game run as administrator away from Eleusinia unless it runs as administrator too.
+function RunAsAdmin() {
+  const [admin, setAdmin] = useState<boolean | null>(null)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    window.api.isAdmin().then(setAdmin)
+  }, [])
+  const restart = async () => {
+    setErr('')
+    if (!(await window.api.restartAsAdmin())) setErr('Not restarted: Windows did not get permission.')
+  }
+  return (
+    <div className="settings-row admin-row">
+      <span className="row-text">
+        <span className="row-line">
+          <span className="row-title">Restart App as Administrator</span>
+          <Info id="admin-tip">
+            Use this when push to talk or your other hotkeys stop working while a game is in front. Some games, launchers and anti-cheat tools run as
+            administrator, and Windows then hides your key presses from programs that are not.
+            <br />
+            Windows asks for permission first. Eleusinia runs as administrator until you close it; only do this when you need it.
+          </Info>
+        </span>
+        {err && (
+          <span className="row-sub" role="alert">
+            {err}
+          </span>
+        )}
+      </span>
+      <button className="button" disabled={admin !== false} onClick={restart}>
+        {admin ? 'Running as administrator' : 'Restart'}
+      </button>
+    </div>
   )
 }
 

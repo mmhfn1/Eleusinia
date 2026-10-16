@@ -73,13 +73,14 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
   return { child, ev, dir, title, windowState }
 }
 
-// Packets received on one of the live connection's slots (see slotsOf in call.ts): 'sound' is the second audio.
-const received = (slot) => `(async () => {
+// What one of the live connection's slots has received (see slotsOf in call.ts): 'sound' is the second audio.
+const received = (slot, field = 'packetsReceived') => `(async () => {
   const pc = window.__pcs.find((p) => p.connectionState === 'connected')
   const ts = pc?.getTransceivers() ?? []
-  const t = { camera: ts.filter((x) => x.receiver.track.kind === 'video')[1], sound: ts.filter((x) => x.receiver.track.kind === 'audio')[1] }['${slot}']
+  const audio = ts.filter((x) => x.receiver.track.kind === 'audio')
+  const t = { voice: audio[0], camera: ts.filter((x) => x.receiver.track.kind === 'video')[1], sound: audio[1] }['${slot}']
   let n = 0
-  if (t) (await t.receiver.getStats()).forEach((r) => r.type === 'inbound-rtp' && (n = r.packetsReceived))
+  if (t) (await t.receiver.getStats()).forEach((r) => r.type === 'inbound-rtp' && (n = r.${field} ?? 0))
   return n
 })()`
 
@@ -123,6 +124,17 @@ const body = (text) => `document.body.innerText.includes('${text}')`
 // that follows the fake microphone's beeps) without depending on when a poll lands.
 const seen = (cond, ms) => `new Promise((r) => { const t0 = Date.now(); const i = setInterval(() => { if (${cond}) (clearInterval(i), r(true)); else if (Date.now() - t0 > ${ms}) (clearInterval(i), r(false)) }, 20) })`
 const press = (label) => `[...document.querySelectorAll('aside.voice button')].find(x => x.textContent.includes('${label}')).click()`
+// Chromium's fake microphones beep the same tone at the same moments, so with both ends live Ann's echo canceller
+// can take her beep for an echo of Bob's and remove it. Bob stays muted while a check needs to hear Ann.
+async function bobQuiet(p, fn) {
+  await p.ev(press('Mute'))
+  await sleep(500)
+  try {
+    return await fn()
+  } finally {
+    await p.ev(press('Unmute'))
+  }
+}
 // A tiny real PNG, run through the same shrink path a picked file takes.
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
@@ -376,10 +388,23 @@ try {
   await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
   await until('A shows push to talk with its key', async () => (await you()).includes('Push to talk: hold F24'), 5)
   if (await a.windowState('minimized')) await until('A is minimised', () => a.ev('document.hidden'), 10)
-  await key(UiohookKey.F24, true)
-  await until('holding F24 with A minimised: Talking', async () => (await you()).includes('Talking'), 5)
-  await key(UiohookKey.F24, false)
-  await until('releasing it: back to push to talk', async () => (await you()).includes('Push to talk: hold F24'), 5)
+  // B must actually receive A's voice only while the key is held, not just see the label change. Bytes, not audio
+  // energy, since a remote voice plays through Web Audio and its receiver reports no energy; a disabled microphone
+  // sends only Opus's tiny silence frames.
+  const heard = () => b.ev(received('voice', 'bytesReceived'))
+  const sent = async () => { const e = await heard(); await sleep(2500); return (await heard()) - e }
+  const [silentBefore, held, silentAfter] = await bobQuiet(b, async () => {
+    const before = await sent()
+    await key(UiohookKey.F24, true)
+    await until('holding F24 with A minimised: Talking', async () => (await you()).includes('Talking'), 5)
+    const during = await sent()
+    await key(UiohookKey.F24, false)
+    await until('releasing it: back to push to talk', async () => (await you()).includes('Push to talk: hold F24'), 5)
+    await sleep(500)
+    return [before, during, await sent()]
+  })
+  if (!(held > 10 * Math.max(silentBefore, silentAfter, 50))) throw new Error(`B did not receive A's voice only while push to talk was held (bytes in 2.5 s: ${silentBefore} before, ${held} holding, ${silentAfter} after)`)
+  console.log('ok   B hears A only while F24 is held, with A minimised')
   await key(UiohookKey.F23, true)
   await key(UiohookKey.F23, false)
   await until('F23 mutes A while minimised, and B sees it', async () =>
@@ -399,10 +424,12 @@ try {
   const annSpeaking = `[...document.querySelectorAll('.caller.speaking')].some((x) => x.textContent.includes('Ann'))`
   const ownSpeaking = `!!document.querySelector('.callers > .caller:first-child.speaking')`
   // 20 s is many beeps' worth; with checks every 20 ms and the ring held for 250 ms, a beep that arrives cannot be missed.
-  if (!(await b.ev(seen(annSpeaking, 20000)))) throw new Error('B never saw Ann speaking')
-  console.log('ok   B sees the speaking ring on Ann')
-  if (!(await a.ev(seen(ownSpeaking, 20000)))) throw new Error('A never saw its own speaking ring')
-  console.log('ok   A sees its own speaking ring')
+  await bobQuiet(b, async () => {
+    if (!(await b.ev(seen(annSpeaking, 20000)))) throw new Error('B never saw Ann speaking')
+    console.log('ok   B sees the speaking ring on Ann')
+    if (!(await a.ev(seen(ownSpeaking, 20000)))) throw new Error('A never saw its own speaking ring')
+    console.log('ok   A sees its own speaking ring')
+  })
   await a.ev(press('Mute'))
   await sleep(500) // a ring lit just before muting may hold for its hang time
   if (await a.ev(seen(ownSpeaking, 3000))) throw new Error("A's own ring lit while muted")

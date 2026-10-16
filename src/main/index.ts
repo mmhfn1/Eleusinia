@@ -1,3 +1,4 @@
+import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { BrowserWindow, app, desktopCapturer, ipcMain, safeStorage, screen, session } from 'electron'
@@ -157,6 +158,29 @@ app.whenReady().then(() => {
   })
   ipcMain.handle('stopRecording', () => finish(null))
   hook()
+
+  // Windows hides keys typed into a program running as administrator (some games, launchers, anti-cheat) from every
+  // program that is not, whatever method it uses, so hotkeys over such a game need Eleusinia elevated too.
+  const run = (file: string, args: string[]) => new Promise<boolean>((r) => execFile(file, args, { windowsHide: true }, (err) => r(!err)))
+  ipcMain.handle('isAdmin', () => process.platform === 'win32' && run('fltmc', [])) // fltmc only succeeds elevated
+  // Relaunches elevated once Windows has asked the user, then closes this copy; the new copy waits for it to be gone,
+  // so the two never share the identity and data folder. An elevated process does not inherit the environment, so
+  // Eleusinia's own variables (data folder, test DHT, dev server) are carried over explicitly.
+  ipcMain.handle('restartAsAdmin', async () => {
+    if (process.platform !== 'win32') return false
+    const q = (s: string) => `'${s.replace(/'/g, "''")}'`
+    const env = Object.entries(process.env)
+      .filter(([k]) => /^(ELEUSINIA_\w+|ELECTRON_RENDERER_URL)$/.test(k))
+      .map(([k, v]) => `$env:${k} = ${q(v ?? '')}; `)
+      .join('')
+    const args = process.argv.slice(1).map((a) => `"${a.replace(/"/g, '\\"')}"`).join(' ')
+    const inner = `Wait-Process -Id ${process.pid} -Timeout 20 -ErrorAction SilentlyContinue; ${env}Set-Location -LiteralPath ${q(process.cwd())}; Start-Process -FilePath ${q(process.execPath)}${args ? ` -ArgumentList ${q(args)}` : ''}`
+    const encoded = Buffer.from(inner, 'utf16le').toString('base64')
+    // Fails, and this copy stays open, when the user says no to Windows' prompt.
+    const ok = await run('powershell', ['-NoProfile', '-NonInteractive', '-Command', `Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile','-EncodedCommand','${encoded}'`])
+    if (ok) win.close()
+    return ok
+  })
 
   app.on('window-all-closed', async () => {
     if (hooked) uIOhook.stop()

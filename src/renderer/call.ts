@@ -34,6 +34,8 @@ declare global {
       chooseScreen(id: string, sound?: boolean): Promise<void>
       recordHotkey(): Promise<import('../shared/hotkeys').Hotkey | null>
       stopRecording(): Promise<void>
+      isAdmin(): Promise<boolean>
+      restartAsAdmin(): Promise<boolean>
     }
   }
 }

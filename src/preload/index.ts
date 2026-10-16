@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('api', {
   chooseScreen: (id: string, sound?: boolean) => ipcRenderer.invoke('chooseScreen', id, sound),
   recordHotkey: () => ipcRenderer.invoke('recordHotkey'),
   stopRecording: () => ipcRenderer.invoke('stopRecording'),
+  isAdmin: () => ipcRenderer.invoke('isAdmin'),
+  restartAsAdmin: () => ipcRenderer.invoke('restartAsAdmin'),
   on(fn: (e: unknown) => void) {
     const h = (_: unknown, e: unknown) => fn(e)
     ipcRenderer.on('event', h)

@@ -1381,6 +1381,15 @@ legend {
   align-items: center;
   gap: 12px;
 }
+.admin-row {
+  position: relative; /* the (i) tip spans the row */
+  margin-top: 14px;
+}
+.row-line {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
 
 /* ---------- Toast ---------- */
 .toast {
