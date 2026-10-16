@@ -27,7 +27,7 @@ setup, also run both smoke modes.
 | Path | Role |
 |---|---|
 | `src/main/index.ts` | Electron main: window, identity (ed25519 key, encrypted with `safeStorage` when available), and one IPC handler `call(method, ...args)` that forwards to the node |
-| `src/main/node.ts` | Friends, groups, message logs and their sync, settings, call signaling (`signal`, `relayOpen`, `relayClose`). **No Electron imports**, so tests run it directly |
+| `src/main/node.ts` | Friends, groups, message logs and their sync, settings, call signaling (`signal`, `relayOpen`, `relayClose`). Logs stay on disk with only the 3 most recently used conversations in memory (`KEEP_LOGS`); `history(conv, limit)` returns the newest messages. **No Electron imports**, so tests run it directly |
 | `src/main/network.ts` | One encrypted HyperDHT stream per peer, found by public key. Newline-delimited JSON `Wire` messages; `packet()` sends call datagrams (≤1000 B unreliable, larger over the stream) |
 | `src/main/relay.ts` | Fallback when routers block direct WebRTC: a local UDP port offered to WebRTC as a low-priority `relay` candidate, with packets ferried over the peer link. Media stays DTLS-SRTP encrypted |
 | `src/shared/protocol.ts` | Wire, state and event types; validation (`isKey`, `cleanProfile`, …); message stacking |

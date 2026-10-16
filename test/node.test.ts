@@ -484,3 +484,31 @@ test('deleting an account erases it from this computer, leaves its groups and te
   for (const f of ['state.json', 'identity.json', 'msgs']) expect(existsSync(join(a.dir, f))).toBe(false)
   await until(() => !b.node.state().friends[a.key] && !b.node.state().groups[gid]?.members.includes(a.key))
 }, 120000)
+
+test('only a few conversations stay in memory; the rest are read back from disk, and history can be limited', async () => {
+  const a = start()
+  let b = start()
+  a.node.addFriend(b.key)
+  await until(() => b.node.state().friends[a.key] === 'incoming')
+  b.node.addFriend(a.key)
+  await until(() => a.node.state().friends[b.key] === 'friend' && a.node.state().online.includes(b.key))
+  const dm = dmId(a.key, b.key)
+  for (const t of ['one', 'two', 'three']) a.node.send(dm, t)
+  await until(() => texts(b, dm).length === 3)
+
+  // Four other conversations push the DM out of A's memory.
+  for (const name of ['g1', 'g2', 'g3', 'g4']) {
+    a.node.createGroup(name, [b.key])
+    const id = Object.values(a.node.state().groups).find((g: any) => g.name === name)!.id
+    a.node.send(id, 'in ' + name)
+  }
+  // Sent while evicted and while B is away; synced from disk when B is back.
+  await b.node.destroy()
+  await until(() => !a.node.state().online.includes(b.key))
+  a.node.send(dm, 'four')
+  b = start(b.dir, b.keyPair)
+  await until(() => texts(b, dm).includes('four') && a.node.history(dm).acked === 4)
+  expect(a.node.history(dm, 2)).toMatchObject({ total: 4 })
+  expect(a.node.history(dm, 2).msgs.map((m: any) => m.text)).toEqual(['three', 'four'])
+  expect(texts(a, dm)).toEqual(['one', 'two', 'three', 'four'])
+})

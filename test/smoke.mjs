@@ -523,6 +523,21 @@ try {
   await until('A is back home and Second is gone from the rail', () => a.ev(`!!document.querySelector('main.home') && !document.querySelector('.rail-item[aria-label^="Second"]')`), 10)
   await b.ev(`document.querySelector('.rail-item[aria-label^="Second"]').click()`)
   await until('B sees Second without Ann', () => b.ev(`(() => { const m = document.querySelector('aside.members'); return !!m && !m.textContent.includes('Ann') && m.textContent.includes('Bob') })()`), 30)
+
+  console.log('--- A long conversation')
+  // The window holds only the newest 200 messages; older ones load on request without losing the reader's place.
+  const [annId, cyId] = await Promise.all([a, c].map((p) => p.ev(`api.call('state').then((s) => s.me)`)))
+  const ac = [annId, cyId].sort().join('_')
+  await a.ev(`(async () => { for (let i = 1; i <= 205; i++) await api.call('send', '${ac}', 'long ' + i) })()`)
+  await until('C has all 205 messages', () => c.ev(`api.call('history', '${ac}').then((h) => h.total === 205)`), 60)
+  await c.ev(open('Ann'))
+  const count = `document.querySelectorAll('.msgs .msg').length`
+  const has = (text) => `[...document.querySelectorAll('.msgs .msg-text')].some((x) => x.textContent === '${text}')`
+  await until('C opens it with the newest 200 and a "Show earlier messages" button', () =>
+    c.ev(`${count} === 200 && ${has('long 205')} && !${has('long 5')} && !!document.querySelector('.msgs .earlier')`), 10)
+  await c.ev(`(() => { const l = document.querySelector('.msgs'); l.scrollTop = 0; l.querySelector('.earlier').click() })()`)
+  await until('the earlier five appear above, the button goes, and the view stays where it was', () =>
+    c.ev(`${count} === 205 && ${has('long 5')} && !document.querySelector('.msgs .earlier') && document.querySelector('.msgs').scrollTop > 0`), 10)
 } catch (e) {
   failed = true
   console.error('FAIL', e.message)

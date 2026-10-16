@@ -1081,6 +1081,10 @@ details[open] > summary::before {
   padding: 16px 0 8px;
   overflow-y: auto;
 }
+.msgs > .earlier {
+  align-self: center;
+  margin-bottom: 12px;
+}
 .msgs > .empty-state {
   margin: auto;
 }

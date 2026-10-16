@@ -42,6 +42,9 @@ type Opts = {
   noDirect?: boolean // testing: withhold ICE candidates so calls can only connect through the relay
 }
 
+// Conversations whose messages stay in memory; the open one and a couple being synced.
+const KEEP_LOGS = 3
+
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
 export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
@@ -91,36 +94,48 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     push()
   }
 
-  const logs = new Map<string, { msgs: Msg[]; have: Have }>()
+  // Message logs live on disk. Only the few most recently used conversations stay in memory, so long histories
+  // cost nothing while unused; what each author has sent so far (`have`) is tiny and always kept.
+  const logs = new Map<string, Msg[]>() // least recently used first
+  const haves = new Map<string, Have>()
   const logFile = (conv: string) => join(dir, 'msgs', conv + '.jsonl')
   // Callers must pass a conv that members() accepted: it becomes a file name.
-  function log(conv: string) {
-    let l = logs.get(conv)
-    if (l) return l
-    l = { msgs: [], have: {} }
-    if (existsSync(logFile(conv))) {
-      for (const line of readFileSync(logFile(conv), 'utf8').split('\n')) {
-        try {
-          const m: Msg = JSON.parse(line)
-          l.msgs.push(m)
-          l.have[m.author] = m.seq
-        } catch {} // blank or torn last line
+  function msgsOf(conv: string) {
+    let msgs = logs.get(conv)
+    if (msgs) logs.delete(conv)
+    else {
+      msgs = []
+      const have: Have = {}
+      if (existsSync(logFile(conv))) {
+        for (const line of readFileSync(logFile(conv), 'utf8').split('\n')) {
+          try {
+            const m: Msg = JSON.parse(line)
+            msgs.push(m)
+            have[m.author] = m.seq
+          } catch {} // blank or torn last line
+        }
       }
+      haves.set(conv, have)
     }
-    logs.set(conv, l)
-    return l
+    logs.set(conv, msgs)
+    for (const old of logs.keys()) if (logs.size > KEEP_LOGS) logs.delete(old)
+    return msgs
+  }
+  const haveOf = (conv: string) => haves.get(conv) ?? (msgsOf(conv), haves.get(conv)!)
+  function forget(conv: string) {
+    logs.delete(conv)
+    haves.delete(conv)
   }
   function append(m: Msg) {
-    const l = log(m.conv)
-    l.msgs.push(m)
-    l.have[m.author] = m.seq
+    haveOf(m.conv)[m.author] = m.seq
+    logs.get(m.conv)?.push(m)
     appendFileSync(logFile(m.conv), JSON.stringify(m) + '\n')
     emit({ type: 'msg', m })
   }
 
   const hi = (key: Key) => net.send(key, { t: 'hello', ...s.profile, friend: s.friends[key] === 'friend' || s.friends[key] === 'outgoing' })
   const sendHave = (key: Key, conv: string, re?: boolean) =>
-    net.send(key, { t: 'have', conv, have: log(conv).have, re })
+    net.send(key, { t: 'have', conv, have: haveOf(conv), re })
 
   function greet(key: Key) {
     const shared = Object.values(s.groups).filter((g) => g.members.includes(key))
@@ -201,10 +216,13 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
 
     if (w.t === 'have') {
       if (!members(w.conv).includes(key) || !w.have || typeof w.have !== 'object') return
-      const l = log(w.conv)
-      for (const m of missing(l.msgs, w.have)) net.send(key, { t: 'msg', m })
+      const have = haveOf(w.conv)
+      // Read the log only when they lack something; a receipt for what they already hold costs nothing.
+      if (Object.entries(have).some(([a, n]) => n > (Number(w.have[a]) || 0))) {
+        for (const m of missing(msgsOf(w.conv), w.have)) net.send(key, { t: 'msg', m })
+      }
       if (!w.re) sendHave(key, w.conv, true)
-      const seq = Math.min(Number(w.have[me]) || 0, l.have[me] ?? 0)
+      const seq = Math.min(Number(w.have[me]) || 0, have[me] ?? 0)
       if (seq > (s.acked[w.conv] ?? 0)) {
         s.acked[w.conv] = seq
         save()
@@ -214,7 +232,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const m = w.m
       const ms = members(m?.conv)
       if (!ms.includes(key) || !ms.includes(m.author)) return
-      const next = (log(m.conv).have[m.author] ?? 0) + 1
+      const next = (haveOf(m.conv)[m.author] ?? 0) + 1
       if (m.seq < next) return // already have it
       if (m.seq > next) return sendHave(key, m.conv, true) // gap: ask for what we lack
       if (!verifyMsg(m)) return
@@ -361,15 +379,18 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       changed()
       spread(s.groups[id])
     },
-    history(conv: string) {
-      if (!members(conv).length) return { msgs: [], acked: 0 }
-      return { msgs: log(conv).msgs, acked: s.acked[conv] ?? 0 }
+    // The newest `limit` messages by time, and how many there are in all, so the window only holds what it shows.
+    history(conv: string, limit = Infinity) {
+      if (!members(conv).length) return { msgs: [], acked: 0, total: 0 }
+      const all = msgsOf(conv)
+      const n = Math.max(1, Number(limit) || 1)
+      return { msgs: all.length > n ? [...all].sort((a, b) => a.ts - b.ts).slice(-n) : all, acked: s.acked[conv] ?? 0, total: all.length }
     },
     // Works with nobody online: the message is logged now and synced whenever a member connects.
     send(conv: string, text: string) {
       const ms = members(conv)
       if (!ms.length || typeof text !== 'string' || !text || text.length > MAX_TEXT) throw new Error('Cannot send that')
-      const m = signMsg({ conv, author: me, seq: (log(conv).have[me] ?? 0) + 1, ts: Date.now(), text }, keyPair.secretKey)
+      const m = signMsg({ conv, author: me, seq: (haveOf(conv)[me] ?? 0) + 1, ts: Date.now(), text }, keyPair.secretKey)
       append(m)
       for (const k of ms) if (k !== me) net.send(k, { t: 'msg', m })
     },
@@ -378,7 +399,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const g = Object.hasOwn(s.groups, id) ? s.groups[id] : undefined
       if (!g || !g.members.includes(me)) return
       s.groups[id] = mergeGroup(undefined, { ...g, left: { ...g.left, [me]: signLeft(id, keyPair) } })
-      logs.delete(id)
+      forget(id)
       rmSync(logFile(id), { force: true })
       changed()
       for (const k of g.members) if (k !== me) net.send(k, { t: 'group', g: s.groups[id] })

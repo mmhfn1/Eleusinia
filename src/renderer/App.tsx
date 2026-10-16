@@ -1171,6 +1171,7 @@ function CameraDialog({ st, close }: { st: State; close: () => void }) {
   const [busy, setBusy] = useState(false)
   const handed = useRef(false) // a preview handed to the call keeps running after the dialog closes
   const preview = useRef<MediaStreamTrack | null>(null)
+  const closed = useRef(false)
   const viewers = [...call.peers.values()].filter((p) => p.pc.connectionState === 'connected').length
 
   // Opens a camera for the preview; the one in use is shown as it is.
@@ -1179,6 +1180,7 @@ function CameraDialog({ st, close }: { st: State; close: () => void }) {
     setVerdict(null)
     try {
       const c = await call.openCamera(id)
+      if (closed.current) return c.track.stop() // the dialog closed while it was opening; never leave a camera on
       preview.current?.stop()
       preview.current = c.track
       setCam(c)
@@ -1195,6 +1197,7 @@ function CameraDialog({ st, close }: { st: State; close: () => void }) {
       else await open(usable(st.settings.cam ?? '', 'videoinput', list, st.settings.camLabel))
     })
     return () => {
+      closed.current = true
       if (!handed.current) preview.current?.stop()
     }
   }, [])
@@ -1596,11 +1599,18 @@ const clock = (ts: number) => new Date(ts).toLocaleTimeString(undefined, { hour:
 
 type ChatProps = { st: State; conv: string; title: string; people: People; run: Run; home: () => void; stage: ReactNode }
 
+// Messages a conversation opens with; older ones load on request, so a long history costs nothing until wanted.
+const PAGE = 200
+
 function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   const [leaving, setLeaving] = useState(false)
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [acked, setAcked] = useState(0)
   const [loaded, setLoaded] = useState(false)
+  const [total, setTotal] = useState(0)
+  const [more, setMore] = useState({ conv, limit: PAGE })
+  const limit = more.conv === conv ? more.limit : PAGE
+  const kept = useRef<number | null>(null) // the list's height before older messages were added above
   const [length, setLength] = useState(0)
   const list = useRef<HTMLDivElement>(null)
   const atBottom = useRef(true)
@@ -1608,20 +1618,25 @@ function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   const { prof, name, user, isOnline } = people
 
   useEffect(() => {
-    api.call('history', conv).then((h) => {
+    api.call('history', conv, limit).then((h) => {
       setMsgs(h.msgs)
       setAcked(h.acked)
+      setTotal(h.total)
       setLoaded(true)
     })
     return api.on((e) => {
-      if (e.type === 'msg' && e.m.conv === conv) setMsgs((m) => [...m, e.m])
+      if (e.type === 'msg' && e.m.conv === conv) {
+        setMsgs((m) => [...m, e.m])
+        setTotal((t) => t + 1)
+      }
       if (e.type === 'acked' && e.conv === conv) setAcked(e.seq)
     })
-  }, [conv])
+  }, [conv, limit])
   // Follow new messages only if the reader was already at the bottom, or wrote the newest one themselves.
   useLayoutEffect(() => {
     const el = list.current
-    if (el && (atBottom.current || msgs[msgs.length - 1]?.author === st.me)) el.scrollTop = el.scrollHeight
+    if (el && kept.current !== null) (el.scrollTop += el.scrollHeight - kept.current), (kept.current = null) // stay on what was being read
+    else if (el && (atBottom.current || msgs[msgs.length - 1]?.author === st.me)) el.scrollTop = el.scrollHeight
   }, [msgs, st.me])
 
   const group = st.groups[conv]
@@ -1751,6 +1766,17 @@ function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
                 : `Messages travel directly between you and ${title}. If they are offline, yours wait and arrive when you are both online.`}
             </p>
           </div>
+        )}
+        {total > msgs.length && (
+          <button
+            className="button subtle earlier"
+            onClick={() => {
+              kept.current = list.current!.scrollHeight
+              setMore({ conv, limit: limit + PAGE })
+            }}
+          >
+            Show earlier messages
+          </button>
         )}
         {rows}
       </div>
