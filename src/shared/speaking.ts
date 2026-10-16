@@ -17,3 +17,14 @@ export function hear(level: number, now: number, loudAt: number | null, threshol
   if (level > threshold) return { speaking: true, loudAt: now }
   return { speaking: loudAt !== null && now - loudAt < hang, loudAt }
 }
+
+// Mic sensitivity: with a level set (in dB, -70 quiet to -10 loud), the microphone only sends while you are louder
+// than it, and for a moment after so word endings are not cut off. Off when no level is set.
+export const GATE_HANG_MS = 400
+export const GATE_DB = { min: -70, max: -10, initial: -45 }
+export const dbOf = (level: number) => (level > 0 ? 20 * Math.log10(level) : -Infinity)
+export function gate(level: number, now: number, loudAt: number | null, db: number | undefined) {
+  if (db === undefined) return { open: true, loudAt }
+  const r = hear(level, now, loudAt, 10 ** (db / 20), GATE_HANG_MS)
+  return { open: r.speaking, loudAt: r.loudAt }
+}

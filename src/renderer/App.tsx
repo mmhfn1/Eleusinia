@@ -2,6 +2,7 @@ import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useLayou
 import { type Offset, clampOffset, cropRect } from '../shared/crop'
 import { usable } from '../shared/devices'
 import { type Action, type Hotkey, sameKeys } from '../shared/hotkeys'
+import { GATE_DB, dbOf } from '../shared/speaking'
 import { type Group, type Key, type Msg, type Profile, type State, MAX_TEXT, dmId, keyTail, stack } from '../shared/protocol'
 import type { SourceKind } from '../shared/sources'
 import { type Quality, SOUND_KBPS, type Verdict, choices, defaultQuality, fitQuality, heightLabel, streamKbps } from '../shared/video'
@@ -10,12 +11,18 @@ import { Avatar, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Info, Splitter, 
 
 const api = window.api
 const NOBODY: Profile = { handle: '', name: '', about: '', avatar: '' }
+// Right-clicking a person opens their profile card instead of the browser's menu.
+const card = (show: (k: Key) => void, k: Key) => (e: { preventDefault: () => void }) => {
+  e.preventDefault()
+  show(k)
+}
 const labelOf = (p: Profile, k: Key) => p.name || p.handle || k.slice(0, 8)
 const groupName = (g: Group) => g.name || 'Unnamed group'
 
 type Run = (p: Promise<unknown>) => Promise<void>
 // What every screen needs to show people: their profile, their name, and their name as a button opening their card.
-type People = { prof: (k: Key) => Profile; name: (k: Key) => string; user: (k: Key) => ReactNode; isOnline: (k: Key) => boolean }
+// show opens a person's profile card, the same one wherever they are clicked.
+type People = { prof: (k: Key) => Profile; name: (k: Key) => string; user: (k: Key) => ReactNode; isOnline: (k: Key) => boolean; show: (k: Key) => void }
 type Modal = { kind: 'card'; k: Key } | { kind: 'settings' } | { kind: 'group' } | { kind: 'delete' } | null
 
 export default function App() {
@@ -25,6 +32,29 @@ export default function App() {
   const [editing, setEditing] = useState(false)
   const [err, setErr] = useState('')
   const [, tick] = useReducer((n: number) => n + 1, 0)
+  // Where you have been, for the mouse's back and forward buttons (mouse 4 and 5).
+  const trail = useRef({ back: [] as (string | null)[], forward: [] as (string | null)[], at: null as string | null })
+  trail.current.at = sel
+  const go = (c: string | null) => {
+    const t = trail.current
+    if (c === t.at) return
+    t.back.push(t.at)
+    t.forward = []
+    setSel(c)
+  }
+  useEffect(() => {
+    const step = (e: MouseEvent) => {
+      if (e.button !== 3 && e.button !== 4) return
+      e.preventDefault()
+      const t = trail.current
+      const [from, to] = e.button === 3 ? [t.back, t.forward] : [t.forward, t.back]
+      if (!from.length) return
+      to.push(t.at)
+      setSel(from.pop()!)
+    }
+    window.addEventListener('mouseup', step)
+    return () => window.removeEventListener('mouseup', step)
+  }, [])
 
   useEffect(() => {
     const got = (s: State) => {
@@ -50,22 +80,23 @@ export default function App() {
     prof,
     name: (k) => labelOf(prof(k), k),
     user: (k) => (
-      <button key={k} className="user" onClick={() => setModal({ kind: 'card', k })}>
+      <button key={k} className="user" onClick={() => people.show(k)}>
         {labelOf(prof(k), k)}
       </button>
     ),
     isOnline: (k) => k === st.me || st.online.includes(k),
+    show: (k) => setModal({ kind: 'card', k }),
   }
   // A conversation that no longer exists (friend removed) falls back to Home.
   const open = sel && (st.groups[sel] || st.friends[sel.split('_').find((k) => k !== st.me)!] === 'friend') ? sel : null
 
   return (
     <div className="app">
-      <Rail st={st} open={open} go={setSel} show={setModal} />
+      <Rail st={st} open={open} go={go} show={setModal} />
       {open ? (
-        <Conversation key={open} st={st} conv={open} people={people} run={run} home={() => setSel(null)} />
+        <Conversation key={open} st={st} conv={open} people={people} run={run} home={() => go(null)} />
       ) : (
-        <Home st={st} people={people} run={run} open={setSel} newGroup={() => setModal({ kind: 'group' })} />
+        <Home st={st} people={people} run={run} open={go} newGroup={() => setModal({ kind: 'group' })} />
       )}
       {err && (
         <div role="alert" className="toast">
@@ -81,14 +112,14 @@ export default function App() {
           st={st}
           p={{ ...prof(modal.k), name: people.name(modal.k) }}
           close={() => setModal(null)}
-          message={() => setSel(dmId(st.me, modal.k))}
+          message={() => go(dmId(st.me, modal.k))}
           edit={() => setEditing(true)}
           run={run}
         />
       )}
       {modal?.kind === 'settings' && <SettingsDialog st={st} close={() => setModal(null)} edit={() => setEditing(true)} remove={() => setModal({ kind: 'delete' })} />}
       {modal?.kind === 'delete' && <DeleteAccount st={st} close={() => setModal(null)} />}
-      {modal?.kind === 'group' && <NewGroup st={st} people={people} run={run} close={() => setModal(null)} open={setSel} />}
+      {modal?.kind === 'group' && <NewGroup st={st} people={people} run={run} close={() => setModal(null)} open={go} />}
     </div>
   )
 }
@@ -144,11 +175,11 @@ function Rail({ st, open, go, show }: { st: State; open: string | null; go: (c: 
 
 function Home({ st, people, run, open, newGroup }: { st: State; people: People; run: Run; open: (conv: string) => void; newGroup: () => void }) {
   const [width, setWidth] = useWidth('home', 260)
-  const { prof, name, user, isOnline } = people
+  const { prof, name, user, isOnline, show } = people
   const byStatus = (s: string) => Object.keys(st.friends).filter((k) => st.friends[k] === s)
   const friends = byStatus('friend').sort((a, b) => name(a).localeCompare(name(b)))
   const friend = (k: Key) => (
-    <button key={k} className="row-button" onClick={() => open(dmId(st.me, k))}>
+    <button key={k} className="row-button" onClick={() => open(dmId(st.me, k))} onContextMenu={card(show, k)}>
       <Avatar k={k} p={prof(k)} size={36} online={isOnline(k)} />
       <span className="row-text">
         <span className="row-title">{name(k)}</span>
@@ -702,8 +733,19 @@ function AudioSettings({ st }: { st: State }) {
   )
   return (
     <div className="audio-settings">
-      {pick('audioinput', 'Microphone', 'mic')}
       {pick('audiooutput', 'Speakers', 'out')}
+      <div className="setting">
+        <label htmlFor="out-volume">
+          Output volume <b>{Math.round(call.outVolume() * 100)}%</b>
+        </label>
+        <input id="out-volume" type="range" min={0} max={200} step={5} value={Math.round(call.outVolume() * 100)} onChange={(e) => set({ outVolume: Number(e.target.value) / 100 })} />
+        <div className="range-ends" aria-hidden="true">
+          <span>0%</span>
+          <span>200%</span>
+        </div>
+      </div>
+      {pick('audioinput', 'Microphone', 'mic')}
+      <MicSensitivity st={st} set={set} />
       <div className="setting">
         <label htmlFor="bitrate">
           Voice bitrate <b>{st.settings.audioKbps} kbps</b>
@@ -724,6 +766,57 @@ function AudioSettings({ st }: { st: State }) {
           <span>256 kbps</span>
         </div>
       </div>
+    </div>
+  )
+}
+
+// Mic sensitivity, with your live level against it while in a call (the meter reads the call's own analyser, so
+// Settings never opens the microphone by itself).
+function MicSensitivity({ st, set }: { st: State; set: (p: Partial<State['settings']>) => void }) {
+  const db = st.settings.micGate
+  const on = db !== undefined
+  const [, tick] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => {
+    const t = setInterval(tick, 100)
+    return () => clearInterval(t)
+  }, [])
+  const at = (v: number) => `${Math.max(0, Math.min(100, ((v - GATE_DB.min) / (GATE_DB.max - GATE_DB.min)) * 100))}%`
+  const level = dbOf(call.ownLevel)
+  return (
+    <div className="setting mic-gate">
+      <label htmlFor="mic-gate">
+        Mic sensitivity <b>{on ? `${db} dB` : 'Off'}</b>
+      </label>
+      <Info id="mic-gate-tip">
+        With this on, your microphone only sends while you are louder than the level you set, so keyboard, fan and room noise stay out between
+        words.
+        <br />
+        <b>Left</b>: picks up quieter speech, and more noise. <b>Right</b>: you need to speak up, and less noise gets through.
+        <br />
+        Push to talk, when set, takes over from this.
+      </Info>
+      <label className="check-row">
+        <input type="checkbox" checked={on} onChange={(e) => set({ micGate: e.target.checked ? GATE_DB.initial : undefined })} />
+        <span>Only send while I am speaking</span>
+      </label>
+      <input
+        id="mic-gate"
+        type="range"
+        min={GATE_DB.min}
+        max={GATE_DB.max}
+        step={1}
+        value={db ?? GATE_DB.initial}
+        disabled={!on}
+        onChange={(e) => set({ micGate: Number(e.target.value) })}
+      />
+      <div className="mic-meter" aria-hidden="true">
+        {call.conv ? <span className={`mic-meter-level ${on && level > (db ?? 0) ? 'open' : ''}`} style={{ width: at(level) }} /> : null}
+        {on && <span className="mic-meter-mark" style={{ left: at(db) }} />}
+      </div>
+      <span className="range-ends">
+        <span>{call.conv ? 'Your level, live' : 'Join a call to see your level here'}</span>
+        <span>Louder</span>
+      </span>
     </div>
   )
 }
@@ -1295,7 +1388,10 @@ function CameraDialog({ st, close }: { st: State; close: () => void }) {
   )
 }
 
-function Screen({ stream, label, big, mirror }: { stream?: MediaStream; label: string; big?: boolean; mirror?: boolean }) {
+// volume: for a share with sound, a slider for how loud it plays here, beside the full screen button.
+type ScreenProps = { stream?: MediaStream; label: string; big?: boolean; mirror?: boolean; volume?: { value: number; set: (v: number) => void; name: string } }
+
+function Screen({ stream, label, big, mirror, volume }: ScreenProps) {
   const ref = useRef<HTMLVideoElement>(null)
   const fig = useRef<HTMLElement>(null)
   // Follows the document rather than the button, so leaving full screen any other way (Esc, F11) shows up too.
@@ -1316,9 +1412,25 @@ function Screen({ stream, label, big, mirror }: { stream?: MediaStream; label: s
       <video ref={ref} autoPlay playsInline muted onDoubleClick={big ? toggle : undefined} />
       <figcaption>{label}</figcaption>
       {big && (
-        <button className="icon-button screen-full" aria-label={word} title={word} onClick={toggle}>
-          <Icon name={full ? 'collapse' : 'expand'} size={16} />
-        </button>
+        <div className="screen-controls">
+          {volume && (
+            <label className="screen-volume" title={`Volume of ${volume.name}'s stream: ${Math.round(volume.value * 100)}%`}>
+              <Icon name="volume" size={16} />
+              <input
+                type="range"
+                min={0}
+                max={200}
+                step={5}
+                value={Math.round(volume.value * 100)}
+                aria-label={`Volume of ${volume.name}'s stream`}
+                onChange={(e) => volume.set(Number(e.target.value) / 100)}
+              />
+            </label>
+          )}
+          <button className="icon-button screen-full" aria-label={word} title={word} onClick={toggle}>
+            <Icon name={full ? 'collapse' : 'expand'} size={16} />
+          </button>
+        </div>
       )}
     </figure>
   )
@@ -1418,7 +1530,16 @@ function Stage({ name, settings }: { name: (k: Key) => string; settings: () => v
           </button>
         )}
       </div>
-      {!hidden && main && <Screen key={itemId(main)} stream={media(main)} label={label(main)} big mirror={false} />}
+      {!hidden && main && (
+        <Screen
+          key={itemId(main)}
+          stream={media(main)}
+          label={label(main)}
+          big
+          mirror={false}
+          volume={main.slot === 'screen' && info(main).sound ? { value: call.streamVolumeOf(main.k), set: (v) => call.setStreamVolume(main.k, v), name: name(main.k) } : undefined}
+        />
+      )}
       {!hidden && main && (items.length > 1 || mine || cam) && (
         <div className="stage-strip">
           {items.filter((i) => itemId(i) !== itemId(main)).map(tile)}
@@ -1442,7 +1563,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
   const [cameraDialog, setCameraDialog] = useState(false)
   const [left, setLeft] = useWidth('voice', 320)
   const [right, setRight] = useWidth('members', 230)
-  const { prof, name, user, isOnline } = people
+  const { prof, name, user, isOnline, show } = people
   const group = st.groups[conv]
   const other = conv.split('_').find((k) => k !== st.me)!
   const title = group ? groupName(group) : name(other)
@@ -1451,7 +1572,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
   // A speaking ring wherever someone in this call appears.
   const ring = (k: Key) => (inCall && call.speaking.has(k) ? ' speaking' : '')
   const member = (k: Key) => (
-    <div className={`member${ring(k)}`} key={k}>
+    <div className={`member${ring(k)}`} key={k} onContextMenu={card(show, k)}>
       <Avatar k={k} p={prof(k)} size={32} online={isOnline(k)} />
       <span className="row-text">
         <span className="row-title">
@@ -1615,7 +1736,7 @@ function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   const list = useRef<HTMLDivElement>(null)
   const atBottom = useRef(true)
   const box = useRef<HTMLTextAreaElement>(null)
-  const { prof, name, user, isOnline } = people
+  const { prof, name, user, isOnline, show } = people
 
   useEffect(() => {
     api.call('history', conv, limit).then((h) => {
@@ -1708,11 +1829,25 @@ function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   return (
     <main className="workspace chat">
       <header className="chat-head">
-        {group ? <GroupEmblem g={group} size={32} /> : <Avatar k={other} p={prof(other)} size={32} online={isOnline(other)} />}
-        <div className="row-text">
-          <h1>{group ? title : user(other)}</h1>
-          <span className="row-sub">{group ? `${group.members.length} members · ${group.members.filter(isOnline).length} online` : isOnline(other) ? 'Online' : 'Offline'}</span>
-        </div>
+        {group ? (
+          <>
+            <GroupEmblem g={group} size={32} />
+            <div className="row-text">
+              <h1>{title}</h1>
+              <span className="row-sub">{`${group.members.length} members · ${group.members.filter(isOnline).length} online`}</span>
+            </div>
+          </>
+        ) : (
+          <button className="chat-person" onClick={() => show(other)} aria-label={`Open ${title}'s profile`}>
+            <Avatar k={other} p={prof(other)} size={32} online={isOnline(other)} />
+            <span className="row-text">
+              <span className="chat-title">{title}</span>
+              <span className="row-sub">
+                {prof(other).handle} · {isOnline(other) ? 'Online' : 'Offline'}
+              </span>
+            </span>
+          </button>
+        )}
         {addable.length > 0 && (
           <label className="add-member">
             <Icon name="userPlus" size={16} />

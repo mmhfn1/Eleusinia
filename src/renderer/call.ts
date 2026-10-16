@@ -3,7 +3,7 @@ import { fellBack, nextDevice, usable } from '../shared/devices'
 import type { Event, Key, State } from '../shared/protocol'
 import { SAMPLE_EVERY, type Sample, grade, remember, worst } from '../shared/quality'
 import type { SourceKind } from '../shared/sources'
-import { hear, rms } from '../shared/speaking'
+import { gate, hear, rms } from '../shared/speaking'
 import {
   type Level,
   type Quality,
@@ -100,7 +100,18 @@ export const onChange = (fn: () => void) => void (notify = fn)
 const send = (c: string, to: Key | null, data: unknown) => window.api.call('signal', c, to, data)
 const membersOf = (c: string) => state.groups[c]?.members ?? c.split('_')
 // 0 to 2 (200%); played through a GainNode, so above 100% is a real boost.
-export const volumeOf = (k: Key) => Math.min(2, Math.max(0, state.settings.volumes?.[k] ?? 1))
+const clampVolume = (v: number | undefined) => Math.min(2, Math.max(0, v ?? 1))
+export const volumeOf = (k: Key) => clampVolume(state.settings.volumes?.[k])
+export const outVolume = () => clampVolume(state.settings.outVolume)
+// How loud each person's shared screen sound plays here, set beside their stream; for this session only.
+const streamVolumes = new Map<Key, number>()
+export const streamVolumeOf = (k: Key) => streamVolumes.get(k) ?? 1
+export function setStreamVolume(k: Key, v: number) {
+  streamVolumes.set(k, clampVolume(v))
+  const g = peers.get(k)?.sound?.gain
+  if (g) g.gain.value = streamVolumeOf(k)
+  notify()
+}
 const mic = (id: string) => navigator.mediaDevices.getUserMedia({ audio: id ? { deviceId: { exact: id } } : true })
 
 // A connection's transceivers by role, from their order (the same on both sides): voice is the first audio, then the
@@ -142,7 +153,7 @@ function context() {
 }
 // Output device for every voice at once. AudioContext.setSinkId is not in the DOM typings yet.
 const sinkTo = (id: string) => (context() as AudioContext & { setSinkId(id: string): Promise<void> }).setSinkId(id).catch(() => {})
-const applyDeafen = () => master && (master.gain.value = deafened ? 0 : 1)
+const applyDeafen = () => master && (master.gain.value = deafened ? 0 : outVolume())
 
 function listen(s: MediaStream): Listen {
   const source = context().createMediaStreamSource(s)
@@ -154,6 +165,17 @@ function listen(s: MediaStream): Listen {
 function unlisten(l: Listen | null | undefined) {
   l?.source.disconnect()
   l?.analyser.disconnect()
+}
+// Your own level is read from a copy of the microphone, which keeps hearing you while the one sent is switched off
+// (muted, or held back by mic sensitivity), so the sensitivity can open it again.
+function listenOwn(s: MediaStream) {
+  unlistenOwn()
+  own = listen(new MediaStream(s.getAudioTracks().map((t) => t.clone())))
+}
+function unlistenOwn() {
+  own?.source.mediaStream.getTracks().forEach((t) => t.stop())
+  unlisten(own)
+  own = null
 }
 
 // Chromium only feeds a remote stream to Web Audio while a media element plays it, so the element plays it muted
@@ -182,7 +204,7 @@ function playSound(k: Key, p: Peer, s: MediaStream) {
   el.srcObject = s
   const source = context().createMediaStreamSource(s)
   const gain = context().createGain()
-  gain.gain.value = volumeOf(k)
+  gain.gain.value = streamVolumeOf(k)
   source.connect(gain).connect(master!)
   p.sound = { source, gain, el }
 }
@@ -198,11 +220,11 @@ const samplesBuf = new Float32Array(512)
 function listenAll() {
   const now = performance.now()
   let changed = false
-  const check = (k: Key, l: Listen | null | undefined, allowed: boolean) => {
+  const level = (l: Listen) => (l.analyser.getFloatTimeDomainData(samplesBuf), rms(samplesBuf))
+  const check = (k: Key, l: Listen | null | undefined, v: number, allowed: boolean) => {
     let on = false
     if (l) {
-      l.analyser.getFloatTimeDomainData(samplesBuf)
-      const r = hear(rms(samplesBuf), now, l.loudAt)
+      const r = hear(v, now, l.loudAt)
       l.loudAt = r.loudAt
       on = r.speaking && allowed
     }
@@ -211,8 +233,12 @@ function listenAll() {
     if (on) speaking.add(k)
     else speaking.delete(k)
   }
-  check(state.me, own, sending()) // your own ring stays off while muted, deafened or not holding push-to-talk
-  for (const [k, p] of peers) check(k, p.voice, true)
+  ownLevel = own ? level(own) : 0
+  const g = gate(ownLevel, now, gateAt, state.settings.micGate)
+  gateAt = g.loudAt
+  if (g.open !== gateOpen) (gateOpen = g.open), applyMic()
+  check(state.me, own, ownLevel, sending()) // your own ring stays off whenever your microphone is not sending
+  for (const [k, p] of peers) check(k, p.voice, p.voice ? level(p.voice) : 0, true)
   if (changed) notify()
 }
 
@@ -600,8 +626,7 @@ async function useMic(id: string) {
   stream.getTracks().forEach((t) => ((t.onended = null), t.stop()))
   stream = fresh
   micId = id
-  unlisten(own)
-  own = listen(fresh)
+  listenOwn(fresh)
 }
 
 // Keeps the call on the chosen microphone and speakers while they are plugged in, and on the system
@@ -657,7 +682,9 @@ export async function join(c: string) {
   await context().resume()
   await sinkTo(outId)
   applyDeafen()
-  own = listen(fresh)
+  gateOpen = state.settings.micGate === undefined
+  gateAt = null
+  listenOwn(fresh)
   listening = setInterval(listenAll, 50)
   navigator.mediaDevices.addEventListener('devicechange', onDeviceChange)
   send(c, null, { k: 'join' })
@@ -678,8 +705,8 @@ export function leave() {
   sampler = null
   if (listening) clearInterval(listening)
   listening = null
-  unlisten(own)
-  own = null
+  unlistenOwn()
+  ownLevel = 0
   speaking.clear()
   ctx?.suspend()
   samples.clear()
@@ -698,7 +725,11 @@ export function leave() {
 // With a push-to-talk key bound, the microphone only sends while it is held.
 export let talking = false
 export const pushToTalk = () => state.settings.hotkeys?.ptt
-const sending = () => !muted && !deafened && (!pushToTalk() || talking)
+// With mic sensitivity set (and no push to talk), it only sends while you are louder than the level you chose.
+let gateOpen = true
+let gateAt: number | null = null
+export let ownLevel = 0 // your microphone's level right now, for the meter in Settings
+const sending = () => !muted && !deafened && (pushToTalk() ? talking : gateOpen)
 const applyMic = () => stream?.getAudioTracks().forEach((t) => (t.enabled = sending()))
 
 // A hotkey pressed anywhere, even with the app in the background. They only act during a call.
@@ -821,7 +852,8 @@ export function onState(next: State) {
   if (a.audioKbps !== b.audioKbps) for (const p of peers.values()) bitrate(p.pc)
   if (!b.hotkeys?.ptt) talking = false
   applyMic()
-  for (const [k, p] of peers) for (const g of [p.voice?.gain, p.sound?.gain]) if (g) g.gain.value = volumeOf(k)
+  for (const [k, p] of peers) if (p.voice) p.voice.gain.gain.value = volumeOf(k)
+  applyDeafen()
   if (a.mic !== b.mic || a.out !== b.out || a.micLabel !== b.micLabel || a.outLabel !== b.outLabel) followDevices()
   notify()
 }

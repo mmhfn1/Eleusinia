@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { HANG_MS, SPEAKING_RMS, hear, rms } from '../src/shared/speaking'
+import { GATE_HANG_MS, HANG_MS, SPEAKING_RMS, dbOf, gate, hear, rms } from '../src/shared/speaking'
 
 test('rms of silence, a constant and a sine', () => {
   expect(rms([])).toBe(0)
@@ -46,4 +46,16 @@ test('a custom threshold and hang time are respected', () => {
   expect(hear(0.2, 0, null, 0.1).speaking).toBe(true)
   expect(hear(0, 99, 0, 0.1, 100).speaking).toBe(true)
   expect(hear(0, 100, 0, 0.1, 100).speaking).toBe(false)
+})
+
+test('mic sensitivity: off sends always; with a level set, only above it and briefly after', () => {
+  expect(gate(0, 0, null, undefined).open).toBe(true)
+  const db = -40 // an RMS of 0.01
+  expect(gate(0.005, 0, null, db).open).toBe(false) // quieter than the level
+  const loud = gate(0.02, 1000, null, db)
+  expect(loud).toEqual({ open: true, loudAt: 1000 })
+  expect(gate(0.001, 1000 + GATE_HANG_MS - 1, loud.loudAt, db).open).toBe(true) // the end of a word
+  expect(gate(0.001, 1000 + GATE_HANG_MS, loud.loudAt, db).open).toBe(false)
+  expect(Math.round(dbOf(0.01))).toBe(-40)
+  expect(dbOf(0)).toBe(-Infinity)
 })

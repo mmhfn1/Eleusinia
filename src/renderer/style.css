@@ -1047,11 +1047,39 @@ details[open] > summary::before {
   height: 1px;
   background: linear-gradient(90deg, color-mix(in srgb, var(--fog) 28%, transparent), var(--line) 50%, transparent);
 }
-.chat-head h1 {
+.chat-head h1,
+.chat-title {
   font-size: 20px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.chat-title {
+  font-family: var(--serif);
+  font-weight: 600;
+  line-height: 1.2;
+  letter-spacing: 0.01em;
+  color: var(--silver);
+}
+/* In a DM, the person's picture, name and friend ID together open their profile. */
+.chat-person {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  margin: -4px -8px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--r-md);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-person:hover,
+.chat-person:focus-visible {
+  background: var(--obsidian-3);
 }
 .chat-head h1 .user {
   font: inherit;
@@ -1661,11 +1689,29 @@ hr {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.screen-full {
+.screen-controls {
   position: absolute;
   right: 8px;
   bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.screen-full {
   background: rgb(0 0 0 / 0.6);
+}
+.screen-volume {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: var(--r-md);
+  background: rgb(0 0 0 / 0.6);
+  color: var(--silver);
+}
+.screen-volume input {
+  width: 96px;
 }
 .stage-strip {
   display: flex;
@@ -1842,4 +1888,33 @@ hr {
 }
 .sound-row {
   grid-column: 1 / -1;
+}
+.mic-gate .check-row,
+.mic-meter {
+  grid-column: 1 / -1;
+}
+/* Your live microphone level, and the sensitivity mark it has to pass. */
+.mic-meter {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--obsidian-3);
+  overflow: hidden;
+}
+.mic-meter-level {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--mist-2);
+  transition: width 90ms linear;
+}
+.mic-meter-level.open {
+  background: var(--good);
+}
+.mic-meter-mark {
+  position: absolute;
+  top: -2px;
+  bottom: -2px;
+  width: 2px;
+  margin-left: -1px;
+  background: var(--silver);
 }

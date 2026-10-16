@@ -184,7 +184,7 @@ try {
   await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
   const layout = await a.ev(`(() => {
     const sec = document.querySelector('section.friend-id'), set = document.querySelector('dialog[open]')
-    const tip = document.getElementById('bitrate-tip'), icon = document.querySelector('.info-icon')
+    const tip = document.getElementById('bitrate-tip'), icon = document.querySelector('.info-icon[aria-describedby=bitrate-tip]')
     const hidden = getComputedStyle(tip).display
     icon.focus()
     const shown = getComputedStyle(tip).display
@@ -228,6 +228,25 @@ try {
   await until('B clicking the name opens Ann card with picture, about, ID and Unique Key', () =>
     b.ev(`(() => { const d = document.querySelector('dialog[open]'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('anntester#') && d.textContent.includes('Unique Key') && !!d.querySelector('.avatar img') })()`))
   await b.ev(`[...document.querySelectorAll('dialog button')].find(x => x.textContent === 'Close').click()`)
+  // The same card from the DM header (picture, name and friend ID) and from a right-click in the friends list.
+  const annCard = `(() => { const d = document.querySelector('dialog[open].card-dialog'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('anntester#') && !!d.querySelector('.avatar img') })()`
+  const closeCard = `[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`
+  if (!(await b.ev(`(() => { const h = document.querySelector('.chat-person'); return !!h?.querySelector('.avatar') && h.textContent.includes('Ann') && h.textContent.includes('anntester#') })()`))) throw new Error('the DM header lacks the picture, name or friend ID')
+  await b.ev(`document.querySelector('.chat-person').click()`)
+  await until('clicking the DM header opens the same card', () => b.ev(annCard), 5)
+  await b.ev(closeCard)
+  await b.ev(`document.querySelector('button.home').click()`)
+  await b.ev(`[...document.querySelectorAll('.online .row-button')].find((x) => x.textContent.includes('Ann')).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+  await until('right-clicking Ann in the friends list opens the same card', () => b.ev(annCard), 5)
+  await b.ev(closeCard)
+  // Mouse 4 and 5 (back and forward) move through where you have been.
+  const mouse = (button) => `window.dispatchEvent(new MouseEvent('mouseup', { button: ${button}, bubbles: true }))`
+  await b.ev(open('Ann'))
+  await until('B is back in the DM', () => b.ev(`!!document.querySelector('.chat-person')`), 5)
+  await b.ev(mouse(3))
+  await until('mouse 4 goes back: Home', () => b.ev(`!!document.querySelector('main.home')`), 5)
+  await b.ev(mouse(4))
+  await until('mouse 5 goes forward: the DM again', () => b.ev(`!!document.querySelector('.chat-person')`), 5)
 
   console.log('--- Voice call from the left sidebar')
   await a.ev(press('Start call'))
@@ -345,6 +364,9 @@ try {
     if (how === 'sound') {
       await until('B sees the share is with sound, and its sound arrives on its own slot', async () =>
         (await b.ev(`!!document.querySelector('.stage .screen.big figcaption')?.textContent.includes('with sound')`)) && (await b.ev(received('sound'))) > 0, 20)
+      await b.ev(`(() => { const r = document.querySelector('.screen.big .screen-controls .screen-volume input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(r, '50'); r.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+      await until("B turns the stream down to 50% with the slider beside the full screen button", () =>
+        b.ev(`(() => { const c = document.querySelector('.screen.big .screen-controls'); return c.querySelector('.screen-volume input').value === '50' && c.lastElementChild.classList.contains('screen-full') })()`), 5)
     } else console.log("      this system could not leave Eleusinia's own audio out, so no sound was shared, as intended")
     await a.ev(press('Stop sharing'))
     await until('A stops; the stage closes for B', () => b.ev(`!document.querySelector('.stage')`), 10)
@@ -371,6 +393,9 @@ try {
   console.log('ok   no hotkeys are bound by default')
   // Set them the way a person would: Settings, Set, press the keys.
   await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
+  const order = await a.ev(`(() => { const t = document.querySelector('.audio-settings').textContent; return ['Speakers', 'Output volume', 'Microphone', 'Mic sensitivity', 'Voice bitrate'].map((x) => t.indexOf(x)) })()`)
+  if (order.some((n, i) => n < 0 || (i && n < order[i - 1]))) throw new Error('Audio settings are not in the order Speakers, Output volume, Microphone, Mic sensitivity, Voice bitrate: ' + order)
+  console.log('ok   Settings: Speakers then output volume, Microphone then mic sensitivity, then bitrate')
   const row = (name) => `[...document.querySelectorAll('.hotkey')].find((x) => x.querySelector('.row-title').textContent === '${name}')`
   const setKey = async (name, code) => {
     await a.ev(`${row(name)}.querySelector('button').click()`)
@@ -419,6 +444,19 @@ try {
   await sleep(500)
   if (await a.ev(`!!document.querySelector('.callers .voice-mark')`)) throw new Error('a cleared hotkey still acted')
   console.log('ok   once cleared, the key does nothing')
+
+  // Mic sensitivity: at 0 dB nothing (not even the fake beep) is loud enough to send; at -70 dB everything is.
+  await a.ev(`api.call('setSettings', { micGate: 0 })`)
+  const [gated, opened] = await bobQuiet(b, async () => {
+    await sleep(500)
+    const shut = await sent()
+    await a.ev(`api.call('setSettings', { micGate: -70 })`)
+    await sleep(500)
+    return [shut, await sent()]
+  })
+  await a.ev(`api.call('setSettings', { micGate: undefined })`)
+  if (!(opened > 10 * Math.max(gated, 50))) throw new Error(`mic sensitivity did not hold the voice back (bytes in 2.5 s: ${gated} above every level, ${opened} at the lowest)`)
+  console.log('ok   mic sensitivity: B receives nothing while A is quieter than the level, and A once louder')
 
   // Chromium's fake microphone beeps, so both sides should see Ann's speaking ring.
   const annSpeaking = `[...document.querySelectorAll('.caller.speaking')].some((x) => x.textContent.includes('Ann'))`
@@ -470,6 +508,9 @@ try {
   await until('B members sidebar lists Ann, Bob and Cy as online', () => b.ev(`(() => { const m = document.querySelector('aside.members'); return !!m && m.querySelector('h2').textContent === 'Online (3)' && ['Ann','Bob','Cy'].every(n => m.textContent.includes(n)) })()`))
   await a.ev(open('Trio'))
   await until('A shows it', () => a.ev(shows('group online from cy')))
+  await b.ev(`[...document.querySelectorAll('aside.members .member')].find((x) => x.textContent.includes('Ann')).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+  await until('right-clicking Ann in the members list opens the same card', () => b.ev(annCard), 5)
+  await b.ev(closeCard)
 
   console.log('--- Resizable sidebars')
   const widths = await a.ev(`(() => {
