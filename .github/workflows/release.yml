@@ -1,8 +1,7 @@
 # Every push to main that changes the app is checked, built and published as a GitHub Release, which installed copies
 # pick up as an update (electron-updater, see startUpdates in src/main/index.ts). Pushes that only touch docs or tests
-# publish nothing. The version counts up by itself: package.json holds the first release of a series (0.0.2), and
-# each release adds this workflow's run number to its last part (0.0.2, 0.0.3, ...). Raise the first two parts in
-# package.json for a bigger step.
+# publish nothing. The version counts up by itself: one past the newest release tag in the series package.json names
+# (0.0.2, 0.0.3, ...), so a failed run never skips a number. Raise the first two parts in package.json for a bigger step.
 name: Release
 
 on:
@@ -26,6 +25,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the release tags, to number this one
 
       - uses: actions/setup-node@v4
         with:
@@ -44,20 +45,34 @@ jobs:
       - name: Version
         shell: bash
         run: |
-          node -e "
+          VERSION=$(node -e "
             const fs = require('fs')
+            const { execSync } = require('child_process')
             const p = JSON.parse(fs.readFileSync('package.json', 'utf8'))
             const [a, b, c] = p.version.split('.').map(Number)
-            p.version = [a, b, c + Number(process.env.RUN) - 1].join('.')
+            const released = execSync('git tag --list v' + a + '.' + b + '.*').toString().split('\n').map((t) => Number(t.trim().split('.')[2])).filter(Number.isInteger)
+            p.version = [a, b, Math.max(c, ...released.map((n) => n + 1))].join('.')
             fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n')
-            console.log('Releasing ' + p.version)
-          "
-        env:
-          RUN: ${{ github.run_number }}
+            console.log(p.version)
+          ")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "Releasing $VERSION"
 
-      - name: Build and publish
+      - name: Build
         run: |
           npx electron-vite build
-          npx electron-builder --win --publish always
+          npx electron-builder --win --publish never
+
+      # One step publishes the installer with its update files (latest.yml, which installed copies read, and the
+      # blockmap for small updates). electron-builder's own publishing uploads them in parallel, and each upload
+      # then tries to create the release, which fails for all but the first.
+      - name: Publish
+        shell: bash
+        run: |
+          gh release create "v$VERSION" \
+            "dist/Eleusinia-Setup-$VERSION.exe" \
+            "dist/Eleusinia-Setup-$VERSION.exe.blockmap" \
+            dist/latest.yml \
+            --title "$VERSION" --target "$GITHUB_SHA" --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
