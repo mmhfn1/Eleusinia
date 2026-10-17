@@ -5,8 +5,9 @@ const MAX_LINE = 1 << 20
 
 type Handlers = { open(key: Key): void; close(key: Key): void; msg(key: Key, w: Wire): void; packet?(key: Key, b: Buffer): void }
 
-// One encrypted, authenticated stream per peer, found by public key over the DHT.
-export function createNet(keyPair: { publicKey: Buffer; secretKey: Buffer }, on: Handlers, dhtOpts?: object) {
+// One encrypted, authenticated stream per peer, found by public key over the DHT. `allow` is for tests: refusing a
+// peer's link stands in for two routers that never let a direct connection through.
+export function createNet(keyPair: { publicKey: Buffer; secretKey: Buffer }, on: Handlers, dhtOpts?: object, allow: (key: Key) => boolean = () => true) {
   const me = keyPair.publicKey.toString('hex')
   const dht = new DHT(dhtOpts)
   const links = new Map<Key, { sock: any; initiator: Key }>()
@@ -14,6 +15,7 @@ export function createNet(keyPair: { publicKey: Buffer; secretKey: Buffer }, on:
 
   function adopt(sock: any, initiator: Key) {
     const key: Key = sock.remotePublicKey.toString('hex')
+    if (!allow(key)) return sock.destroy()
     const old = links.get(key)
     if (old) {
       // Both sides dialed at once: both keep the stream dialed by the smaller key. The same side dialing again
@@ -66,7 +68,7 @@ export function createNet(keyPair: { publicKey: Buffer; secretKey: Buffer }, on:
       links.get(key)?.sock.write(JSON.stringify(w) + '\n')
     },
     dial(key: Key) {
-      if (links.has(key) || dialing.has(key)) return
+      if (links.has(key) || dialing.has(key) || !allow(key)) return
       dialing.add(key)
       const sock = dht.connect(Buffer.from(key, 'hex'), { keyPair })
       sock.on('error', () => {}) // offline peers end up here; the caller redials on a timer
@@ -82,6 +84,16 @@ export function createNet(keyPair: { publicKey: Buffer; secretKey: Buffer }, on:
       const keys = new Set<Key>()
       for await (const r of dht.lookup(topic)) for (const peer of r.peers) keys.add(peer.publicKey.toString('hex'))
       return [...keys]
+    },
+    // A small record signed by this key (under 1 KB), kept by the DHT for up to 48 hours: anyone can read it by key
+    // without a link. Each publish needs a higher seq than the last.
+    publish: (value: Buffer, seq: number) => dht.mutablePut(keyPair, value, { seq }).then(() => true, () => false) as Promise<boolean>,
+    async fetch(key: Key): Promise<Buffer | null> {
+      try {
+        return (await dht.mutableGet(Buffer.from(key, 'hex'), { latest: false }))?.value ?? null
+      } catch {
+        return null
+      }
     },
     // A call packet: sent as an unreliable datagram when it fits, so a lost one is never waited for.
     // Larger ones (DTLS handshake) go over the reliable stream instead.

@@ -73,6 +73,15 @@ export default function App() {
     })
   }, [])
 
+  // A new friend request shows as a desktop notification, so it is not missed while Eleusinia is in the background.
+  const asked = useRef<Set<Key> | null>(null)
+  useEffect(() => {
+    if (!st) return
+    const now = new Set(Object.keys(st.friends).filter((k) => st.friends[k] === 'incoming'))
+    if (asked.current) for (const k of now) if (!asked.current.has(k)) new Notification('Eleusinia', { body: `${labelOf(st.profiles[k] ?? NOBODY, k)} wants to be friends` })
+    asked.current = now
+  }, [st])
+
   if (!st) return null
   if (!st.profile.handle || editing) return <ProfileForm st={st} first={!st.profile.handle} done={() => setEditing(false)} />
 
@@ -334,7 +343,7 @@ function FriendId({ st }: { st: State }) {
   )
 }
 
-type Found = { key: Key; profile: Profile }
+type Found = { key: Key; profile: Profile; linked: boolean }
 
 // Suggests people as their username or ID is typed (from 4 characters). The request goes only to the row clicked.
 function Search({ st, run }: { st: State; run: Run }) {
@@ -352,14 +361,16 @@ function Search({ st, run }: { st: State; run: Run }) {
       return
     }
     setBusy(true)
-    // Nobody found is asked again a few times: someone who just came online takes a few seconds to be findable.
+    // Asked again a few times while nobody is found (someone who just came online takes a few seconds to be findable)
+    // or someone was found only by their published card: once a link is made, their picture comes too.
     let timer: ReturnType<typeof setTimeout>
     const look = (tries: number) => {
       api.call('findFriend', q).then(
         (r: Found[]) => {
           if (id !== latest.current) return
           setFound(r)
-          if (!r.length && tries > 0) timer = setTimeout(() => look(tries - 1), 3000)
+          if (r.length) setBusy(false)
+          if ((!r.length || r.some((f) => !f.linked)) && tries > 0) timer = setTimeout(() => look(tries - 1), 3000)
           else setBusy(false)
         },
         () => id === latest.current && setBusy(false),
@@ -375,6 +386,7 @@ function Search({ st, run }: { st: State; run: Run }) {
     setText('')
   }
   const status = (k: Key) => ({ friend: 'Already friends', outgoing: 'Request sent', incoming: 'Wants to be friends' })[st.friends[k]]
+  const action = (k: Key) => ({ friend: 'Friends', outgoing: 'Requested', incoming: 'Accept' })[st.friends[k]] ?? 'Add friend'
 
   return (
     <div className="search-box">
@@ -391,13 +403,21 @@ function Search({ st, run }: { st: State; run: Run }) {
         />
       </div>
       <p id="search-status" className="row-sub" aria-live="polite">
-        {busy ? 'Searching…' : found && (found.length ? found.some((f) => !st.friends[f.key]) ? 'Choose a person to send them a friend request.' : `${found.length} found` : 'No one online matches that.')}
+        {busy ? 'Searching…' : found && (found.length ? found.some((f) => !st.friends[f.key]) ? 'Choose Add friend to send them a request.' : `${found.length} found` : 'No one online matches that.')}
       </p>
       {found && found.length > 0 && (
         <div className="results" role="group" aria-label="Suggestions">
           {sameId && <p className="notice">Some people here share the same ID. Ask your friend for their Unique Key and choose that one.</p>}
           {found.map((r) => (
-            <button key={r.key} className="row-button result" disabled={st.friends[r.key] === 'friend' || st.friends[r.key] === 'outgoing'} onClick={() => pick(r)}>
+            <div key={r.key} className="result">
+              <button
+                className="button primary add-friend"
+                disabled={st.friends[r.key] === 'friend' || st.friends[r.key] === 'outgoing'}
+                onClick={() => pick(r)}
+                aria-label={`${action(r.key)}: ${r.profile.name || r.profile.handle}`}
+              >
+                {!st.friends[r.key] && <Icon name="userPlus" size={16} />} {action(r.key)}
+              </button>
               <Avatar k={r.key} p={r.profile} size={36} />
               <span className="row-text">
                 <span className="row-title">
@@ -408,7 +428,7 @@ function Search({ st, run }: { st: State; run: Run }) {
               <span className="tail" title="Unique Key">
                 {keyTail(r.key)}
               </span>
-            </button>
+            </div>
           ))}
         </div>
       )}

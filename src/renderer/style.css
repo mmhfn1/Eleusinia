@@ -813,6 +813,21 @@ aside {
   box-shadow: var(--shadow-1);
   animation: rise var(--t-fast) var(--ease);
 }
+.result {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px;
+  border-radius: var(--r-md);
+}
+.result:hover {
+  background: var(--obsidian-3);
+}
+.result .add-friend {
+  flex: none;
+  min-width: 112px; /* the same width whatever it says, so rows line up */
+  justify-content: center;
+}
 .result .tail {
   margin-left: auto;
 }

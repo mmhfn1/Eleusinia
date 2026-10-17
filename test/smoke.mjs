@@ -229,7 +229,7 @@ try {
     const pic = n === 'Cy' ? '.avatar svg' : '.avatar img'
     await until(`typing "${typed}" suggests ${n}: ${n === 'Cy' ? 'generated' : 'uploaded'} picture, ID, Unique Key ${tail}`, () =>
       a.ev(`(() => { const r = document.querySelectorAll('.result'); return r.length === 1 && !!r[0].querySelector('${pic}') && r[0].textContent.includes('${ids[n]}') && r[0].querySelector('.tail').textContent === '${tail}' })()`))
-    await a.ev(`document.querySelector('.result').click()`)
+    await a.ev(`document.querySelector('.result .add-friend').click()`)
     await until(`${n} sees the request with Ann's picture`, () => p.ev(`[...document.querySelectorAll('.request')].some(r => r.textContent.includes('Ann wants') && r.querySelector('.avatar img'))`))
     await p.ev(`[...document.querySelectorAll('.request button')].find(x => x.textContent === 'Accept').click()`)
   }

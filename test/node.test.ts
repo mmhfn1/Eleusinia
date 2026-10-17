@@ -533,3 +533,40 @@ test('peers tell each other their version; a hello without one counts as 0.0.1, 
   expect(versionOf({ app: '<script>', call: -3 })).toEqual({ app: '0.0.1 or older', call: 1 })
   expect(versionOf({ app: '1.2.3', call: 2 })).toEqual({ app: '1.2.3', call: 2 })
 })
+
+test('friend requests arrive and are accepted even when no direct link can ever be made, and a declined one stays gone', async () => {
+  const blocked = new Set<string>()
+  const mk = (name: string) => {
+    const dir = mkdtempSync(join(tmpdir(), 'eleusinia-'))
+    const keyPair = DHT.keyPair()
+    const key = keyPair.publicKey.toString('hex')
+    // Two strict routers: these peers refuse every direct link with each other.
+    const node = createNode({ dir, keyPair, emit: () => {}, dht: { bootstrap: testnet.bootstrap }, redialMs: 300, links: (k) => !blocked.has([k, key].sort().join()) })
+    const n = { node, dir, keyPair, key }
+    nodes.push(n)
+    return n
+  }
+  const a = mk('a')
+  const b = mk('b')
+  const c = mk('c')
+  blocked.add([a.key, b.key].sort().join())
+  blocked.add([c.key, b.key].sort().join())
+  await a.node.setProfile({ username: 'ada', name: 'Ada', about: 'hello', avatar: '' })
+  await b.node.setProfile({ username: 'bea', name: 'Bea', about: '', avatar: '' })
+  await c.node.setProfile({ username: 'cal', name: 'Cal', about: '', avatar: '' })
+
+  a.node.addFriend(b.key)
+  await until(() => b.node.state().friends[a.key] === 'incoming')
+  await until(() => b.node.state().profiles[a.key]?.name === 'Ada') // from Ada's published card, no link needed
+  expect(b.node.state().profiles[a.key].handle).toBe(a.node.state().profile.handle)
+  b.node.addFriend(a.key) // accept
+  await until(() => a.node.state().friends[b.key] === 'friend')
+  expect(b.node.state().friends[a.key]).toBe('friend')
+  expect(a.node.state().online).not.toContain(b.key) // friends now, yet never linked: it all went through the DHT
+
+  c.node.addFriend(b.key)
+  await until(() => b.node.state().friends[c.key] === 'incoming')
+  b.node.removeFriend(c.key) // decline, while Cal keeps announcing
+  await new Promise((r) => setTimeout(r, 3000)) // several checks of the request topic, where Cal is still announced
+  expect(b.node.state().friends[c.key]).toBeUndefined()
+}, 120000)
