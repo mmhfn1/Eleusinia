@@ -26,6 +26,7 @@ export type Settings = {
   outVolume?: number
   micGate?: number
   crashReports?: boolean // send crash reports to the developers automatically; on unless turned off
+  closeToTray?: boolean // closing the window keeps Eleusinia running in the tray; on unless turned off
 }
 
 export type State = {

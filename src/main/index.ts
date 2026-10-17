@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { join } from 'node:path'
-import { BrowserWindow, app, desktopCapturer, ipcMain, safeStorage, screen, session } from 'electron'
+import { BrowserWindow, Menu, Tray, app, desktopCapturer, ipcMain, nativeImage, safeStorage, screen, session } from 'electron'
 import DHT from 'hyperdht'
 import { autoUpdater } from 'electron-updater'
 import { UiohookKey, uIOhook } from 'uiohook-napi'
@@ -18,6 +18,10 @@ const inboxMode = process.argv.includes('--inbox')
 if (inboxMode) app.setPath('userData', process.env.ELEUSINIA_INBOX_DIR || join(app.getPath('appData'), 'Eleusinia Inbox'))
 // Lets several instances run side by side on one machine, each with its own identity.
 else if (process.env.ELEUSINIA_DATA) app.setPath('userData', process.env.ELEUSINIA_DATA)
+// One copy per data folder: opening Eleusinia while it waits in the tray brings that copy back rather than starting a
+// second one with the same identity.
+const firstCopy = inboxMode || app.requestSingleInstanceLock()
+if (!firstCopy) app.quit()
 
 // Testing only: join this DHT instead of the public one, as "host:port,host:port" (test/smoke.mjs runs a local
 // one). Unset in normal use, which keeps the public DHT.
@@ -64,7 +68,7 @@ function loadIdentity(dir: string) {
   return { publicKey: secretKey.subarray(32), secretKey } // an ed25519 secret key ends with its public key
 }
 
-app.whenReady().then(() => (inboxMode ? startInbox() : startApp()))
+app.whenReady().then(() => (inboxMode ? startInbox() : firstCopy && startApp()))
 
 // Updates: the installed app looks for a newer release of github.com/mmhfn1/Eleusinia (published for every push to
 // main, see .github/workflows/release.yml) on start and every 4 hours, downloads it in the background and tells the
@@ -102,6 +106,28 @@ function startApp() {
   })
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', (e) => e.preventDefault())
+
+  // Closing the window keeps Eleusinia running in the tray, so calls, messages, hotkeys and updates carry on; it quits
+  // from the tray menu (or when Windows shuts down, or to install an update). Settings can turn this off, and closing
+  // the window then quits.
+  let quitting = false
+  app.on('before-quit', () => (quitting = true))
+  const show = () => {
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  }
+  const tray = new Tray(nativeImage.createFromPath(join(__dirname, '../../build/icon.png')).resize({ width: 32, height: 32 }))
+  tray.setToolTip('Eleusinia')
+  tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Quit Eleusinia', click: () => app.quit() }]))
+  tray.on('click', show)
+  app.on('second-instance', show)
+  win.on('close', (e) => {
+    if (quitting) return
+    e.preventDefault()
+    if (node.state().settings.closeToTray === false) app.quit()
+    else win.hide()
+  })
 
   // The last few minutes of what happened, scrubbed and in memory only, for problem and crash reports (reports.ts).
   const diagnostics = createDiagnostics()
@@ -284,14 +310,21 @@ function startApp() {
     const encoded = Buffer.from(inner, 'utf16le').toString('base64')
     // Fails, and this copy stays open, when the user says no to Windows' prompt.
     const ok = await run('powershell', ['-NoProfile', '-NonInteractive', '-Command', `Start-Process powershell -Verb RunAs -WindowStyle Hidden -ArgumentList '-NoProfile','-EncodedCommand','${encoded}'`])
-    if (ok) win.close()
+    if (ok) app.quit()
     return ok
   })
 
-  app.on('window-all-closed', async () => {
+  // Every way out (the tray menu, an update, Windows shutting down) passes here once: the network closes cleanly and
+  // the marker goes, so the next start does not report an abrupt end.
+  let closed = false
+  app.on('will-quit', async (e) => {
+    if (closed) return
+    e.preventDefault()
     if (hooked) uIOhook.stop()
-    await node.destroy()
+    await node.destroy().catch(() => {})
     rmSync(running, { force: true })
+    tray.destroy()
+    closed = true
     app.quit()
   })
 }

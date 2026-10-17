@@ -18,7 +18,8 @@
   },
   "type": "commonjs",
   "dependencies": {
-    "@fontsource/cormorant-garamond": "^5.3.0",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@fontsource/zen-kaku-gothic-new": "^5.3.1",
     "electron-updater": "^6.8.9",
     "hypercore-crypto": "^3.7.0",
     "hyperdht": "^6.34.1",

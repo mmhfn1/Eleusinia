@@ -717,7 +717,7 @@ function NewGroup({ st, people, run, close, open }: { st: State; people: People;
           <legend>Members</legend>
           {friends.map((k) => (
             <label key={k} className="check-row">
-              <input type="checkbox" name="member" value={k} />
+              <input type="checkbox" role="switch" name="member" value={k} />
               <Avatar k={k} p={people.prof(k)} size={28} />
               <span>{people.name(k)}</span>
             </label>
@@ -825,7 +825,7 @@ function MicSensitivity({ st, set }: { st: State; set: (p: Partial<State['settin
         Push to talk, when set, takes over from this.
       </Info>
       <label className="check-row">
-        <input type="checkbox" checked={on} onChange={(e) => set({ micGate: e.target.checked ? GATE_DB.initial : undefined })} />
+        <input type="checkbox" role="switch" checked={on} onChange={(e) => set({ micGate: e.target.checked ? GATE_DB.initial : undefined })} />
         <span>Only send while I am speaking</span>
       </label>
       <input
@@ -941,6 +941,15 @@ function SettingsDialog({ st, close, edit, remove }: { st: State; close: () => v
         {WINDOWS && <RunAsAdmin />}
       </section>
       <section className="settings-section">
+        <h2>General</h2>
+        <label className="check-row">
+          <input type="checkbox" role="switch" checked={st.settings.closeToTray !== false} onChange={(e) => api.call('setSettings', { closeToTray: e.target.checked })} />
+          <span>
+            Minimize to the system tray when the window is closed
+          </span>
+        </label>
+      </section>
+      <section className="settings-section">
         <h2>Help and feedback</h2>
         <Feedback st={st} />
       </section>
@@ -1021,7 +1030,7 @@ function Feedback({ st }: { st: State }) {
       </div>
       <div className="setting crash-setting">
         <label className="check-row">
-          <input type="checkbox" checked={st.settings.crashReports !== false} onChange={(e) => api.call('setSettings', { crashReports: e.target.checked })} />
+          <input type="checkbox" role="switch" checked={st.settings.crashReports !== false} onChange={(e) => api.call('setSettings', { crashReports: e.target.checked })} />
           <span>Send crash reports to the developers automatically</span>
         </label>
         <Info id="crash-tip">
@@ -1128,7 +1137,7 @@ function ReportDialog({ st, close }: { st: State; close: () => void }) {
           <legend>Share diagnostics</legend>
           {SHARE.map((s) => (
             <label key={s.area} className="check-row">
-              <input type="checkbox" checked={share.includes(s.area)} onChange={(e) => toggle(s.area, e.target.checked)} />
+              <input type="checkbox" role="switch" checked={share.includes(s.area)} onChange={(e) => toggle(s.area, e.target.checked)} />
               <span>
                 {s.label}
                 <span className="hint"> · {s.area === 'app' ? 'version, Windows version, memory' : `${count(s.area)} from the last 15 minutes`}</span>
@@ -1136,7 +1145,7 @@ function ReportDialog({ st, close }: { st: State; close: () => void }) {
             </label>
           ))}
           <label className="check-row">
-            <input type="checkbox" checked={contact} onChange={(e) => setContact(e.target.checked)} />
+            <input type="checkbox" role="switch" checked={contact} onChange={(e) => setContact(e.target.checked)} />
             <span>
               Include my friend ID so the developers can reply<span className="hint"> · {st.profile.handle}</span>
             </span>
@@ -1407,7 +1416,7 @@ function ShareDialog({ close }: { close: () => void }) {
           </label>
           {CAN_SHARE_SOUND && (
             <label className="check-row sound-row">
-              <input type="checkbox" checked={sound} onChange={(e) => setSound(e.target.checked)} />
+              <input type="checkbox" role="switch" checked={sound} onChange={(e) => setSound(e.target.checked)} />
               <span>
                 Share computer sound
                 <span className="hint"> · everything you hear except Eleusinia, so nobody hears themselves</span>

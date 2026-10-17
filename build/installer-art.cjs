@@ -11,17 +11,18 @@ const url = (p) => pathToFileURL(join(root, p)).href
 const version = require('../package.json').version
 
 const css = `
-@font-face { font-family: Cormorant; font-weight: 600; src: url('${url('node_modules/@fontsource/cormorant-garamond/files/cormorant-garamond-latin-600-normal.woff2')}'); }
+@font-face { font-family: Display; font-weight: 700; src: url('${url('node_modules/@fontsource/zen-kaku-gothic-new/files/zen-kaku-gothic-new-latin-700-normal.woff2')}'); }
+@font-face { font-family: Text; font-weight: 100 900; src: url('${url('node_modules/@fontsource-variable/inter/files/inter-latin-wght-normal.woff2')}'); }
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; }
 body {
-  font-family: 'Segoe UI', sans-serif; color: #d9e0ec;
+  font-family: Text, 'Segoe UI', sans-serif; color: #d9e0ec;
   background:
     radial-gradient(260px 200px at 20% -10%, rgb(145 185 240 / 0.16), transparent 70%),
     radial-gradient(220px 200px at 110% 115%, rgb(145 185 240 / 0.12), transparent 70%),
     linear-gradient(180deg, #0f1722, #0b1119);
 }
 .emblem { background: linear-gradient(180deg, #d9e0ec, #a6b6ca); -webkit-mask: url('${url('src/renderer/assets/emblem.png')}') center / contain no-repeat; filter: drop-shadow(0 0 14px rgb(145 185 240 / 0.45)); }
-.word { font: 600 15px/1 Cormorant, serif; letter-spacing: 0.34em; padding-left: 0.34em; text-transform: uppercase; }
+.word { font: 700 15px/1 Display, sans-serif; letter-spacing: 0.34em; padding-left: 0.34em; text-transform: uppercase; }
 .quiet { color: #8290a6; font-size: 10px; letter-spacing: 0.04em; }
 `
 const sidebar = `<body style="display:flex;flex-direction:column;align-items:center;text-align:center">
