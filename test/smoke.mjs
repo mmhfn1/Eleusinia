@@ -22,7 +22,8 @@ const testnet = publicDht ? null : await createTestnet(3)
 const bootstrap = testnet?.bootstrap.map((n) => `${n.host}:${n.port}`).join(',')
 // The app reads ELEUSINIA_BOOTSTRAP only when set; in public mode it is removed, in case the shell has one.
 const { ELEUSINIA_BOOTSTRAP: _, ...baseEnv } = process.env
-const appEnv = bootstrap ? { ...baseEnv, ELEUSINIA_BOOTSTRAP: bootstrap } : baseEnv
+// Updates are off, so a run against the packaged app never downloads a real release.
+const appEnv = { ...(bootstrap ? { ...baseEnv, ELEUSINIA_BOOTSTRAP: bootstrap } : baseEnv), ELEUSINIA_NO_UPDATES: '1' }
 console.log(publicDht ? 'DHT: public (ELEUSINIA_SMOKE_PUBLIC=1)' : `DHT: local test network at ${bootstrap}`)
 
 // A developers' inbox of the test's own, never the real one, which every app below sends its reports to. No GitHub
@@ -252,7 +253,7 @@ try {
     b.ev(`(() => { const d = document.querySelector('dialog[open]'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('anntester#') && d.textContent.includes('Unique Key') && !!d.querySelector('.avatar img') })()`))
   await b.ev(`[...document.querySelectorAll('dialog button')].find(x => x.textContent === 'Close').click()`)
   // The same card from the DM header (picture, name and friend ID) and from a right-click in the friends list.
-  const annCard = `(() => { const d = document.querySelector('dialog[open].card-dialog'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('anntester#') && !!d.querySelector('.avatar img') })()`
+  const annCard = `(() => { const d = document.querySelector('dialog[open].card-dialog'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('anntester#') && !!d.querySelector('.avatar img') && /Eleusinia \\d+\\.\\d+\\.\\d+/.test(d.textContent) })()`
   const closeCard = `[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`
   if (!(await b.ev(`(() => { const h = document.querySelector('.chat-person'); return !!h?.querySelector('.avatar') && h.textContent.includes('Ann') && h.textContent.includes('anntester#') })()`))) throw new Error('the DM header lacks the picture, name or friend ID')
   await b.ev(`document.querySelector('.chat-person').click()`)

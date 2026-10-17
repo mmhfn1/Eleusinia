@@ -6,7 +6,7 @@ import createTestnet from 'hyperdht/testnet'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 import { createNode } from '../src/main/node'
 import { createNet } from '../src/main/network'
-import { type Group, type Msg, cleanProfile, dmId, identicon, isHandle, keyTail, normHandle, stack } from '../src/shared/protocol'
+import { CALL_VERSION, type Group, type Msg, cleanProfile, dmId, identicon, isHandle, keyTail, normHandle, stack, versionOf } from '../src/shared/protocol'
 import { mergeGroup, missing, signAdd, signLeft, signMsg, validGroup, verifyAdd, verifyMsg } from '../src/shared/sync'
 
 test('a tampered or re-attributed message fails verification', () => {
@@ -511,4 +511,25 @@ test('only a few conversations stay in memory; the rest are read back from disk,
   expect(a.node.history(dm, 2)).toMatchObject({ total: 4 })
   expect(a.node.history(dm, 2).msgs.map((m: any) => m.text)).toEqual(['three', 'four'])
   expect(texts(a, dm)).toEqual(['one', 'two', 'three', 'four'])
+})
+
+test('peers tell each other their version; a hello without one counts as 0.0.1, and nonsense is not believed', async () => {
+  const mk = (version: string) => {
+    const dir = mkdtempSync(join(tmpdir(), 'eleusinia-'))
+    const keyPair = DHT.keyPair()
+    const node = createNode({ dir, keyPair, emit: () => {}, dht: { bootstrap: testnet.bootstrap }, redialMs: 300, version })
+    const n = { node, dir, keyPair, key: keyPair.publicKey.toString('hex') as string }
+    nodes.push(n)
+    return n
+  }
+  const a = mk('0.0.2')
+  const b = mk('0.0.7')
+  a.node.addFriend(b.key)
+  await until(() => b.node.state().friends[a.key] === 'incoming')
+  b.node.addFriend(a.key)
+  await until(() => a.node.state().versions[b.key]?.app === '0.0.7' && b.node.state().versions[a.key]?.app === '0.0.2')
+  expect(a.node.state().versions[b.key]).toEqual({ app: '0.0.7', call: CALL_VERSION })
+  expect(versionOf({})).toEqual({ app: '0.0.1 or older', call: 1 })
+  expect(versionOf({ app: '<script>', call: -3 })).toEqual({ app: '0.0.1 or older', call: 1 })
+  expect(versionOf({ app: '1.2.3', call: 2 })).toEqual({ app: '1.2.3', call: 2 })
 })

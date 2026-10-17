@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld('api', {
   restartAsAdmin: () => ipcRenderer.invoke('restartAsAdmin'),
   diag: (area: string, text: string) => ipcRenderer.send('diag', area, text),
   diagnostics: () => ipcRenderer.invoke('diagnostics'),
+  installUpdate: () => ipcRenderer.invoke('installUpdate'),
   on(fn: (e: unknown) => void) {
     const h = (_: unknown, e: unknown) => fn(e)
     ipcRenderer.on('event', h)

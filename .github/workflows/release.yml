@@ -1,0 +1,63 @@
+# Every push to main that changes the app is checked, built and published as a GitHub Release, which installed copies
+# pick up as an update (electron-updater, see startUpdates in src/main/index.ts). Pushes that only touch docs or tests
+# publish nothing. The version counts up by itself: package.json holds the first release of a series (0.0.2), and
+# each release adds this workflow's run number to its last part (0.0.2, 0.0.3, ...). Raise the first two parts in
+# package.json for a bigger step.
+name: Release
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+      - 'test/**'
+  workflow_dispatch:
+
+permissions:
+  contents: write # to publish the release
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      # Install scripts stay off, as on the developers' machines: the native modules ship prebuilt, and
+      # electron-builder fetches Electron itself.
+      - run: npm ci --ignore-scripts
+
+      - name: Check
+        run: |
+          npm run typecheck
+          npm test
+
+      - name: Version
+        shell: bash
+        run: |
+          node -e "
+            const fs = require('fs')
+            const p = JSON.parse(fs.readFileSync('package.json', 'utf8'))
+            const [a, b, c] = p.version.split('.').map(Number)
+            p.version = [a, b, c + Number(process.env.RUN) - 1].join('.')
+            fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n')
+            console.log('Releasing ' + p.version)
+          "
+        env:
+          RUN: ${{ github.run_number }}
+
+      - name: Build and publish
+        run: |
+          npx electron-vite build
+          npx electron-builder --win --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

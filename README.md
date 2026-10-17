@@ -4,7 +4,7 @@
 
 Peer-to-peer chat and voice calls for desktop, with no central server. A Discord/TeamSpeak-style app where every message and call goes directly between the people involved.
 
-**Status:** tester build 0.0.1. Friends, direct and group text chat (including delivery to people who were offline), voice calls, screen sharing and cameras work. Problems can be reported from inside the app.
+**Status:** tester build (0.0.2 and up, updating itself). Friends, direct and group text chat (including delivery to people who were offline), voice calls, screen sharing and cameras work. Problems can be reported from inside the app.
 
 ## Features
 
@@ -38,7 +38,13 @@ The only outside infrastructure is the public DHT's bootstrap nodes and a public
 
 ## Installing
 
-Testers: run `Eleusinia-Setup-0.0.1.exe`. It is not code-signed yet, so Windows shows "Windows protected your PC" the first time: choose **More info → Run anyway**. Your data stays in `%APPDATA%\Eleusinia` and is kept if you uninstall.
+Testers: download the latest `Eleusinia-Setup-<version>.exe` from [Releases](https://github.com/mmhfn1/Eleusinia/releases) and run it. It is not code-signed yet, so Windows shows "Windows protected your PC" the first time: choose **More info → Run anyway**. Your data stays in `%APPDATA%\Eleusinia` and is kept if you uninstall.
+
+**Updates are automatic** from 0.0.2 on: Eleusinia checks for a newer release when it starts and every 4 hours, downloads it in the background and offers **Restart now**; otherwise it installs the next time you close it. Anyone on 0.0.1 installs 0.0.2 by hand once.
+
+**Releases** are made by GitHub itself: every push to `main` that changes the app (not only docs or tests) is type-checked, unit-tested, built and published as the next version (`.github/workflows/release.yml`). The version counts up by itself from the one in `package.json` (0.0.2, 0.0.3, …); raise its first two parts there for a bigger step. Keep unfinished work on other branches: whatever reaches `main` reaches every tester within hours.
+
+**Mixed versions:** everyone's profile card shows the Eleusinia version they run. Copies whose calls cannot work together do not try to connect, and the call panel says who needs to update.
 
 ## Getting started
 
@@ -91,7 +97,7 @@ Both people must have the app open when one searches for the other's ID.
 - **Computer sound with a share is Windows only**, and mono. Calls of more than about 6 to 8 full-quality streams (screens and cameras together) need peer forwarding, which is not built yet (see the roadmap).
 - **Hotkeys use a system-wide keyboard hook** ([uiohook-napi](https://github.com/SnosMe/uiohook-napi)), running only while a hotkey is set or being recorded. Keys are only compared in memory, never stored or sent. On Windows, keys pressed while a program running as administrator is in front (some games, launchers and anti-cheat tools) never reach it; **Settings → Restart App as Administrator** fixes that until Eleusinia is closed. On macOS it needs Accessibility permission; on Linux it needs X11 (not Wayland).
 - **Text only:** no attachments, edits, deletes, reactions or unread markers.
-- **Desktop only, one device per identity.** The installer is Windows only and unsigned, and there are no automatic updates yet.
+- **Desktop only, one device per identity.** The installer and updates are Windows only, and unsigned.
 - **Reports reach the developers only while their inbox is running**; until then they wait on your computer.
 
 ## Roadmap

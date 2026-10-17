@@ -13,7 +13,7 @@ See `README.md` for features, known limits and the roadmap.
 | `npm run typecheck` | `tsc --noEmit` over `src` and `test` |
 | `npm test` | Vitest: `test/node.test.ts` runs the whole node layer against a local test DHT, no Electron; `test/callstate.test.ts` covers call reconnect decisions with a fake connection; `video.test.ts`, `quality.test.ts`, `devices.test.ts`, `relay.test.ts`, `hotkeys.test.ts` cover the other pure logic |
 | `npm run smoke` | Builds, then drives three real app windows on a **local test DHT** (passed to the app as `ELEUSINIA_BOOTSTRAP`, which is off unless set): setup, friend search, chat, a voice call, hotkeys, screen sharing (with computer sound on Windows), a camera, offline delivery, a problem report and a renderer crash reaching a test inbox it starts itself (~2 min, opens windows; the microphone and camera are Chromium's fake devices, and screen sharing only ever captures the test's own windows; what each connection receives is read with `getStats` through a wrapped `RTCPeerConnection`; hotkeys are tested by injecting F23/F24 key presses system-wide, keys no ordinary keyboard has) |
-| `npm run dist` | Windows installer into `dist/` (electron-builder; native modules stay unpacked, `npmRebuild` off since they ship prebuilt). Run the smoke against it with `ELEUSINIA_SMOKE_EXE=dist/win-unpacked/Eleusinia.exe node test/smoke.mjs` |
+| `npm run dist` | Windows installer into `dist/` (never published from a PC: releases come from `.github/workflows/release.yml` on every push to `main` that changes the app, numbered from `package.json`'s version plus the workflow run) (electron-builder; native modules stay unpacked, `npmRebuild` off since they ship prebuilt). Run the smoke against it with `ELEUSINIA_SMOKE_EXE=dist/win-unpacked/Eleusinia.exe node test/smoke.mjs` |
 | `ELEUSINIA_NO_DIRECT=1 npm run smoke` | Same, but direct call routes are withheld so the call must go through the relay |
 | `ELEUSINIA_SMOKE_PUBLIC=1 npm run smoke` | Same, over the **public** DHT, for an occasional real-network check (slower, and flaky when the DHT is) |
 
@@ -51,6 +51,8 @@ Key ideas worth keeping intact:
 - A `Key` is a 64-hex ed25519 public key; it is the identity and the address on the DHT.
 - Everything from another peer is untrusted: validate and cap it (see `cleanProfile`, `validGroup`, `verifyMsg`).
 - Messages and group changes are signed by their author; a member's leave can only be signed by themselves.
+- **Raise `CALL_VERSION` (`src/shared/protocol.ts`) in any change older copies cannot follow in a call** (slot order, signal meanings). Copies on different call versions then refuse to connect and say who must update, instead of failing silently. Every push to `main` reaches all testers as an update.
+- The installed app updates itself from GitHub Releases (`startUpdates` in `src/main/index.ts`); `ELEUSINIA_UPDATE_URL` points it at another folder of releases for testing, `ELEUSINIA_NO_UPDATES=1` turns it off (the smoke run does).
 - Tie-breaks use key order: when both sides dial or offer at once, the smaller key wins.
 - Call signals are processed one at a time (`onSignal` queue) so ICE candidates never overtake their offer.
 

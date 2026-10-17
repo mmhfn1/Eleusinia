@@ -37,12 +37,24 @@ export type State = {
   groups: Record<string, Group>
   settings: Settings
   reports: number // problem and crash reports waiting to reach the developers' inbox
+  versions: Record<Key, Version> // what each person we have greeted runs; memory only
 }
+
+// How calls are set up (slot order and signals). Raised only by a change older copies cannot follow: copies on
+// different call versions do not try to connect, and each says who needs to update. 0.0.1 sent none: version 1.
+export const CALL_VERSION = 1
+export type Version = { app: string; call: number }
+// What a hello says about the sender's version, checked like everything else from another peer.
+export const versionOf = (w: { app?: unknown; call?: unknown }): Version => ({
+  app: typeof w.app === 'string' && /^\d+\.\d+\.\d+$/.test(w.app) ? w.app : '0.0.1 or older',
+  call: Number.isInteger(w.call) && (w.call as number) > 0 && (w.call as number) < 1000 ? (w.call as number) : 1,
+})
 
 export type Wire =
   // friend: whether the sender counts us as a friend or has asked to be one. Group members who are not friends
   // greet each other too, so a hello alone is not a friend request. Older versions leave it out.
-  | ({ t: 'hello'; friend?: boolean } & Profile)
+  // app and call: the sender's version and call version (CALL_VERSION); 0.0.1 sent neither.
+  | ({ t: 'hello'; friend?: boolean; app?: string; call?: number } & Profile)
   | { t: 'who' } // a stranger asking for our profile, to show it in friend search
   | ({ t: 'card' } & Profile)
   | { t: 'group'; g: Group }
@@ -62,6 +74,7 @@ export type Event =
   | { type: 'acked'; conv: string; seq: number }
   | { type: 'call'; from: Key; conv: string; data: any }
   | { type: 'hotkey'; action: Action; down: boolean } // from the main process's system-wide key hook
+  | { type: 'update'; version: string } // a newer version has downloaded and installs on restart
 
 export const MAX_TEXT = 4000
 export const isKey = (s: unknown): s is Key => typeof s === 'string' && /^[0-9a-f]{64}$/.test(s)

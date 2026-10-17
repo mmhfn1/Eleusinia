@@ -1,6 +1,6 @@
 import { createCandidates, createWatchdog, lightOpus, offers, relayCandidate } from '../shared/callstate'
 import { fellBack, nextDevice, usable } from '../shared/devices'
-import type { Event, Key, State } from '../shared/protocol'
+import { CALL_VERSION, type Event, type Key, type State } from '../shared/protocol'
 import { SAMPLE_EVERY, type Sample, grade, remember, worst } from '../shared/quality'
 import type { SourceKind } from '../shared/sources'
 import { gate, hear, rms } from '../shared/speaking'
@@ -37,6 +37,7 @@ declare global {
       isAdmin(): Promise<boolean>
       restartAsAdmin(): Promise<boolean>
       diag(area: import('../shared/reports').Area, text: string): void
+      installUpdate(): Promise<void>
       diagnostics(): Promise<{ meta: import('../shared/reports').Meta; events: import('../shared/reports').Diag[] }>
     }
   }
@@ -107,6 +108,13 @@ export const onChange = (fn: () => void) => void (notify = fn)
 
 const send = (c: string, to: Key | null, data: unknown) => window.api.call('signal', c, to, data)
 const membersOf = (c: string) => state.groups[c]?.members ?? c.split('_')
+// People on a call version that cannot work with ours are never connected; the call panel says who must update.
+export const callVersionOf = (k: Key) => state.versions?.[k]?.call ?? 1
+const compatible = (k: Key) => callVersionOf(k) === CALL_VERSION
+export function mismatched() {
+  if (!conv) return []
+  return [...(active.get(conv) ?? [])].filter((k) => !compatible(k)).map((k) => ({ k, app: state.versions?.[k]?.app ?? 'an older version', newer: callVersionOf(k) > CALL_VERSION }))
+}
 // 0 to 2 (200%); played through a GainNode, so above 100% is a real boost.
 const clampVolume = (v: number | undefined) => Math.min(2, Math.max(0, v ?? 1))
 export const volumeOf = (k: Key) => clampVolume(state.settings.volumes?.[k])
@@ -803,6 +811,7 @@ async function handle(from: Key, c: string, d: any) {
   if (!set.size && !conv) new Notification('Eleusinia', { body: `${state.profiles[from]?.name || 'Someone'} started a call` })
   set.add(from)
   if (c !== conv) return
+  if (!compatible(from)) return log(`not connecting ${who(from)}: call version ${callVersionOf(from)}, ours ${CALL_VERSION}`), notify()
 
   if (d.k === 'join') {
     // A duplicate while our connection works or is being set up; otherwise they lost us and we start over.

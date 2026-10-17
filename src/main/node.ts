@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomInt } from 'node:crypto'
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
+  CALL_VERSION,
   type Event,
   type FriendStatus,
   type Group,
@@ -19,6 +20,8 @@ import {
   isKey,
   isUsername,
   normHandle,
+  type Version,
+  versionOf,
 } from '../shared/protocol'
 import { type Area, type Report, cleanReport } from '../shared/reports'
 import { mergeGroup, missing, signAdd, signLeft, signMsg, validGroup, verifyAdd, verifyMsg } from '../shared/sync'
@@ -42,6 +45,7 @@ type Opts = {
   redialMs?: number
   noDirect?: boolean // testing: withhold ICE candidates so calls can only connect through the relay
   inbox?: Key // the developers' inbox, where problem and crash reports go
+  version?: string // this app's version, told to everyone we greet
   diag?: (area: Area, text: string) => void // diagnostic events, kept in memory by the caller
 }
 
@@ -49,7 +53,7 @@ type Opts = {
 const KEEP_LOGS = 3
 
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
-export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {} }: Opts) {
+export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0' }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
   const file = join(dir, 'state.json')
   mkdirSync(join(dir, 'msgs'), { recursive: true })
@@ -91,6 +95,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     groups: Object.fromEntries(ours().map((g) => [g.id, g])),
     settings: s.settings,
     reports: outgoing().length,
+    versions: Object.fromEntries([...versions].filter(([k]) => known(k))),
   })
   const push = () => emit({ type: 'state', state: state() })
   const changed = () => {
@@ -150,7 +155,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     }
   }
 
-  const hi = (key: Key) => net.send(key, { t: 'hello', ...s.profile, friend: s.friends[key] === 'friend' || s.friends[key] === 'outgoing' })
+  const versions = new Map<Key, Version>()
+  const hi = (key: Key) =>
+    net.send(key, { t: 'hello', ...s.profile, friend: s.friends[key] === 'friend' || s.friends[key] === 'outgoing', app: version, call: CALL_VERSION })
   const sendHave = (key: Key, conv: string, re?: boolean) =>
     net.send(key, { t: 'have', conv, have: haveOf(conv), re })
 
@@ -218,6 +225,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         delete s.friends[key] // they cancelled their request
       }
       if (!known(key) && !s.friends[key]) return // a stranger who is not asking anything
+      versions.set(key, versionOf(w))
       s.profiles[key] = cleanProfile(w)
       return changed()
     }

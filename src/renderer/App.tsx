@@ -32,6 +32,7 @@ export default function App() {
   const [modal, setModal] = useState<Modal>(null)
   const [editing, setEditing] = useState(false)
   const [err, setErr] = useState('')
+  const [update, setUpdate] = useState<string | null>(null) // a downloaded version waiting for a restart
   const [, tick] = useReducer((n: number) => n + 1, 0)
   // Where you have been, for the mouse's back and forward buttons (mouse 4 and 5).
   const trail = useRef({ back: [] as (string | null)[], forward: [] as (string | null)[], at: null as string | null })
@@ -68,6 +69,7 @@ export default function App() {
       if (e.type === 'state') got(e.state)
       if (e.type === 'call') call.onSignal(e.from, e.conv, e.data)
       if (e.type === 'hotkey') call.onHotkey(e.action, e.down)
+      if (e.type === 'update') setUpdate(e.version)
     })
   }, [])
 
@@ -98,6 +100,19 @@ export default function App() {
         <Conversation key={open} st={st} conv={open} people={people} run={run} home={() => go(null)} />
       ) : (
         <Home st={st} people={people} run={run} open={go} newGroup={() => setModal({ kind: 'group' })} />
+      )}
+      {update && (
+        <div role="status" className="toast update-toast">
+          <span>
+            Eleusinia {update} is ready.{call.conv ? ' Restarting ends your call.' : ''}
+          </span>
+          <button className="button primary" onClick={() => window.api.installUpdate()}>
+            Restart now
+          </button>
+          <button className="button subtle" onClick={() => setUpdate(null)}>
+            Later
+          </button>
+        </div>
       )}
       {err && (
         <div role="alert" className="toast">
@@ -630,7 +645,12 @@ function Card({ k, st, p, close, message, edit, run }: CardProps) {
           <Avatar k={k} p={p} size={96} online={k === st.me ? undefined : st.online.includes(k)} />
         </div>
         <h1>{p.name}</h1>
-        {k !== st.me && <p className="row-sub">{st.online.includes(k) ? 'Online' : 'Offline'}</p>}
+        {k !== st.me && (
+          <p className="row-sub">
+            {st.online.includes(k) ? 'Online' : 'Offline'}
+            {st.versions[k] && ` · Eleusinia ${st.versions[k].app}`}
+          </p>
+        )}
         {p.about && <p className="about">{p.about}</p>}
         <dl className="identity">
           <dt>Friend ID</dt>
@@ -1816,6 +1836,13 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
               {call.notices().map((n) => (
                 <p className="call-notice" role="status" key={n}>
                   {n}
+                </p>
+              ))}
+              {call.mismatched().map((m) => (
+                <p className="call-notice" role="status" key={m.k}>
+                  {m.newer
+                    ? `${name(m.k)} is on a newer Eleusinia (${m.app}) that cannot call this one. Restart Eleusinia once its update has downloaded to join them.`
+                    : `${name(m.k)} is on an older Eleusinia (${m.app}) that cannot join this call. They need to update.`}
                 </p>
               ))}
               <div className="call-controls">

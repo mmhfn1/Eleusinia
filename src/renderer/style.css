@@ -2003,3 +2003,8 @@ hr {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
 }
+
+/* A downloaded update offered as a restart sits above an error message, if both show. */
+.toast + .toast {
+  bottom: 84px;
+}

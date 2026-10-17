@@ -4,6 +4,7 @@ import os from 'node:os'
 import { join } from 'node:path'
 import { BrowserWindow, app, desktopCapturer, ipcMain, safeStorage, screen, session } from 'electron'
 import DHT from 'hyperdht'
+import { autoUpdater } from 'electron-updater'
 import { UiohookKey, uIOhook } from 'uiohook-napi'
 import { type Bindings, type Hotkey, createMatcher, createRecorder } from '../shared/hotkeys'
 import { isKey } from '../shared/protocol'
@@ -65,6 +66,26 @@ function loadIdentity(dir: string) {
 
 app.whenReady().then(() => (inboxMode ? startInbox() : startApp()))
 
+// Updates: the installed app looks for a newer release of github.com/mmhfn1/Eleusinia (published for every push to
+// main, see .github/workflows/release.yml) on start and every 4 hours, downloads it in the background and tells the
+// window, which offers a restart; otherwise it installs the next time Eleusinia is closed. Copies run from source never
+// update. ELEUSINIA_UPDATE_URL points it at another folder of releases (testing), ELEUSINIA_NO_UPDATES=1 turns it off.
+function startUpdates(ready: (version: string) => void, diag: (area: 'app' | 'error', text: string) => void) {
+  if (!app.isPackaged || process.env.ELEUSINIA_NO_UPDATES === '1') return
+  if (process.env.ELEUSINIA_UPDATE_URL) autoUpdater.setFeedURL({ provider: 'generic', url: process.env.ELEUSINIA_UPDATE_URL })
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.on('update-available', (i) => diag('app', `update ${i.version} found, downloading`))
+  autoUpdater.on('update-downloaded', (i) => {
+    diag('app', `update ${i.version} ready`)
+    ready(i.version)
+  })
+  autoUpdater.on('error', (e) => diag('error', `update check failed: ${e.message}`))
+  const check = () => autoUpdater.checkForUpdates().catch(() => {}) // offline: the next check tries again
+  check()
+  setInterval(check, 4 * 3600e3)
+}
+
 function startApp() {
   const dir = app.getPath('userData')
   mkdirSync(dir, { recursive: true })
@@ -104,7 +125,10 @@ function startApp() {
     // Only the installed app reports to the real inbox, so development runs (stopped with Ctrl+C) never send any.
     inbox: isKey(process.env.ELEUSINIA_INBOX) ? process.env.ELEUSINIA_INBOX : app.isPackaged ? INBOX_KEY : undefined,
     diag: diagnostics.add,
+    version: app.getVersion(),
   })
+  startUpdates((version) => !win.isDestroyed() && win.webContents.send('event', { type: 'update', version }), diagnostics.add)
+  ipcMain.handle('installUpdate', () => autoUpdater.quitAndInstall(true, true)) // quietly, then opens the new version
   ipcMain.on('diag', (_e, area: unknown, text: unknown) => AREAS.includes(area as any) && typeof text === 'string' && diagnostics.add(area as any, text))
   ipcMain.handle('diagnostics', () => ({ meta: meta(), events: diagnostics.list() }))
 

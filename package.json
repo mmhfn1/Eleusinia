@@ -1,7 +1,7 @@
 {
   "name": "eleusinia",
   "productName": "Eleusinia",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Peer-to-peer chat and voice calls with no central server",
   "main": "out/main/index.js",
   "scripts": {
@@ -14,11 +14,12 @@
     "smoke": "electron-vite build && node test/smoke.mjs .",
     "inbox": "electron-vite build && electron . --inbox",
     "installer-art": "electron build/installer-art.cjs",
-    "dist": "electron-vite build && electron-builder --win"
+    "dist": "electron-vite build && electron-builder --win --publish never"
   },
   "type": "commonjs",
   "dependencies": {
     "@fontsource/cormorant-garamond": "^5.3.0",
+    "electron-updater": "^6.8.9",
     "hypercore-crypto": "^3.7.0",
     "hyperdht": "^6.34.1",
     "uiohook-napi": "^1.5.5"
@@ -83,6 +84,14 @@
       "shortcutName": "Eleusinia",
       "uninstallDisplayName": "Eleusinia",
       "deleteAppDataOnUninstall": false
-    }
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "mmhfn1",
+        "repo": "Eleusinia",
+        "releaseType": "release"
+      }
+    ]
   }
 }
