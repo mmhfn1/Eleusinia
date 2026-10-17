@@ -209,7 +209,7 @@ test('setup assigns username#1234; search shows a stranger with their picture an
   expect(b.node.state().profile).toMatchObject({ handle: id, name: 'Bob' })
 
   const found = await a.node.findFriend(' ' + id.toUpperCase() + ' ')
-  expect(found).toEqual([{ key: b.key, profile: { handle: id, name: 'Bob', about: 'hello', avatar: PNG } }])
+  expect(found).toEqual([{ key: b.key, linked: true, profile: { handle: id, name: 'Bob', about: 'hello', avatar: PNG } }]) // over a link, so with the picture
   // Searching alone asks nothing of the other person
   expect(a.node.state().friends).toEqual({})
   expect(b.node.state().friends).toEqual({})
