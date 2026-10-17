@@ -45,11 +45,16 @@ const inboxed = () => {
   return existsSync(d) ? readdirSync(d).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(readFileSync(join(d, f), 'utf8')).report) : []
 }
 
-async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-'))) {
+// ELEUSINIA_SMOKE_RELAYED=1: Ann and Bob behave as behind strict routers and withhold direct call routes, so their chat
+// and call can only go through Cy, the mutual friend, relaying. A shorter run of its own (see relayedRun).
+const relayedMode = process.env.ELEUSINIA_SMOKE_RELAYED === '1'
+const strictEnv = relayedMode ? { ELEUSINIA_STRICT: '1', ELEUSINIA_NO_DIRECT: '1' } : {}
+
+async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')), extraEnv = {}) {
   // The windows overlap, and Windows reports a covered window as hidden; the app then (rightly) asks not to be sent
   // video. Occlusion detection is off so every window counts as visible.
   const flags = [`--remote-debugging-port=${port}`, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--disable-features=CalculateNativeWinOcclusion']
-  const child = spawn(exe, [...app, ...flags], { env: { ...appEnv, ELEUSINIA_DATA: dir }, stdio: 'ignore' })
+  const child = spawn(exe, [...app, ...flags], { env: { ...appEnv, ...extraEnv, ELEUSINIA_DATA: dir }, stdio: 'ignore' })
   children.push(child)
   let page
   for (let i = 0; i < 50 && !page; i++) {
@@ -162,8 +167,57 @@ async function bobQuiet(p, fn) {
 // A tiny real PNG, run through the same shrink path a picked file takes.
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
-const a = await launch(9231)
-let b = await launch(9232)
+// Ann and Bob can never link directly; Cy is friends with both and relays. Turned on from Settings, as a person would.
+async function relayedRun(ownTitles) {
+  console.log('--- Relayed: Ann and Bob link only through Cy')
+  for (const [p, n] of [[a, 'Ann'], [b, 'Bob'], [c, 'Cy']]) {
+    await p.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
+    await until(`${n} turns on connecting through mutual friends in Settings`, () =>
+      p.ev(`(() => { const l = [...document.querySelectorAll('dialog[open] label')].find((x) => x.textContent.includes('Connect through mutual friends')); if (!l) return false; const i = l.querySelector('input'); if (!i.checked) i.click(); return i.checked })()`), 10)
+    await p.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
+  }
+  const key = (p) => p.ev(`api.call('state').then((s) => s.me)`)
+  const [ka, kb, kc] = [await key(a), await key(b), await key(c)]
+  for (const [x, kx, y, ky, names] of [[a, ka, b, kb, 'Ann and Bob'], [a, ka, c, kc, 'Ann and Cy'], [b, kb, c, kc, 'Bob and Cy']]) {
+    await x.ev(`api.call('addFriend', '${ky}')`)
+    await until(`${names}: the request arrives`, () => y.ev(`api.call('state').then((s) => s.friends['${kx}'] === 'incoming')`))
+    await y.ev(`api.call('addFriend', '${kx}')`)
+    await until(`${names} are friends`, () => x.ev(`api.call('state').then((s) => s.friends['${ky}'] === 'friend')`))
+  }
+  // They met only through the DHT, so their names arrive with the first hello over the relayed link.
+  await until('A and B link through Cy and learn each other\'s names', async () =>
+    (await a.ev(`api.call('state').then((s) => s.profiles['${kb}']?.name === 'Bob')`)) && b.ev(`api.call('state').then((s) => s.profiles['${ka}']?.name === 'Ann')`), 120)
+  await a.ev(open('Bob'))
+  await b.ev(open('Ann'))
+  await a.ev(say('through cy'))
+  await until('B shows a DM that could only come through Cy', () => b.ev(shows('through cy')))
+  await until('both see the link goes through a friend', async () =>
+    (await a.ev(`api.call('state').then((s) => s.relayed.includes('${kb}'))`)) && b.ev(`api.call('state').then((s) => s.relayed.includes('${ka}'))`))
+  await b.ev(say('reply via cy'))
+  await until('A shows the reply', () => a.ev(shows('reply via cy')))
+  await a.ev(`document.querySelector('.chat-person').click()`)
+  await until("Bob's card says online through a friend, voice and text only", () => a.ev(`!!document.querySelector('dialog[open]')?.textContent.includes('Online through a friend')`), 10)
+  await a.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
+
+  console.log('--- Relayed: a voice call, and no screen share')
+  await a.ev(press('Start call'))
+  await until('B sees the call', () => b.ev(`[...document.querySelectorAll('aside.voice button')].some(x => x.textContent.includes('Join call'))`))
+  await b.ev(press('Join call'))
+  await until('A connected to Bob', () => a.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Bob')`))
+  await until('B hears Ann through the relay', async () => (await bobQuiet(b, () => b.ev(received('voice')))) > 50, 30)
+  await a.ev(press('Share screen'))
+  await until('A sees the share picker', () => a.ev(`document.querySelectorAll('dialog[open] .source').length > 0`), 20)
+  await a.ev(`document.querySelector('dialog[open] #share-tab-window').click()`)
+  await pickOwn(a, ownTitles[1])
+  await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Share').click()`)
+  await sleep(8000)
+  const screenIn = await b.ev(`(async () => { const pc = window.__pcs.find((p) => p.connectionState === 'connected'); const t = pc?.getTransceivers().filter((x) => x.receiver.track.kind === 'video')[0]; let n = 0; if (t) (await t.receiver.getStats()).forEach((r) => r.type === 'inbound-rtp' && (n = r.packetsReceived ?? 0)); return n })()`)
+  if (screenIn > 20) throw new Error(`B received ${screenIn} screen packets through the relay, which carries voice only`)
+  console.log(`ok   no screen video crossed the relay (${screenIn} packets)`)
+}
+
+const a = await launch(9231, undefined, strictEnv)
+let b = await launch(9232, undefined, strictEnv)
 const c = await launch(9233)
 let failed = false
 try {
@@ -197,6 +251,8 @@ try {
     })()`)
     await until(`${n} lands on Home`, () => p.ev(`!!document.querySelector('main.home')`))
   }
+  if (relayedMode) await relayedRun(ownTitles)
+  else {
   const ids = {}
   for (const [p, n] of [[b, 'Bob'], [c, 'Cy']]) {
     ids[n] = await p.ev(`document.querySelector('.friend-id b').textContent`)
@@ -646,10 +702,12 @@ try {
     ws.close()
     return back
   }, 20)
+  }
 } catch (e) {
   failed = true
   console.error('FAIL', e.message)
   for (const [n, p] of [['A', a], ['B', b], ['C', c]]) console.error(n, (await p.ev(`document.body.innerText`).catch(String)).replace(/\n+/g, ' | '))
+  for (const [n, p] of [['A', a], ['B', b], ['C', c]]) console.error(n, 'DIAG', JSON.stringify(await p.ev(`api.diagnostics().then((d) => d.events.filter((e) => e.area === 'network').map((e) => e.text))`).catch(String)))
 } finally {
   children.forEach((ch) => ch.kill())
   await testnet?.destroy().catch(() => {})

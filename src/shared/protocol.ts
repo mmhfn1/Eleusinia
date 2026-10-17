@@ -27,6 +27,7 @@ export type Settings = {
   micGate?: number
   crashReports?: boolean // send crash reports to the developers automatically; on unless turned off
   closeToTray?: boolean // closing the window keeps Eleusinia running in the tray; on unless turned off
+  relay?: boolean // connect through mutual friends when no direct link works, and relay for them; off unless turned on
 }
 
 export type State = {
@@ -39,6 +40,7 @@ export type State = {
   settings: Settings
   reports: number // problem and crash reports waiting to reach the developers' inbox
   versions: Record<Key, Version> // what each person we have greeted runs; memory only
+  relayed: Key[] // online people whose link goes through a mutual friend's relay: voice and text only
 }
 
 // How calls are set up (slot order and signals). Raised only by a change older copies cannot follow: copies on
@@ -55,7 +57,10 @@ export type Wire =
   // friend: whether the sender counts us as a friend or has asked to be one. Group members who are not friends
   // greet each other too, so a hello alone is not a friend request. Older versions leave it out.
   // app and call: the sender's version and call version (CALL_VERSION); 0.0.1 sent neither.
-  | ({ t: 'hello'; friend?: boolean; app?: string; call?: number } & Profile)
+  // relay: the sender's relay key, only while it relays for its contacts (Settings.relay); older versions never send it.
+  | ({ t: 'hello'; friend?: boolean; app?: string; call?: number; relay?: Key } & Profile)
+  | { t: 'reach'; key: Key; ok?: boolean } // asking a contact whether it can relay us to `key`, and its answer
+  | { t: 'relayed'; by: Key } // sent by whoever dialed: this link goes through `by`'s relay
   | { t: 'who' } // a stranger asking for our profile, to show it in friend search
   | ({ t: 'card' } & Profile)
   | { t: 'group'; g: Group }

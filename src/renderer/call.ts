@@ -99,7 +99,8 @@ let camera: Out<CameraSource> | null = null
 // Keyed `${slot}:${person}`: what each viewer shows of our screen and camera, and what we show of theirs.
 const wants = new Map<string, Level>()
 const shown = new Map<string, Level>()
-const want = (slot: Slot, k: Key) => wants.get(`${slot}:${k}`) ?? 'full'
+// Nothing but voice goes through a friend's relay: it is capped for voice and text.
+const want = (slot: Slot, k: Key) => (state?.relayed?.includes(k) ? 'off' : (wants.get(`${slot}:${k}`) ?? 'full'))
 let starved = 0 // samples in a row where our stream to someone was held back by their or our bandwidth
 let cpuBound = 0 // ... or by our computer not encoding fast enough
 let upload: { kbps: number | null; at: number } | null = null
@@ -889,6 +890,7 @@ export function onState(next: State) {
   if (!b.hotkeys?.ptt) talking = false
   applyMic()
   for (const [k, p] of peers) if (p.voice) p.voice.gain.gain.value = volumeOf(k)
+  for (const k of new Set([...prev.relayed, ...next.relayed])) if (prev.relayed.includes(k) !== next.relayed.includes(k)) applyLevel(k)
   applyDeafen()
   if (a.mic !== b.mic || a.out !== b.out || a.micLabel !== b.micLabel || a.outLabel !== b.outLabel) followDevices()
   notify()

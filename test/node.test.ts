@@ -5,7 +5,7 @@ import DHT from 'hyperdht'
 import createTestnet from 'hyperdht/testnet'
 import { afterAll, beforeAll, expect, test } from 'vitest'
 import { createNode } from '../src/main/node'
-import { createNet } from '../src/main/network'
+import { type RelayLimits, createNet, relayKeyPair } from '../src/main/network'
 import { CALL_VERSION, type Group, type Msg, cleanProfile, dmId, identicon, isHandle, keyTail, normHandle, stack, versionOf } from '../src/shared/protocol'
 import { mergeGroup, missing, signAdd, signLeft, signMsg, validGroup, verifyAdd, verifyMsg } from '../src/shared/sync'
 
@@ -570,3 +570,150 @@ test('friend requests arrive and are accepted even when no direct link can ever 
   await new Promise((r) => setTimeout(r, 3000)) // several checks of the request topic, where Cal is still announced
   expect(b.node.state().friends[c.key]).toBeUndefined()
 }, 120000)
+
+// Peers behind strict routers (`strict`: their direct connections fail for real on the test DHT), linked through a
+// mutual friend's blind relay.
+function peer(opts: { strict?: boolean; relayLimits?: RelayLimits } = {}) {
+  const dir = mkdtempSync(join(tmpdir(), 'eleusinia-'))
+  const keyPair = DHT.keyPair()
+  const node = createNode({ dir, keyPair, emit: () => {}, dht: { bootstrap: testnet.bootstrap }, redialMs: 300, ...opts })
+  const n = { node, dir, keyPair, key: keyPair.publicKey.toString('hex') as string }
+  nodes.push(n)
+  return n
+}
+let names = 0
+async function setUp(ns: N[], relay = true) {
+  await Promise.all(ns.map((n) => n.node.setProfile({ username: 'relay' + names++, name: 'R', about: '', avatar: '' })))
+  await Promise.all(ns.map((n) => n.node.setSettings({ relay })))
+}
+// Friends through the request topics, as two strict peers can only become.
+async function befriendUnlinked(x: N, y: N) {
+  x.node.addFriend(y.key)
+  await until(() => y.node.state().friends[x.key] === 'incoming')
+  y.node.addFriend(x.key)
+  await until(() => x.node.state().friends[y.key] === 'friend')
+}
+const linked = (x: N, y: N) => x.node.state().online.includes(y.key)
+const wait = (ms: number) => new Promise((r) => setTimeout(r, ms))
+// Opens a plain connection to a node's relay as `keyPair`; resolves to the open DHT or null when refused.
+function toRelay(of: N, keyPair: any) {
+  const d = new DHT({ bootstrap: testnet.bootstrap, keyPair })
+  const sock = d.connect(relayKeyPair(of.keyPair.secretKey).publicKey)
+  return new Promise<any>((resolve) => {
+    sock.on('open', () => resolve(d))
+    sock.on('error', () => (d.destroy(), resolve(null)))
+  })
+}
+
+test('two peers that can never link directly chat, sync a group and carry a call through a mutual friend who sees none of it', async () => {
+  const dgram = await import('node:dgram')
+  const a = peer({ strict: true })
+  const b = peer({ strict: true })
+  const r = peer()
+  await setUp([a, b, r])
+  await befriendUnlinked(a, b)
+  const dm = dmId(a.key, b.key)
+  a.node.send(dm, 'queued')
+  await wait(6000) // direct dials keep failing and nobody can relay yet
+  expect(linked(a, b)).toBe(false)
+
+  await befriend(a, r)
+  await befriend(b, r)
+  await until(() => texts(b, dm).includes('queued'))
+  await until(() => a.node.state().relayed.includes(b.key) && b.node.state().relayed.includes(a.key))
+  b.node.send(dm, 'reply')
+  await until(() => texts(a, dm).includes('reply'))
+  expect(existsSync(join(r.dir, 'msgs', dm + '.jsonl'))).toBe(false)
+  expect(await a.node.probe(b.key)).toBeNull() // the upload burst is never sent through a relay
+
+  const gid = a.node.createGroup('pair', [b.key]) // the relay is not in it
+  await until(() => !!b.node.state().groups[gid])
+  b.node.send(gid, 'in the group')
+  await until(() => texts(a, gid).includes('in the group'))
+  expect(r.node.state().groups[gid]).toBeUndefined()
+
+  const ra = (await a.node.relayOpen(b.key))!
+  const rb = (await b.node.relayOpen(a.key))!
+  const udp = async (ip: string) => {
+    const s = dgram.createSocket('udp4')
+    await new Promise<void>((done) => s.bind(0, ip, done))
+    return s
+  }
+  const [pa, pb] = await Promise.all([udp(ra.ip), udp(rb.ip)])
+  const got: string[] = []
+  pb.on('message', (m) => got.push(m.toString()))
+  pb.send('register', rb.port, rb.ip)
+  await until(() => (pa.send('voice', ra.port, ra.ip), got.includes('voice')))
+  pa.close()
+  pb.close()
+}, 180000)
+
+test('when the relaying friend leaves, the pair moves to another mutual friend', async () => {
+  const a = peer({ strict: true })
+  const b = peer({ strict: true })
+  const r1 = peer()
+  const r2 = peer()
+  await setUp([a, b, r1, r2])
+  await befriendUnlinked(a, b)
+  await befriend(a, r1)
+  await befriend(b, r1)
+  const dm = dmId(a.key, b.key)
+  a.node.send(dm, 'first')
+  await until(() => texts(b, dm).includes('first'))
+  await befriend(a, r2)
+  await befriend(b, r2)
+  await r1.node.destroy()
+  a.node.send(dm, 'after the move')
+  await until(() => texts(b, dm).includes('after the move'))
+  expect(a.node.state().relayed).toContain(b.key)
+}, 180000)
+
+test('nobody relays for strangers or with relaying off', async () => {
+  const a = peer({ strict: true })
+  const b = peer({ strict: true })
+  const off = peer() // friends with both, relaying off
+  const half = peer() // relaying, but only friends with a
+  const stranger = DHT.keyPair()
+  await setUp([a, b, half])
+  await setUp([off], false)
+  await befriendUnlinked(a, b)
+  await befriend(a, off)
+  await befriend(b, off)
+  await befriend(a, half)
+  a.node.send(dmId(a.key, b.key), 'nobody can carry this')
+  await wait(8000)
+  expect(linked(a, b)).toBe(false)
+  const ok = await toRelay(half, a.keyPair)
+  expect(ok).not.toBeNull() // a friend may use the relay
+  await ok.destroy()
+  expect(await toRelay(half, stranger)).toBeNull()
+  expect(await toRelay(half, b.keyPair)).toBeNull() // b is not half's contact
+}, 180000)
+
+test('a relay holds to its caps: pairs, per contact, and bytes', async () => {
+  const a = peer({ strict: true })
+  const b = peer({ strict: true })
+  const c = peer()
+  const r = peer({ relayLimits: { pairs: 1, perContact: 1, bytesPerSec: 1024 } })
+  await setUp([a, b, c, r])
+  await befriend(a, r)
+  await befriend(b, r)
+  await befriend(c, r)
+  // Two connections make one pair; a third, or a second from the same contact, is refused.
+  const one = await toRelay(r, a.keyPair)
+  expect(one).not.toBeNull()
+  expect(await toRelay(r, a.keyPair)).toBeNull()
+  const two = await toRelay(r, b.keyPair)
+  expect(two).not.toBeNull()
+  expect(await toRelay(r, c.keyPair)).toBeNull()
+  await Promise.all([one.destroy(), two.destroy()])
+
+  await befriendUnlinked(a, b)
+  const dm = dmId(a.key, b.key)
+  a.node.send(dm, 'hi')
+  await until(() => texts(b, dm).includes('hi'))
+  for (let i = 0; i < 20; i++) a.node.send(dm, 'x'.repeat(3000)) // ~60 KB, over the 20 s budget of 20 KB
+  await until(() => !linked(a, b))
+  await wait(3000)
+  expect(linked(a, b)).toBe(false) // and the sender is refused for a while
+}, 180000)

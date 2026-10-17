@@ -147,6 +147,7 @@ function startApp() {
     keyPair: loadIdentity(dir),
     emit: (e) => !win.isDestroyed() && win.webContents.send('event', e),
     noDirect: process.env.ELEUSINIA_NO_DIRECT === '1',
+    strict: process.env.ELEUSINIA_STRICT === '1', // testing: behave as behind a strict router (smoke's relayed mode)
     dht: testDht(),
     // Only the installed app reports to the real inbox, so development runs (stopped with Ctrl+C) never send any.
     inbox: isKey(process.env.ELEUSINIA_INBOX) ? process.env.ELEUSINIA_INBOX : app.isPackaged ? INBOX_KEY : undefined,

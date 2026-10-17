@@ -667,7 +667,7 @@ function Card({ k, st, p, close, message, edit, run }: CardProps) {
         <h1>{p.name}</h1>
         {k !== st.me && (
           <p className="row-sub">
-            {st.online.includes(k) ? 'Online' : 'Offline'}
+            {st.online.includes(k) ? (st.relayed.includes(k) ? 'Online through a friend: voice and text only' : 'Online') : 'Offline'}
             {st.versions[k] && ` · Eleusinia ${st.versions[k].app}`}
           </p>
         )}
@@ -966,6 +966,13 @@ function SettingsDialog({ st, close, edit, remove }: { st: State; close: () => v
           <input type="checkbox" role="switch" checked={st.settings.closeToTray !== false} onChange={(e) => api.call('setSettings', { closeToTray: e.target.checked })} />
           <span>
             Minimize to the system tray when the window is closed
+          </span>
+        </label>
+        <label className="check-row">
+          <input type="checkbox" role="switch" checked={!!st.settings.relay} onChange={(e) => api.call('setSettings', { relay: e.target.checked })} />
+          <span>
+            Connect through mutual friends when a direct connection fails (experimental). They can see when you talk, never
+            what you say. Voice and text only
           </span>
         </label>
       </section>

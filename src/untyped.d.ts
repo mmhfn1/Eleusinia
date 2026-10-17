@@ -1,4 +1,5 @@
 declare module 'hyperdht'
 declare module 'hyperdht/testnet'
 declare module 'hypercore-crypto'
+declare module 'blind-relay'
 declare module '*.css'
