@@ -25,6 +25,7 @@ export type Settings = {
   camLabel?: string
   outVolume?: number
   micGate?: number
+  crashReports?: boolean // send crash reports to the developers automatically; on unless turned off
 }
 
 export type State = {
@@ -35,6 +36,7 @@ export type State = {
   online: Key[]
   groups: Record<string, Group>
   settings: Settings
+  reports: number // problem and crash reports waiting to reach the developers' inbox
 }
 
 export type Wire =
@@ -51,6 +53,8 @@ export type Wire =
   | { t: 'gone' } // the sender deleted their account
   | { t: 'probe'; id: number; d?: string; end?: boolean } // filler for measuring the sender's upload speed
   | { t: 'probed'; id: number } // all of that probe arrived
+  | { t: 'report'; r: unknown } // a problem or crash report, only ever sent to the developers' inbox (shared/reports.ts)
+  | { t: 'reportAck'; id: string } // the inbox holds that report; the sender deletes its copy
 
 export type Event =
   | { type: 'state'; state: State }

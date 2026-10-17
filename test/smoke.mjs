@@ -2,14 +2,16 @@
 // group messages with the recipient online and offline. They meet on a local test DHT, so a run depends on nothing
 // outside this machine; ELEUSINIA_SMOKE_PUBLIC=1 uses the public DHT instead, for an occasional real-network check.
 import { spawn } from 'node:child_process'
-import { mkdtempSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import createTestnet from 'hyperdht/testnet.js'
 
-const app = process.argv[2]
-const exe = (await import('electron')).default // path to the Electron binary on any OS
+// ELEUSINIA_SMOKE_EXE runs the packaged app instead (for example dist/win-unpacked/Eleusinia.exe after npm run dist).
+const packaged = process.env.ELEUSINIA_SMOKE_EXE
+const exe = packaged || (await import('electron')).default // path to the Electron binary on any OS
+const app = packaged ? [] : [process.argv[2]]
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const t0 = Date.now()
 const children = []
@@ -23,11 +25,30 @@ const { ELEUSINIA_BOOTSTRAP: _, ...baseEnv } = process.env
 const appEnv = bootstrap ? { ...baseEnv, ELEUSINIA_BOOTSTRAP: bootstrap } : baseEnv
 console.log(publicDht ? 'DHT: public (ELEUSINIA_SMOKE_PUBLIC=1)' : `DHT: local test network at ${bootstrap}`)
 
+// A developers' inbox of the test's own, never the real one, which every app below sends its reports to. No GitHub
+// token is given, so it only keeps them as files.
+const inboxDir = mkdtempSync(join(tmpdir(), 'eleusinia-inbox-'))
+const inboxProc = spawn(exe, [...app, '--inbox'], { env: { ...appEnv, ELEUSINIA_INBOX_DIR: inboxDir, GITHUB_TOKEN: '', ELEUSINIA_REPORTS_REPO: '' }, stdio: ['ignore', 'pipe', 'ignore'] })
+children.push(inboxProc)
+appEnv.ELEUSINIA_INBOX = await new Promise((resolve, reject) => {
+  let out = ''
+  inboxProc.stdout.on('data', (d) => {
+    out += d
+    const m = out.match(/Eleusinia inbox ([0-9a-f]{64})/)
+    if (m) resolve(m[1])
+  })
+  setTimeout(() => reject(new Error('the test inbox did not start')), 30000)
+})
+const inboxed = () => {
+  const d = join(inboxDir, 'reports')
+  return existsSync(d) ? readdirSync(d).filter((f) => f.endsWith('.json')).map((f) => JSON.parse(readFileSync(join(d, f), 'utf8')).report) : []
+}
+
 async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-'))) {
   // The windows overlap, and Windows reports a covered window as hidden; the app then (rightly) asks not to be sent
   // video. Occlusion detection is off so every window counts as visible.
   const flags = [`--remote-debugging-port=${port}`, '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream', '--disable-features=CalculateNativeWinOcclusion']
-  const child = spawn(exe, [app, ...flags], { env: { ...appEnv, ELEUSINIA_DATA: dir }, stdio: 'ignore' })
+  const child = spawn(exe, [...app, ...flags], { env: { ...appEnv, ELEUSINIA_DATA: dir }, stdio: 'ignore' })
   children.push(child)
   let page
   for (let i = 0; i < 50 && !page; i++) {
@@ -69,8 +90,10 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
     return true
   }
   // Lets the test read what each call connection actually receives (getStats), without the app exposing anything.
+  // Crashes the page as a real renderer crash would (Chromium's own command for it).
+  const crash = () => ws.send(JSON.stringify({ id: ++id, method: 'Page.crash' }))
   await ev(`(() => { window.__pcs = []; const P = RTCPeerConnection; window.RTCPeerConnection = class extends P { constructor(...a) { super(...a); window.__pcs.push(this) } } })()`)
-  return { child, ev, dir, title, windowState }
+  return { child, ev, dir, title, windowState, crash }
 }
 
 // What one of the live connection's slots has received (see slotsOf in call.ts): 'sound' is the second audio.
@@ -579,6 +602,49 @@ try {
   await c.ev(`(() => { const l = document.querySelector('.msgs'); l.scrollTop = 0; l.querySelector('.earlier').click() })()`)
   await until('the earlier five appear above, the button goes, and the view stays where it was', () =>
     c.ev(`${count} === 205 && ${has('long 5')} && !document.querySelector('.msgs .earlier') && document.querySelector('.msgs').scrollTop > 0`), 10)
+
+  console.log('--- Problem and crash reports')
+  const bobId = await b.ev(`api.call('state').then((s) => s.me)`)
+  const handles = await Promise.all([a, b, c].map((p) => p.ev(`api.call('state').then((s) => s.profile.handle)`)))
+  const leaks = (text) => [annId, bobId, cyId, ...handles].filter((x) => text.includes(x))
+  await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
+  await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Report a problem').click()`)
+  await until('A opens Report a problem, all diagnostics chosen for a problem', () =>
+    a.ev(`(() => { const d = document.querySelector('dialog.report-dialog[open]'); return !!d && [...d.querySelectorAll('.report-share input')].slice(0, 4).every((x) => x.checked) })()`), 5)
+  const type = (sel, text) => `(() => { const el = document.querySelector('dialog.report-dialog[open] ${sel}'); Object.getOwnPropertyDescriptor(Object.getPrototypeOf(el), 'value').set.call(el, ${JSON.stringify(text)}); el.dispatchEvent(new Event('input', { bubbles: true })) })()`
+  await a.ev(type('input[maxlength="120"]', 'Smoke test report'))
+  await a.ev(type('textarea', 'Typed by the smoke test.'))
+  const preview = await a.ev(`document.querySelector('dialog.report-dialog[open] .report-preview pre').textContent`)
+  if (!preview.includes('[bug] Smoke test report') || !preview.includes(' call ') || !preview.includes(' network ')) throw new Error('the preview does not show the report with its call and connection events: ' + preview.slice(0, 300))
+  if (leaks(preview).length) throw new Error('the preview contains a full key or friend ID: ' + leaks(preview))
+  console.log('ok   the preview shows the report with its events, and no full keys or friend IDs')
+  await a.ev(`[...document.querySelectorAll('dialog.report-dialog[open] button')].find((x) => x.textContent === 'Send report').click()`)
+  await until('A sees it is on its way', () => a.ev(`!!document.querySelector('dialog[open]')?.textContent.includes('on its way')`), 5)
+  const report = await until('the inbox receives it, and A no longer holds it', async () =>
+    (await a.ev(`api.call('state').then((s) => s.reports === 0)`)) && inboxed().find((r) => r.title === 'Smoke test report'), 120)
+  if (leaks(JSON.stringify(report)).length || report.contact) throw new Error('the received report contains a full key or friend ID')
+  if (!report.meta?.version || !report.events?.some((e) => e.area === 'call')) throw new Error('the received report lacks its app details or call events')
+  console.log('ok   what arrived holds app details and events, and nothing identifying')
+  await a.ev(`document.querySelector('dialog[open] .button.primary').click()`)
+  // Bob was killed earlier in this run: on his restart the app noticed and sent that on its own (diagnostics died with it).
+  await until("Bob's abrupt end earlier was reported by itself on his restart", async () => (await b.ev(`api.call('state').then((s) => s.reports === 0)`)) && inboxed().some((r) => r.kind === 'crash' && r.title === 'Eleusinia closed unexpectedly last time' && !r.events?.length), 90)
+
+
+  c.crash()
+  const crashReport = await until("C's window crashes: a crash report reaches the inbox by itself", async () => inboxed().find((r) => r.kind === 'crash' && r.title === 'The window crashed'), 120)
+  if (leaks(JSON.stringify(crashReport)).length) throw new Error('the crash report contains a full key or friend ID')
+  await until("C's window comes back by itself", async () => {
+    const page = await fetch('http://127.0.0.1:9233/json').then((r) => r.json()).then((l) => l.find((p) => p.type === 'page'), () => null)
+    if (!page) return false
+    const ws = new WebSocket(page.webSocketDebuggerUrl)
+    await new Promise((r, j) => ((ws.onopen = r), (ws.onerror = j)))
+    const back = await new Promise((r) => {
+      ws.onmessage = (e) => r(JSON.parse(e.data).result?.result?.value)
+      ws.send(JSON.stringify({ id: 1, method: 'Runtime.evaluate', params: { expression: `!!document.querySelector('.rail')`, returnByValue: true } }))
+    })
+    ws.close()
+    return back
+  }, 20)
 } catch (e) {
   failed = true
   console.error('FAIL', e.message)

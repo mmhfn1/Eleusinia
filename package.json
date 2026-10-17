@@ -1,7 +1,7 @@
 {
   "name": "eleusinia",
   "productName": "Eleusinia",
-  "version": "0.1.0",
+  "version": "0.0.1",
   "description": "Peer-to-peer chat and voice calls with no central server",
   "main": "out/main/index.js",
   "scripts": {
@@ -11,7 +11,10 @@
     "start": "electron-vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "smoke": "electron-vite build && node test/smoke.mjs ."
+    "smoke": "electron-vite build && node test/smoke.mjs .",
+    "inbox": "electron-vite build && electron . --inbox",
+    "installer-art": "electron build/installer-art.cjs",
+    "dist": "electron-vite build && electron-builder --win"
   },
   "type": "commonjs",
   "dependencies": {
@@ -26,6 +29,7 @@
     "@types/react-dom": "^19.3.0",
     "@vitejs/plugin-react": "^5.2.0",
     "electron": "^44.7.2",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^5.0.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
@@ -33,5 +37,52 @@
     "vite": "^7.3.7",
     "vitest": "^5.0.4"
   },
-  "private": true
+  "private": true,
+  "build": {
+    "appId": "app.eleusinia.desktop",
+    "productName": "Eleusinia",
+    "copyright": "Eleusinia developers",
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "out/**/*",
+      "build/icon.png",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "**/node_modules/uiohook-napi/**",
+      "**/node_modules/sodium-native/**",
+      "**/node_modules/udx-native/**",
+      "**/node_modules/*-native/**",
+      "**/*.node"
+    ],
+    "npmRebuild": false,
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "artifactName": "Eleusinia-Setup-${version}.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "installerSidebar": "build/installer-sidebar.bmp",
+      "uninstallerSidebar": "build/installer-sidebar.bmp",
+      "installerHeader": "build/installer-header.bmp",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Eleusinia",
+      "uninstallDisplayName": "Eleusinia",
+      "deleteAppDataOnUninstall": false
+    }
+  }
 }

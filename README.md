@@ -4,7 +4,7 @@
 
 Peer-to-peer chat and voice calls for desktop, with no central server. A Discord/TeamSpeak-style app where every message and call goes directly between the people involved.
 
-**Status:** early. Friends, direct and group text chat (including delivery to people who were offline), voice calls and screen sharing work. Cameras are not built yet.
+**Status:** tester build 0.0.1. Friends, direct and group text chat (including delivery to people who were offline), voice calls, screen sharing and cameras work. Problems can be reported from inside the app.
 
 ## Features
 
@@ -18,6 +18,7 @@ Peer-to-peer chat and voice calls for desktop, with no central server. A Discord
 - **Screen sharing.** Share a screen or window in any call, picked from **Screens** and **Applications** tabs (overlays such as the NVIDIA and Xbox Game Bar ones, and system windows, are left out). A shared screen can be watched full screen, and a share with sound has its own volume slider beside the full screen button; the button switches to **Exit full screen**, and Esc works too. Streams start at 720p and 30 fps; the streaming menu goes as high as your system allows (for example 4K at 120 fps), and your choice is always applied. You can switch to another screen or window mid-stream without stopping; your quality carries over as far as the new source allows. On Windows you can share your computer's sound with it: everything you hear except Eleusinia itself, so nobody in the call hears themselves back. A stream only starts if your measured upload can carry it to everyone and nobody already streaming is short of bandwidth; otherwise a notice explains why. Viewers receive full quality for the stream they show large, a small copy for thumbnails, and nothing while the window is hidden or the screens are hidden.
 - **Cameras.** Turn your camera on in any call. Camera settings shows a preview and offers resolution and frame rate up to what your camera can do (720p at 30 fps by default). With only cameras on, everyone appears in a grid; with a screen shared, cameras sit beside it. The same upload check as screen sharing applies.
 - **Back and forward** with the mouse's side buttons (mouse 4 and 5), through the conversations you have opened.
+- **Problem and crash reports.** Settings → Help and feedback → **Report a problem** sends a bug report, feedback or an idea to the developers, with diagnostics you choose and preview first; crash reports go by themselves unless turned off. They travel peer to peer to the developers' inbox, with no account and no server; nothing identifying is included (see [docs/reports.md](docs/reports.md)).
 - **Resizable layout.** Groups sidebar, friends list split into online and offline, and in a conversation a voice sidebar, the chat and a members sidebar.
 
 ## How it works
@@ -34,6 +35,10 @@ The only outside infrastructure is the public DHT's bootstrap nodes and a public
 - `src/main/node.ts`: friends, groups, message logs and their sync. No Electron imports, so the tests run it directly.
 - `src/shared/`: wire types, validation, signing and merge logic, and the per-peer call decisions (`callstate.ts`: early ICE candidates, reconnect timing).
 - `src/renderer/`: the React UI (`App.tsx`) and voice calls (`call.ts`).
+
+## Installing
+
+Testers: run `Eleusinia-Setup-0.0.1.exe`. It is not code-signed yet, so Windows shows "Windows protected your PC" the first time: choose **More info → Run anyway**. Your data stays in `%APPDATA%\Eleusinia` and is kept if you uninstall.
 
 ## Getting started
 
@@ -67,8 +72,12 @@ Both people must have the app open when one searches for the other's ID.
 | `npm start` | Run the built app |
 | `npm test` | Unit and integration tests on a local test DHT |
 | `npm run typecheck` | TypeScript check |
-| `npm run smoke` | Builds, then drives three real app windows on a local test DHT through setup, friend search, chat, a voice call, screen sharing (of its own windows only, with computer sound on Windows), a camera and offline delivery (about a minute, opens windows) |
+| `npm run smoke` | Builds, then drives three real app windows on a local test DHT through setup, friend search, chat, a voice call, screen sharing (of its own windows only, with computer sound on Windows), a camera, offline delivery, and problem and crash reports to a test inbox (about two minutes, opens windows) |
 | `ELEUSINIA_NO_DIRECT=1 npm run smoke` | Same, but direct call routes are withheld, so the call must go through the relay |
+| `npm run dist` | Builds the Windows installer into `dist/` (`Eleusinia-Setup-<version>.exe`) |
+| `ELEUSINIA_SMOKE_EXE=dist/win-unpacked/Eleusinia.exe node test/smoke.mjs` | The same smoke run against the packaged app, after `npm run dist` |
+| `npm run inbox` | Runs the developers' inbox, which receives problem and crash reports and files them as GitHub issues (see [docs/reports.md](docs/reports.md)) |
+| `npm run installer-art` | Redraws the installer's sidebar and header pictures in the app's look |
 | `ELEUSINIA_SMOKE_PUBLIC=1 npm run smoke` | Same, over the public DHT: an occasional real-network check, slower and sometimes flaky when the DHT is |
 
 ## Known limits
@@ -82,7 +91,8 @@ Both people must have the app open when one searches for the other's ID.
 - **Computer sound with a share is Windows only**, and mono. Calls of more than about 6 to 8 full-quality streams (screens and cameras together) need peer forwarding, which is not built yet (see the roadmap).
 - **Hotkeys use a system-wide keyboard hook** ([uiohook-napi](https://github.com/SnosMe/uiohook-napi)), running only while a hotkey is set or being recorded. Keys are only compared in memory, never stored or sent. On Windows, keys pressed while a program running as administrator is in front (some games, launchers and anti-cheat tools) never reach it; **Settings → Restart App as Administrator** fixes that until Eleusinia is closed. On macOS it needs Accessibility permission; on Linux it needs X11 (not Wayland).
 - **Text only:** no attachments, edits, deletes, reactions or unread markers.
-- **Desktop only, one device per identity,** and no installer yet.
+- **Desktop only, one device per identity.** The installer is Windows only and unsigned, and there are no automatic updates yet.
+- **Reports reach the developers only while their inbox is running**; until then they wait on your computer.
 
 ## Roadmap
 

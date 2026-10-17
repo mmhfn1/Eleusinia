@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomInt } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   type Event,
@@ -20,6 +20,7 @@ import {
   isUsername,
   normHandle,
 } from '../shared/protocol'
+import { type Area, type Report, cleanReport } from '../shared/reports'
 import { mergeGroup, missing, signAdd, signLeft, signMsg, validGroup, verifyAdd, verifyMsg } from '../shared/sync'
 import { createNet } from './network'
 import { createRelay } from './relay'
@@ -40,13 +41,15 @@ type Opts = {
   dht?: object
   redialMs?: number
   noDirect?: boolean // testing: withhold ICE candidates so calls can only connect through the relay
+  inbox?: Key // the developers' inbox, where problem and crash reports go
+  diag?: (area: Area, text: string) => void // diagnostic events, kept in memory by the caller
 }
 
 // Conversations whose messages stay in memory; the open one and a couple being synced.
 const KEEP_LOGS = 3
 
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
-export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false }: Opts) {
+export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {} }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
   const file = join(dir, 'state.json')
   mkdirSync(join(dir, 'msgs'), { recursive: true })
@@ -87,6 +90,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     online: net.keys().filter(known),
     groups: Object.fromEntries(ours().map((g) => [g.id, g])),
     settings: s.settings,
+    reports: outgoing().length,
   })
   const push = () => emit({ type: 'state', state: state() })
   const changed = () => {
@@ -133,6 +137,19 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     emit({ type: 'msg', m })
   }
 
+  // Reports for the developers wait here, on disk, until their inbox confirms it holds them.
+  const outbox = join(dir, 'outbox')
+  const outgoing = () => (existsSync(outbox) ? readdirSync(outbox).filter((f) => f.endsWith('.json')) : [])
+  function deliver() {
+    if (!inbox || !outgoing().length) return
+    if (!net.linked(inbox)) return net.dial(inbox)
+    for (const f of outgoing()) {
+      try {
+        net.send(inbox, { t: 'report', r: JSON.parse(readFileSync(join(outbox, f), 'utf8')) })
+      } catch {} // a torn file: dropped below once the inbox has the rest
+    }
+  }
+
   const hi = (key: Key) => net.send(key, { t: 'hello', ...s.profile, friend: s.friends[key] === 'friend' || s.friends[key] === 'outgoing' })
   const sendHave = (key: Key, conv: string, re?: boolean) =>
     net.send(key, { t: 'have', conv, have: haveOf(conv), re })
@@ -174,6 +191,13 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   }
 
   function onMsg(key: Key, w: Wire) {
+    if (key === inbox && w.t === 'reportAck') {
+      if (typeof w.id !== 'string' || !/^[0-9a-f]{16}$/.test(w.id) || !existsSync(join(outbox, w.id + '.json'))) return
+      rmSync(join(outbox, w.id + '.json'), { force: true })
+      diag('app', 'a report reached the developers')
+      if (!outgoing().length && !wants(key)) net.drop(key)
+      return push()
+    }
     if (w.t === 'who') return net.send(key, { t: 'card', ...s.profile })
     if (w.t === 'card') return asking.get(key)?.done(cleanProfile(w))
     if (w.t === 'hello') {
@@ -269,11 +293,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     keyPair,
     {
       open(key) {
+        diag('network', `linked with …${key.slice(-6)}${known(key) ? '' : key === inbox ? ' (developers inbox)' : ' (not a friend)'}`)
+        if (key === inbox) deliver()
         if (wants(key)) greet(key)
         if (asking.has(key)) net.send(key, { t: 'who' })
         push()
       },
       close(key) {
+        diag('network', `link closed with …${key.slice(-6)}`)
         relay.close(key)
         push()
       },
@@ -292,6 +319,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   }
   redial()
   const timer = setInterval(redial, redialMs)
+  const delivery = setInterval(deliver, redialMs) // only dials while reports are waiting, like redialing an offline friend
+  deliver()
 
   const topic = (id: string) => createHash('sha256').update('eleusinia:' + id).digest()
   const prefixTopic = (prefix: string) => createHash('sha256').update('eleusinia-prefix:' + prefix).digest()
@@ -445,8 +474,20 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       Object.assign(s.settings, p)
       changed()
     },
+    // Queues a problem or crash report for the developers. It is checked and scrubbed here (shared/reports.ts) as
+    // well as at the inbox, then sent whenever the inbox is reachable.
+    report(r: Omit<Report, 'id' | 'at'>) {
+      const clean = cleanReport({ ...r, id: randomBytes(8).toString('hex'), at: Date.now() })
+      if (!clean) throw new Error('That report cannot be sent')
+      mkdirSync(outbox, { recursive: true })
+      writeFileSync(join(outbox, clean.id + '.json'), JSON.stringify(clean))
+      push()
+      deliver()
+      return clean.id
+    },
     async destroy() {
       clearInterval(timer)
+      clearInterval(delivery)
       clearInterval(announcer)
       clearInterval(probeReset)
       relay.closeAll()

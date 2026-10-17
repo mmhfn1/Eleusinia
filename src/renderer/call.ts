@@ -36,6 +36,8 @@ declare global {
       stopRecording(): Promise<void>
       isAdmin(): Promise<boolean>
       restartAsAdmin(): Promise<boolean>
+      diag(area: import('../shared/reports').Area, text: string): void
+      diagnostics(): Promise<{ meta: import('../shared/reports').Meta; events: import('../shared/reports').Diag[] }>
     }
   }
 }
@@ -69,6 +71,12 @@ export let deafened = false // hear nobody; also keeps your microphone off
 let state: State
 let stream: MediaStream | null = null
 // The devices actually in use: the chosen ones, or '' (system default) while a chosen one is unplugged.
+// Call events for problem reports: counts, qualities and states only (never names, window titles or device names);
+// the main process scrubs and keeps them in memory (shared/reports.ts).
+const log = (text: string) => window.api.diag('call', text)
+const who = (k: Key) => '…' + k.slice(-6).toUpperCase()
+let lastGrade: string | null = null
+
 let micId = ''
 let outId = ''
 let relayMissing = false // no network address the relay port could use
@@ -282,9 +290,11 @@ function connect(k: Key) {
     else if (e.track.kind === 'audio') playVoice(k, peer, e.streams[0] ?? new MediaStream([e.track]))
     notify()
   }
-  if (!watchdogs.has(k)) watchdogs.set(k, createWatchdog(state.me, k, { restart: () => serial(() => restart(k)), rebuild: () => serial(() => offer(k)) }))
+  if (!watchdogs.has(k))
+    watchdogs.set(k, createWatchdog(state.me, k, { restart: () => serial(() => restart(k)), rebuild: () => (log(`rebuilding the connection to ${who(k)}`), serial(() => offer(k))) }))
   pc.onconnectionstatechange = async () => {
     if (peers.get(k) !== peer) return // a replaced connection
+    log(`connection to ${who(k)}: ${pc.connectionState}`)
     watchdogs.get(k)?.update(pc.connectionState)
     if (pc.connectionState === 'connected') {
       bitrate(pc)
@@ -293,6 +303,7 @@ function connect(k: Key) {
       if (camera) sendCamera(k)
       await applyLevel(k)
       peer.relayed = await isRelayed(pc)
+      if (peer.relayed) log(`connection to ${who(k)} goes through the relay`)
     }
     notify()
   }
@@ -351,6 +362,7 @@ async function restart(k: Key) {
   const p = peers.get(k)
   if (!conv || !p || p.pc.signalingState === 'closed') return
   const id = (p.offer = ++offerId)
+  log(`looking for a new route to ${who(k)}`)
   p.pc.restartIce()
   await local(p.pc, await p.pc.createOffer({ iceRestart: true }))
   send(conv, k, { k: 'offer', sdp: p.pc.localDescription!.toJSON(), restart: true, id })
@@ -433,6 +445,7 @@ async function capture(src: ScreenSource, q: Quality, sound: boolean) {
   track.contentHint = q.motion ? 'motion' : 'detail'
   let heard: MediaStreamTrack | undefined = media.getAudioTracks()[0]
   soundRefused = sound && !(heard?.getSettings() as { restrictOwnAudio?: boolean } | undefined)?.restrictOwnAudio
+  if (soundRefused) log('computer sound refused: this system cannot leave our own audio out')
   if (soundRefused) heard?.stop()
   if (heard) heard.contentHint = 'music'
   return { track, sound: soundRefused ? undefined : heard }
@@ -455,8 +468,11 @@ async function use(cap: { track: MediaStreamTrack; sound?: MediaStreamTrack }, s
   notify()
 }
 
+const shareWords = (src: ScreenSource, q: Quality, sound: boolean) => `a ${src.id.startsWith('window') ? 'window' : 'screen'} at ${q.height}p ${q.fps} fps${q.motion ? ' (motion)' : ''}${sound ? ' with sound' : ''}`
+
 export async function startShare(src: ScreenSource, q: Quality, sound = false) {
   if (!conv) return
+  log(`started sharing ${shareWords(src, q, sound)}`)
   const cap = await capture(src, q, sound)
   if (!conv) return cap.track.stop(), cap.sound?.stop() // the call ended meanwhile
   await use(cap, src, q)
@@ -465,6 +481,7 @@ export async function startShare(src: ScreenSource, q: Quality, sound = false) {
 // Shares another screen or window, or turns its sound on or off, without stopping: viewers keep watching.
 export async function switchShare(src: ScreenSource, q: Quality, sound = false) {
   if (!screen) return
+  log(`switched to sharing ${shareWords(src, q, sound)}`)
   const cap = await capture(src, q, sound)
   if (!screen) return cap.track.stop(), cap.sound?.stop() // stopped meanwhile
   await use(cap, src, q)
@@ -484,6 +501,7 @@ export async function setQuality(q: Quality) {
 
 export function stopShare() {
   if (!screen) return
+  log('stopped sharing')
   screen.track.onended = null
   screen.track.stop()
   screen.sound?.stop()
@@ -512,6 +530,7 @@ export const cameraLimits = (src: CameraSource, q: Quality) => ({ width: { ideal
 // Puts a camera on every connection, replacing any camera in use. The streamer's quality is applied as chosen.
 export async function useCamera(track: MediaStreamTrack, src: CameraSource, q: Quality) {
   if (!conv) return track.stop()
+  log(`camera on at ${q.height}p ${q.fps} fps`)
   await track.applyConstraints(cameraLimits(src, q)).catch(() => {})
   track.contentHint = 'motion'
   const old = camera?.track
@@ -529,6 +548,7 @@ export async function useCamera(track: MediaStreamTrack, src: CameraSource, q: Q
 
 export function stopCamera() {
   if (!camera) return
+  log('camera off')
   camera.track.onended = null
   camera.track.stop()
   camera = null
@@ -601,6 +621,9 @@ async function measure() {
       samples.set('', remember(samples.get(''), { rtt: ms ?? Infinity }))
     }
     await checkLimits()
+    const now = signal()
+    if (now.grade !== lastGrade) log(`connection ${now.grade ?? 'unknown'}; ping ${now.pings.map((p) => `${p.k ? who(p.k) : 'network'} ${Number.isFinite(p.ms) ? Math.round(p.ms) + ' ms' : 'none'}`).join(', ')}`)
+    lastGrade = now.grade
   } finally {
     measuring = false
   }
@@ -641,10 +664,12 @@ function followDevices(micEnded = false) {
       const { mic: chosenMic, out: chosenOut, micLabel, outLabel } = state.settings
       const out = nextDevice(chosenOut, outId, 'audiooutput', list, outLabel)
       if (out !== null) {
+        log(`speakers moved to ${out === chosenOut ? 'the chosen device' : 'the system default'}`)
         outId = out
         await sinkTo(outId)
       }
       const m = nextDevice(chosenMic, micId, 'audioinput', list, micLabel)
+      if (m !== null || micEnded) log(`microphone moved to ${(m ?? micId) === chosenMic && chosenMic ? 'the chosen device' : 'the system default'}${micEnded ? ' (it stopped)' : ''}`)
       if (m !== null || micEnded) await useMic(m ?? micId)
     })
     .catch(console.error)
@@ -670,6 +695,7 @@ export function notices() {
 
 export async function join(c: string) {
   leave()
+  log(`joining a ${state.groups[c] ? 'group' : 'direct'} call, ${active.get(c)?.size ?? 0} already in it`)
   const list = await navigator.mediaDevices.enumerateDevices()
   micId = usable(state.settings.mic, 'audioinput', list, state.settings.micLabel)
   outId = usable(state.settings.out, 'audiooutput', list, state.settings.outLabel)
@@ -696,6 +722,7 @@ export async function join(c: string) {
 
 export function leave() {
   if (!conv) return
+  log(`left the call (${peers.size} connected)`)
   stopShare()
   stopCamera()
   send(conv, null, { k: 'leave' })

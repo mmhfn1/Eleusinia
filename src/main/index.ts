@@ -1,15 +1,50 @@
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import os from 'node:os'
 import { join } from 'node:path'
 import { BrowserWindow, app, desktopCapturer, ipcMain, safeStorage, screen, session } from 'electron'
 import DHT from 'hyperdht'
 import { UiohookKey, uIOhook } from 'uiohook-napi'
 import { type Bindings, type Hotkey, createMatcher, createRecorder } from '../shared/hotkeys'
+import { isKey } from '../shared/protocol'
+import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared/reports'
 import { kindOf, shareable } from '../shared/sources'
+import { createInbox } from './inbox'
 import { createNode } from './node'
 
+// `npm run inbox` runs the developers' inbox (inbox.ts) instead of the app, in a data folder of its own.
+const inboxMode = process.argv.includes('--inbox')
+if (inboxMode) app.setPath('userData', process.env.ELEUSINIA_INBOX_DIR || join(app.getPath('appData'), 'Eleusinia Inbox'))
 // Lets several instances run side by side on one machine, each with its own identity.
-if (process.env.ELEUSINIA_DATA) app.setPath('userData', process.env.ELEUSINIA_DATA)
+else if (process.env.ELEUSINIA_DATA) app.setPath('userData', process.env.ELEUSINIA_DATA)
+
+// Testing only: join this DHT instead of the public one, as "host:port,host:port" (test/smoke.mjs runs a local
+// one). Unset in normal use, which keeps the public DHT.
+function testDht() {
+  const bootstrap = (process.env.ELEUSINIA_BOOTSTRAP ?? '').split(',').map((s) => s.trim()).filter((s) => /^[\w.-]+:\d{1,5}$/.test(s))
+  return bootstrap.length ? { bootstrap } : undefined
+}
+
+// The inbox's identity is kept in plain text on purpose: it only exists on the developers' machine, and whoever
+// holds it can receive every report. The GitHub token comes from the environment or github.json beside it.
+function startInbox() {
+  const dir = app.getPath('userData')
+  mkdirSync(dir, { recursive: true })
+  const idFile = join(dir, 'inbox-identity.json')
+  if (!existsSync(idFile)) writeFileSync(idFile, JSON.stringify({ sk: DHT.keyPair().secretKey.toString('hex') }))
+  const secretKey = Buffer.from(JSON.parse(readFileSync(idFile, 'utf8')).sk, 'hex')
+  const config = join(dir, 'github.json')
+  const saved = existsSync(config) ? JSON.parse(readFileSync(config, 'utf8')) : {}
+  const token = process.env.GITHUB_TOKEN || saved.token
+  const repo = process.env.ELEUSINIA_REPORTS_REPO || saved.repo
+  const log = (line: string) => console.log(`${new Date().toISOString().slice(0, 19).replace('T', ' ')}  ${line}`)
+  const inbox = createInbox({ dir, keyPair: { publicKey: secretKey.subarray(32), secretKey }, dht: testDht(), github: token && repo ? { token, repo } : undefined, log })
+  log(`Eleusinia inbox ${inbox.key}`)
+  log(`saving reports in ${join(dir, 'reports')}`)
+  log(token && repo ? `filing issues in ${repo}` : `not filing issues: put {"token": "...", "repo": "owner/name"} in ${config}`)
+  if (inbox.key !== INBOX_KEY && !process.env.ELEUSINIA_BOOTSTRAP) log('warning: the app sends reports to a different inbox (INBOX_KEY in src/shared/reports.ts)')
+  process.on('SIGINT', () => inbox.destroy().then(() => app.exit(0)))
+}
 
 function loadIdentity(dir: string) {
   const file = join(dir, 'identity.json')
@@ -28,7 +63,9 @@ function loadIdentity(dir: string) {
   return { publicKey: secretKey.subarray(32), secretKey } // an ed25519 secret key ends with its public key
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(() => (inboxMode ? startInbox() : startApp()))
+
+function startApp() {
   const dir = app.getPath('userData')
   mkdirSync(dir, { recursive: true })
   const win = new BrowserWindow({
@@ -45,21 +82,66 @@ app.whenReady().then(() => {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   win.webContents.on('will-navigate', (e) => e.preventDefault())
 
-  // Testing only: join this DHT instead of the public one, as "host:port,host:port" (test/smoke.mjs runs a local
-  // one). Unset in normal use, which keeps the public DHT.
-  const bootstrap = (process.env.ELEUSINIA_BOOTSTRAP ?? '').split(',').map((s) => s.trim()).filter((s) => /^[\w.-]+:\d{1,5}$/.test(s))
+  // The last few minutes of what happened, scrubbed and in memory only, for problem and crash reports (reports.ts).
+  const diagnostics = createDiagnostics()
+  const meta = (): Meta => ({
+    version: app.getVersion(),
+    build: BUILD,
+    os: `${os.type()} ${os.release()}`,
+    arch: process.arch,
+    electron: process.versions.electron,
+    chrome: process.versions.chrome,
+    locale: app.getLocale(),
+    memoryGb: Math.round(os.totalmem() / 2 ** 30),
+  })
+  diagnostics.add('app', `started Eleusinia ${app.getVersion()} (${BUILD} build)`)
   const node = createNode({
     dir,
     keyPair: loadIdentity(dir),
     emit: (e) => !win.isDestroyed() && win.webContents.send('event', e),
     noDirect: process.env.ELEUSINIA_NO_DIRECT === '1',
-    dht: bootstrap.length ? { bootstrap } : undefined,
+    dht: testDht(),
+    // Only the installed app reports to the real inbox, so development runs (stopped with Ctrl+C) never send any.
+    inbox: isKey(process.env.ELEUSINIA_INBOX) ? process.env.ELEUSINIA_INBOX : app.isPackaged ? INBOX_KEY : undefined,
+    diag: diagnostics.add,
   })
+  ipcMain.on('diag', (_e, area: unknown, text: unknown) => AREAS.includes(area as any) && typeof text === 'string' && diagnostics.add(area as any, text))
+  ipcMain.handle('diagnostics', () => ({ meta: meta(), events: diagnostics.list() }))
+
+  // Crash reports go to the developers by themselves (unless turned off in Settings), at most 5 an hour so a crash
+  // that repeats cannot flood anyone. They carry only what a problem report would: never a memory dump.
+  const crashes: number[] = []
+  function crashed(title: string, detail: string, events = true) {
+    diagnostics.add('error', `${title}: ${detail}`)
+    const hour = crashes.filter((t) => t > Date.now() - 3600e3)
+    if (node.state().settings.crashReports === false || hour.length >= 5) return
+    crashes.splice(0, crashes.length, ...hour, Date.now())
+    try {
+      node.report({ kind: 'crash', title, body: `${detail}\n\nSent automatically; this can be turned off in Settings.`, meta: meta(), events: events ? diagnostics.list() : [] })
+    } catch {}
+  }
+  app.on('render-process-gone', (_e, wc, d) => {
+    if (d.reason === 'clean-exit') return
+    crashed('The window crashed', `${d.reason}, exit code ${d.exitCode}`)
+    if (wc === win.webContents) setTimeout(() => !win.isDestroyed() && win.reload(), 500) // a crashed window stays blank otherwise
+  })
+  app.on('child-process-gone', (_e, d) => {
+    if (d.reason === 'clean-exit' || d.reason === 'killed') return
+    crashed(`The ${d.name || d.serviceName || d.type} process crashed`, `${d.reason}, exit code ${d.exitCode}`)
+  })
+  process.on('uncaughtException', (e) => crashed('An error in the background process', e.stack ?? String(e)))
+  process.on('unhandledRejection', (e) => diagnostics.add('error', `unhandled: ${e instanceof Error ? e.message : String(e)}`))
+  // A marker that only a normal shutdown removes: still there at start means the last run ended abruptly. Nothing
+  // from that run survives (diagnostics are in memory only), so the report says just that.
+  const running = join(dir, 'running')
+  if (existsSync(running)) crashed('Eleusinia closed unexpectedly last time', 'It did not shut down normally: a crash, the computer losing power, or the app being ended from Task Manager.', false)
+  writeFileSync(running, '')
   ipcMain.handle('call', async (_e, method: string, ...args: unknown[]) => {
     if (!Object.hasOwn(node, method)) throw new Error('Unknown method')
     const result = await (node as any)[method](...args)
     if (method === 'setSettings') hook()
     if (method === 'deleteAccount') {
+      rmSync(running, { force: true })
       app.relaunch()
       app.exit(0)
     }
@@ -185,6 +267,7 @@ app.whenReady().then(() => {
   app.on('window-all-closed', async () => {
     if (hooked) uIOhook.stop()
     await node.destroy()
+    rmSync(running, { force: true })
     app.quit()
   })
-})
+}

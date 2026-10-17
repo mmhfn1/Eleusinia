@@ -2,6 +2,7 @@ import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useLayou
 import { type Offset, clampOffset, cropRect } from '../shared/crop'
 import { usable } from '../shared/devices'
 import { type Action, type Hotkey, sameKeys } from '../shared/hotkeys'
+import { type Area, type Diag, type Kind, type Meta, BUILD, cleanReport, describe } from '../shared/reports'
 import { GATE_DB, dbOf } from '../shared/speaking'
 import { type Group, type Key, type Msg, type Profile, type State, MAX_TEXT, dmId, keyTail, stack } from '../shared/protocol'
 import type { SourceKind } from '../shared/sources'
@@ -336,12 +337,20 @@ function Search({ st, run }: { st: State; run: Run }) {
       return
     }
     setBusy(true)
-    const timer = setTimeout(() => {
+    // Nobody found is asked again a few times: someone who just came online takes a few seconds to be findable.
+    let timer: ReturnType<typeof setTimeout>
+    const look = (tries: number) => {
       api.call('findFriend', q).then(
-        (r: Found[]) => id === latest.current && (setFound(r), setBusy(false)),
+        (r: Found[]) => {
+          if (id !== latest.current) return
+          setFound(r)
+          if (!r.length && tries > 0) timer = setTimeout(() => look(tries - 1), 3000)
+          else setBusy(false)
+        },
         () => id === latest.current && setBusy(false),
       )
-    }, 350)
+    }
+    timer = setTimeout(() => look(4), 350)
     return () => clearTimeout(timer)
   }, [text])
 
@@ -912,6 +921,10 @@ function SettingsDialog({ st, close, edit, remove }: { st: State; close: () => v
         {WINDOWS && <RunAsAdmin />}
       </section>
       <section className="settings-section">
+        <h2>Help and feedback</h2>
+        <Feedback st={st} />
+      </section>
+      <section className="settings-section">
         <h2>Account</h2>
         <div className="settings-row">
           <span className="row-text">
@@ -962,6 +975,173 @@ function RunAsAdmin() {
         {admin ? 'Running as administrator' : 'Restart'}
       </button>
     </div>
+  )
+}
+
+// Reporting problems to the developers: a report goes peer to peer to their inbox, which files it for them; nobody
+// needs an account. Crash reports go by themselves unless turned off here.
+function Feedback({ st }: { st: State }) {
+  const [reporting, setReporting] = useState(false)
+  const [version, setVersion] = useState('')
+  useEffect(() => {
+    window.api.diagnostics().then((d) => setVersion(d.meta.version))
+  }, [])
+  return (
+    <>
+      <div className="settings-row">
+        <span className="row-text">
+          <span className="row-title">Report a problem</span>
+          <span className="row-sub">
+            Eleusinia {version} · {BUILD} build
+          </span>
+        </span>
+        <button className="button" onClick={() => setReporting(true)}>
+          Report a problem
+        </button>
+      </div>
+      <div className="setting crash-setting">
+        <label className="check-row">
+          <input type="checkbox" checked={st.settings.crashReports !== false} onChange={(e) => api.call('setSettings', { crashReports: e.target.checked })} />
+          <span>Send crash reports to the developers automatically</span>
+        </label>
+        <Info id="crash-tip">
+          When part of Eleusinia crashes, a short report goes to the developers: what crashed and why, the app and Windows versions, and the last few
+          minutes of connection, call and error events.
+          <br />
+          It never includes your messages, names, pictures, window titles, device names, full keys or network addresses.
+        </Info>
+      </div>
+      {st.reports > 0 && (
+        <p className="row-sub" role="status">
+          {st.reports === 1 ? '1 report is' : `${st.reports} reports are`} waiting to reach the developers. They are sent as soon as their inbox is
+          reachable, even after a restart.
+        </p>
+      )}
+      {reporting && <ReportDialog close={() => setReporting(false)} st={st} />}
+    </>
+  )
+}
+
+const REPORT_KINDS: { kind: Kind; label: string; hint: string }[] = [
+  { kind: 'bug', label: 'Something went wrong', hint: 'What happened, and what did you expect? Steps to make it happen again help most.' },
+  { kind: 'feedback', label: 'Feedback', hint: 'What works well, or what could be better?' },
+  { kind: 'idea', label: 'An idea', hint: 'What would you like Eleusinia to do?' },
+]
+const SHARE: { area: Area; label: string }[] = [
+  { area: 'app', label: 'App and system details' },
+  { area: 'network', label: 'Connection events' },
+  { area: 'call', label: 'Call events and quality' },
+  { area: 'error', label: 'Errors' },
+]
+
+function ReportDialog({ st, close }: { st: State; close: () => void }) {
+  const [kind, setKind] = useState<Kind>('bug')
+  const [title, setTitle] = useState('')
+  const [body, setBody] = useState('')
+  const [share, setShare] = useState<Area[]>(SHARE.map((s) => s.area))
+  const [contact, setContact] = useState(false)
+  const [diag, setDiag] = useState<{ meta: Meta; events: Diag[] } | null>(null)
+  const [err, setErr] = useState('')
+  const [sent, setSent] = useState(false)
+  useEffect(() => {
+    window.api.diagnostics().then(setDiag)
+  }, [])
+  const pick = (k: Kind) => {
+    setKind(k)
+    setShare(k === 'bug' ? SHARE.map((s) => s.area) : []) // diagnostics help with problems; feedback rarely needs them
+  }
+  const toggle = (a: Area, on: boolean) => setShare((s) => (on ? [...s, a] : s.filter((x) => x !== a)))
+  const draft = {
+    kind,
+    title,
+    body,
+    contact: contact ? st.profile.handle : undefined,
+    meta: share.includes('app') ? diag?.meta : undefined,
+    events: diag?.events.filter((e) => share.includes(e.area)),
+  }
+  // Exactly what will leave: the same checks and scrubbing the app and the inbox apply.
+  const preview = cleanReport({ ...draft, id: '0'.repeat(16), at: Date.now(), title: title || '(title)' })
+  const count = (a: Area) => diag?.events.filter((e) => e.area === a).length ?? 0
+  async function send(e: FormEvent) {
+    e.preventDefault()
+    setErr('')
+    try {
+      await api.call('report', draft)
+      setSent(true)
+    } catch (x: any) {
+      setErr(String(x?.message ?? x).replace(/^.*Error: /, ''))
+    }
+  }
+  if (sent)
+    return (
+      <Dialog label="Report sent" close={close}>
+        <h1>Thank you</h1>
+        <p>Your report is on its way to the developers. If their inbox is not reachable right now, it waits on this computer and goes later by itself.</p>
+        <div className="form-actions">
+          <button className="button primary" onClick={close}>
+            Close
+          </button>
+        </div>
+      </Dialog>
+    )
+  return (
+    <Dialog label="Report a problem" close={close} className="report-dialog">
+      <h1>Report a problem</h1>
+      <form onSubmit={send}>
+        <div className="report-kinds" role="radiogroup" aria-label="What kind of report">
+          {REPORT_KINDS.map((k) => (
+            <label key={k.kind} className={`report-kind ${kind === k.kind ? 'chosen' : ''}`}>
+              <input type="radio" name="kind" checked={kind === k.kind} onChange={() => pick(k.kind)} />
+              {k.label}
+            </label>
+          ))}
+        </div>
+        <label className="field-label">
+          Title
+          <input value={title} maxLength={120} required onChange={(e) => setTitle(e.target.value)} placeholder="In a few words" />
+        </label>
+        <label className="field-label">
+          Description
+          <textarea value={body} maxLength={4000} rows={5} onChange={(e) => setBody(e.target.value)} placeholder={REPORT_KINDS.find((k) => k.kind === kind)!.hint} />
+        </label>
+        <fieldset className="report-share">
+          <legend>Share diagnostics</legend>
+          {SHARE.map((s) => (
+            <label key={s.area} className="check-row">
+              <input type="checkbox" checked={share.includes(s.area)} onChange={(e) => toggle(s.area, e.target.checked)} />
+              <span>
+                {s.label}
+                <span className="hint"> · {s.area === 'app' ? 'version, Windows version, memory' : `${count(s.area)} from the last 15 minutes`}</span>
+              </span>
+            </label>
+          ))}
+          <label className="check-row">
+            <input type="checkbox" checked={contact} onChange={(e) => setContact(e.target.checked)} />
+            <span>
+              Include my friend ID so the developers can reply<span className="hint"> · {st.profile.handle}</span>
+            </span>
+          </label>
+          <p className="hint">Never included: your messages, names, pictures, window titles, device names, full keys or network addresses.</p>
+        </fieldset>
+        <details className="report-preview">
+          <summary>See exactly what will be sent</summary>
+          <pre>{preview ? describe(preview) : ''}</pre>
+        </details>
+        {err && (
+          <p className="form-error" role="alert">
+            {err}
+          </p>
+        )}
+        <div className="form-actions">
+          <button type="button" className="button" onClick={close}>
+            Cancel
+          </button>
+          <button className="button primary" disabled={!title.trim()}>
+            Send report
+          </button>
+        </div>
+      </form>
+    </Dialog>
   )
 }
 
