@@ -276,6 +276,10 @@ try {
   console.log('ok   friend ID is its own section; Settings separate; (i) sits right of the bitrate and shows its tip on focus')
   await a.ev(`document.activeElement.blur(); document.querySelector('dialog[open] .dialog-close').click()`)
 
+  // Chromium's fake microphone beeps a steady tone, which noise suppression rightly removes as noise: the checks
+  // that listen for that beep run without it, and noise suppression gets a check of its own in the call below.
+  for (const p of [a, b, c]) await p.ev(`api.call('setSettings', { noiseSuppression: false })`)
+
   console.log('--- Friend search suggestions')
   for (const [p, n] of [[b, 'Bob'], [c, 'Cy']]) {
     const tail = await p.ev(`api.call('state').then(s => s.me.slice(-6).toUpperCase())`)
@@ -465,6 +469,25 @@ try {
     b.ev(`!document.querySelector('aside.voice').textContent.includes('Audio devices')`), 5)
   // Hotkeys, pressed as real system-wide key events while A's window is minimised. F23 and F24 exist on no ordinary
   // keyboard, so injecting them cannot type into anything else on this machine.
+  console.log('--- Noise suppression')
+  await a.ev(`api.call('setSettings', { noiseSuppression: true })`)
+  const diagText = (p) => p.ev(`api.diagnostics().then((d) => d.events.map((e) => e.text).join(' | '))`)
+  await until('A turns noise suppression on mid-call: RNNoise starts, with no error', async () => {
+    const t = await diagText(a)
+    if (t.includes('noise suppression could not start')) throw new Error(t.split(' | ').find((l) => l.includes('could not start')))
+    return t.includes('noise suppression on')
+  }, 15).catch(async (e) => {
+    throw new Error(e.message + ' | A diagnostics: ' + (await diagText(a)).slice(-1500))
+  })
+  const before = await b.ev(received('voice'))
+  await sleep(3000)
+  if (!((await b.ev(received('voice'))) > before)) throw new Error("B stopped receiving A's voice stream once it was cleaned")
+  console.log("ok   B still receives A's (now cleaned) voice stream")
+  const offs = (await diagText(a)).split('noise suppression off').length
+  await a.ev(`api.call('setSettings', { noiseSuppression: false })`)
+  await until("A turns it off again: the microphone is reopened with Chromium's own filter", async () => (await diagText(a)).split('noise suppression off').length > offs, 15)
+  await sleep(1000)
+
   console.log('--- Hotkeys (none bound by default)')
   const { uIOhook, UiohookKey } = createRequire(import.meta.url)('uiohook-napi')
   const key = async (code, down) => (uIOhook.keyToggle(code, down ? 'down' : 'up'), sleep(150))

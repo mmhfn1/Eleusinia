@@ -11,7 +11,7 @@ Goals: peer-to-peer (no server), lightweight, secure, calls of up to 15 to 20 pe
   - **Their upload:** it must carry their chosen quality to everyone in the call. The upload is measured live by sending about 1 MB to the best-connected person in the call and timing its arrival.
   - **Nobody already streaming may be short of bandwidth.** This is read from WebRTC's own report of what limits each stream.
 
-  If either fails, the stream does not start, and a notification explains why: the numbers for their upload, or that another stream would lower the quality of the call for others. They can pick a lower quality or try again later.
+  If either fails, a warning explains why before the stream starts: the numbers for their upload, or that another stream would lower the quality of the call for others. They can pick a lower quality or start anyway; the soft cap never blocks.
 - **Viewers only receive what they show.** A stream shown large gets exactly the streamer's chosen quality. A thumbnail gets a small copy, and a hidden, minimised or fully covered window gets nothing. This never changes what the streamer picked; it only avoids sending video nobody is looking at.
 
 ## The core problem
@@ -25,7 +25,7 @@ Calls are a full mesh: everyone sends their audio straight to everyone else (`sr
 | Camera (720p) | ~1.2 Mbps | ~23 Mbps |
 | Screen, sharp text (720p, 30 fps) | ~1.4 Mbps | ~26 Mbps |
 
-A pure mesh therefore holds up to about 6 to 8 full-quality streams on ordinary home connections. Beyond that, the soft cap stops new streams unless peers forward (phase 5).
+A pure mesh therefore holds up to about 6 to 8 full-quality streams on ordinary home connections. Beyond that, the soft cap warns before each new stream, and quality drops for everyone unless peers forward (phase 5).
 
 ## Phases
 
@@ -41,7 +41,7 @@ A pure mesh therefore holds up to about 6 to 8 full-quality streams on ordinary 
 3. **Shared screen sound. Built (Windows).** "Share computer sound" in the share dialog sends every app's sound except Eleusinia's own (Chromium's `restrictOwnAudio`, which Windows supports), so nobody hears themselves back; if the system cannot leave our own audio out, no sound is shared and the call panel says why. It travels on its own slot at 128 kbps Opus, plays at the sharer's volume, and is not sent to anyone who has hidden the screens. Mono for now; on macOS and Linux the option is not offered.
 4. **Forwarder spike (go/no-go, 2 to 3 days):** forwarding needs a WebRTC stack in the main process. The candidate is `werift`, a pure-TypeScript library with no native module and the one new dependency. It must forward Chromium VP8/VP9 simulcast between 3 machines before anything is built on it.
 5. **Peer forwarding with end-to-end frame encryption:**
-   - **Who forwards and how:** when the soft cap would block a stream, the best-connected participants (ranked by `src/shared/quality.ts`) forward it. The sender uploads one copy as three quality layers (simulcast), and the forwarder picks a layer per viewer without decoding.
+   - **Who forwards and how:** when the soft cap would warn about a stream, the best-connected participants (ranked by `src/shared/quality.ts`) forward it. The sender uploads one copy as three quality layers (simulcast), and the forwarder picks a layer per viewer without decoding.
    - **Hand-over:** if a forwarder's connection stays poor for about 90 s, or it leaves, a replacement is chosen by the same rule on every member.
    - **Encryption:** every video frame is encrypted end to end (WebRTC encoded transforms, AES-GCM). Keys are sent over the encrypted chat link and rotated on join and leave, so a forwarder only handles ciphertext.
    - **Audio:** stays in the mesh.

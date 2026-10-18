@@ -1,3 +1,6 @@
+import { RnnoiseWorkletNode } from '@sapphi-red/web-noise-suppressor'
+import rnnoiseWasm from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?inline'
+import rnnoiseWorklet from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?raw'
 import { createCandidates, createWatchdog, lightOpus, offers, relayCandidate } from '../shared/callstate'
 import { fellBack, nextDevice, usable } from '../shared/devices'
 import { CALL_VERSION, type Event, type Key, type State } from '../shared/protocol'
@@ -129,7 +132,48 @@ export function setStreamVolume(k: Key, v: number) {
   if (g) g.gain.value = streamVolumeOf(k)
   notify()
 }
-const mic = (id: string) => navigator.mediaDevices.getUserMedia({ audio: id ? { deviceId: { exact: id } } : true })
+// Chromium's own, milder noise filter only when RNNoise (below) is off, so the voice is never cleaned twice.
+const mic = (id: string) =>
+  navigator.mediaDevices.getUserMedia({ audio: { ...(id ? { deviceId: { exact: id } } : {}), noiseSuppression: !suppressing(), echoCancellation: true, autoGainControl: true } })
+
+// Noise suppression: RNNoise, a small neural network, takes taps, keys, fans and hum out of the microphone before it is
+// sent. It runs in the audio thread on the CPU (about 1-2% of a core, a couple of MB) and only during a call; a GPU
+// would cost more than it saves for a model this small. It wants 48 kHz, hence a context of its own. The page loads
+// from local files, which fetch() cannot read, so its module and model come bundled.
+const suppressing = () => state.settings.noiseSuppression !== false
+let denoiseCtx: AudioContext | null = null
+let rnnoise: Promise<ArrayBuffer> | null = null
+let cleaned: { track: MediaStreamTrack; stop: () => void } | null = null // what is sent while suppression is on
+async function clean(raw: MediaStream) {
+  const ctx = (denoiseCtx ??= new AudioContext({ sampleRate: 48000 }))
+  rnnoise ??= Promise.all([
+    // Decoded here rather than fetched: the page may only fetch its own files. Electron's Chromium has WebAssembly SIMD.
+    Uint8Array.from(atob(rnnoiseWasm.split(',')[1]), (c) => c.charCodeAt(0)).buffer,
+    ctx.audioWorklet.addModule(URL.createObjectURL(new Blob([rnnoiseWorklet], { type: 'text/javascript' }))),
+  ]).then(([binary]) => binary)
+  const wasmBinary = await rnnoise
+  await ctx.resume()
+  const source = ctx.createMediaStreamSource(raw)
+  const node = new RnnoiseWorkletNode(ctx, { maxChannels: 1, wasmBinary })
+  const out = ctx.createMediaStreamDestination()
+  source.connect(node).connect(out)
+  const stop = () => {
+    source.disconnect()
+    node.destroy()
+    node.disconnect()
+    out.stream.getTracks().forEach((t) => t.stop())
+  }
+  return { track: out.stream.getAudioTracks()[0], stop }
+}
+// The voice track people receive: cleaned while suppression is on (muting still works on the microphone itself).
+const sent = () => cleaned?.track ?? stream?.getAudioTracks()[0]
+async function cleanOrNot(raw: MediaStream) {
+  if (!suppressing()) return log('noise suppression off'), null
+  return clean(raw).then(
+    (c) => (log('noise suppression on'), c),
+    (e) => (window.api.diag('error', `noise suppression could not start: ${e?.message ?? e}`), null),
+  )
+}
 
 // A connection's transceivers by role, from their order (the same on both sides): voice is the first audio, then the
 // screen and camera videos, then the screen's sound. Connections with older versions have only voice and screen.
@@ -288,7 +332,7 @@ function connect(k: Key) {
   const audio = new Audio()
   audio.autoplay = true
   audio.muted = true
-  for (const t of stream!.getTracks()) pc.addTrack(t, stream!)
+  pc.addTrack(sent()!, stream!)
   pc.onicecandidate = (e) => e.candidate && send(c, k, { k: 'ice', c: e.candidate.toJSON() })
   const peer: Peer = { pc, audio, candidates: createCandidates(pc) }
   pc.ontrack = (e) => {
@@ -654,7 +698,11 @@ async function useMic(id: string) {
   const track = fresh.getAudioTracks()[0]
   track.enabled = sending()
   track.onended = () => followDevices(true) // unplugged, or the system took it away
-  for (const p of peers.values()) slotsOf(p.pc).voice?.sender.replaceTrack(track)
+  const fresher = await cleanOrNot(fresh)
+  if (!stream) return fresh.getTracks().forEach((t) => t.stop()), fresher?.stop()
+  for (const p of peers.values()) slotsOf(p.pc).voice?.sender.replaceTrack(fresher?.track ?? track)
+  cleaned?.stop()
+  cleaned = fresher
   stream.getTracks().forEach((t) => ((t.onended = null), t.stop()))
   stream = fresh
   micId = id
@@ -709,6 +757,7 @@ export async function join(c: string) {
   micId = usable(state.settings.mic, 'audioinput', list, state.settings.micLabel)
   outId = usable(state.settings.out, 'audiooutput', list, state.settings.outLabel)
   const fresh = await mic(micId).catch(() => mic((micId = '')))
+  cleaned = await cleanOrNot(fresh)
   stream = fresh
   fresh.getAudioTracks().forEach((t) => (t.onended = () => followDevices(true)))
   conv = c
@@ -754,6 +803,9 @@ export function leave() {
   upload = null
   stream?.getTracks().forEach((t) => ((t.onended = null), t.stop()))
   stream = null
+  cleaned?.stop()
+  cleaned = null
+  denoiseCtx?.suspend() // no audio thread work between calls
   conv = null
   notify()
 }
@@ -893,5 +945,6 @@ export function onState(next: State) {
   for (const k of new Set([...prev.relayed, ...next.relayed])) if (prev.relayed.includes(k) !== next.relayed.includes(k)) applyLevel(k)
   applyDeafen()
   if (a.mic !== b.mic || a.out !== b.out || a.micLabel !== b.micLabel || a.outLabel !== b.outLabel) followDevices()
+  if (stream && (a.noiseSuppression !== false) !== (b.noiseSuppression !== false)) useMic(micId) // reopened with the other filter
   notify()
 }

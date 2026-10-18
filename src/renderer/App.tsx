@@ -794,6 +794,18 @@ function AudioSettings({ st }: { st: State }) {
         </div>
       </div>
       {pick('audioinput', 'Microphone', 'mic')}
+      <div className="setting">
+        <label className="check-row">
+          <input type="checkbox" role="switch" checked={st.settings.noiseSuppression !== false} onChange={(e) => set({ noiseSuppression: e.target.checked })} />
+          <span>Noise suppression</span>
+        </label>
+        <Info id="noise-tip">
+          Takes background noise out of your microphone before anyone hears it: taps, keyboards, fans, traffic and hum. It is gentle, so your voice
+          stays natural; voices in the room are speech, so it lets them through. Mic sensitivity helps with those.
+          <br />
+          It runs on your computer and uses very little of it.
+        </Info>
+      </div>
       <MicSensitivity st={st} set={set} />
       <div className="setting">
         <label htmlFor="bitrate">
@@ -1353,8 +1365,9 @@ function ShareDialog({ close }: { close: () => void }) {
       if (current && (src.id !== current.src.id || sound !== current.sound)) await call.switchShare(src, q, sound)
       else if (current) await call.setQuality(q)
       else {
-        const v = await call.checkStream('screen', src, q, sound)
-        if (!v.ok) return setVerdict(v)
+        // A stream that would strain the call is warned about once; pressing again shares anyway.
+        const v = verdict ?? (await call.checkStream('screen', src, q, sound))
+        if (!v.ok && !verdict) return setVerdict(v)
         await call.startShare(src, q, sound)
       }
       close()
@@ -1443,7 +1456,7 @@ function ShareDialog({ close }: { close: () => void }) {
           </label>
           {CAN_SHARE_SOUND && (
             <label className="check-row sound-row">
-              <input type="checkbox" role="switch" checked={sound} onChange={(e) => setSound(e.target.checked)} />
+              <input type="checkbox" role="switch" checked={sound} onChange={(e) => (setSound(e.target.checked), setVerdict(null))} />
               <span>
                 Share computer sound
                 <span className="hint"> · everything you hear except Eleusinia, so nobody hears themselves</span>
@@ -1456,7 +1469,7 @@ function ShareDialog({ close }: { close: () => void }) {
           </p>
         </div>
       )}
-      {verdict && !verdict.ok && <Refusal verdict={verdict} q={q!} viewers={viewers} />}
+      {verdict && !verdict.ok && <StreamWarning verdict={verdict} q={q!} viewers={viewers} />}
       {err && (
         <p role="alert" className="form-error">
           {err}
@@ -1467,7 +1480,7 @@ function ShareDialog({ close }: { close: () => void }) {
           Cancel
         </button>
         <button type="button" className="button primary" disabled={!src || !q || busy} onClick={go}>
-          {busy ? (current ? 'Applying…' : 'Checking…') : !current ? 'Share' : src && src.id !== current.src.id ? 'Switch' : 'Apply'}
+          {busy ? (current ? 'Applying…' : 'Checking…') : !current ? (verdict ? 'Share anyway' : 'Share') : src && src.id !== current.src.id ? 'Switch' : 'Apply'}
         </button>
       </div>
     </Dialog>
@@ -1477,13 +1490,14 @@ function ShareDialog({ close }: { close: () => void }) {
 const CAN_SHARE_SOUND = navigator.userAgent.includes('Windows') // computer sound can only be captured on Windows
 
 // Why a stream cannot start: the soft cap (see canStream).
-function Refusal({ verdict, q, viewers }: { verdict: Verdict; q: Quality; viewers: number }) {
+// The soft cap only warns: the streamer has the final say, and can start anyway.
+function StreamWarning({ verdict, q, viewers }: { verdict: Verdict; q: Quality; viewers: number }) {
   if (verdict.ok) return null
   return (
     <p role="alert" className="form-error">
       {verdict.reason === 'upload'
-        ? `You can't start streaming right now. Your upload is about ${mbps(verdict.uploadKbps)} Mbps, and ${heightLabel(q.height)} at ${q.fps} fps to ${viewers} ${viewers === 1 ? 'person' : 'people'} needs about ${mbps(verdict.needKbps)} Mbps along with anything you already send, so it would lower the quality of the call for others. Choose a lower quality, or try again when fewer people are in the call.`
-        : "You can't start streaming right now. Someone already streaming is short of bandwidth, and another stream would lower the quality of the call for everyone. Try again shortly."}
+        ? `Streaming now will likely lower the quality of the call for others. Your upload is about ${mbps(verdict.uploadKbps)} Mbps, and ${heightLabel(q.height)} at ${q.fps} fps to ${viewers} ${viewers === 1 ? 'person' : 'people'} needs about ${mbps(verdict.needKbps)} Mbps along with anything you already send. You can choose a lower quality, or go ahead anyway.`
+        : 'Someone already streaming is short of bandwidth, so another stream will likely lower the quality of the call for everyone. You can go ahead anyway.'}
     </p>
   )
 }
@@ -1542,8 +1556,8 @@ function CameraDialog({ st, close }: { st: State; close: () => void }) {
     try {
       const switching = !!current && cam.src.id !== current.src.id
       if (!current) {
-        const v = await call.checkStream('camera', cam.src, q)
-        if (!v.ok) return setVerdict(v)
+        const v = verdict ?? (await call.checkStream('camera', cam.src, q))
+        if (!v.ok && !verdict) return setVerdict(v) // warned once; pressing again turns it on anyway
       }
       handed.current = true
       await call.useCamera(cam.track, cam.src, q)
@@ -1606,7 +1620,7 @@ function CameraDialog({ st, close }: { st: State; close: () => void }) {
           </>
         )}
       </div>
-      {verdict && q && <Refusal verdict={verdict} q={q} viewers={viewers} />}
+      {verdict && q && <StreamWarning verdict={verdict} q={q} viewers={viewers} />}
       {err && (
         <p role="alert" className="form-error">
           {err}
@@ -1617,7 +1631,7 @@ function CameraDialog({ st, close }: { st: State; close: () => void }) {
           Cancel
         </button>
         <button type="button" className="button primary" disabled={!cam || !q || busy} onClick={go}>
-          {busy ? (current ? 'Applying…' : 'Checking…') : current ? 'Apply' : 'Turn on camera'}
+          {busy ? (current ? 'Applying…' : 'Checking…') : current ? 'Apply' : verdict ? 'Turn on anyway' : 'Turn on camera'}
         </button>
       </div>
     </Dialog>

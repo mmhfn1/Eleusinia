@@ -27,6 +27,7 @@ export type Settings = {
   micGate?: number
   crashReports?: boolean // send crash reports to the developers automatically; on unless turned off
   closeToTray?: boolean // closing the window keeps Eleusinia running in the tray; on unless turned off
+  noiseSuppression?: boolean // RNNoise on the microphone; on unless turned off
   relay?: boolean // connect through mutual friends when no direct link works, and relay for them; off unless turned on
 }
 
