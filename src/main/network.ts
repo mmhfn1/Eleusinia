@@ -1,9 +1,25 @@
 import { createHash } from 'node:crypto'
+import { StringDecoder } from 'node:string_decoder'
 import BlindRelay from 'blind-relay'
 import DHT from 'hyperdht'
 import type { Key, Wire } from '../shared/protocol'
 
 const MAX_LINE = 1 << 20
+
+// Splits a stream of chunks into lines. A character can be split across two chunks (emoji, accents, any non-English
+// text), so bytes are decoded with a StringDecoder, which keeps half a character until the rest arrives. Returns the
+// complete lines, or null once the unfinished line grows past MAX_LINE.
+export function lineReader() {
+  const decoder = new StringDecoder('utf8')
+  let buf = ''
+  return (chunk: Buffer): string[] | null => {
+    buf += decoder.write(chunk)
+    if (buf.length > MAX_LINE) return null
+    const lines = buf.split('\n')
+    buf = lines.pop()!
+    return lines
+  }
+}
 
 type Handlers = {
   open(key: Key): void
@@ -50,12 +66,10 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
     // Both sides send a keepalive every 5 s, so a stream that hears nothing for 20 s is dead (a dropped
     // connection that was never closed); closing it lets the peer show offline and be redialed.
     sock.setTimeout(20000)
-    let buf = ''
+    const read = lineReader()
     sock.on('data', (d: Buffer) => {
-      buf += d.toString()
-      if (buf.length > MAX_LINE) return sock.destroy()
-      const lines = buf.split('\n')
-      buf = lines.pop()!
+      const lines = read(d)
+      if (!lines) return sock.destroy()
       for (const line of lines) {
         let w: Wire
         try {

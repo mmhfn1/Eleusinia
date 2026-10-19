@@ -153,7 +153,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const outgoing = () => (existsSync(outbox) ? readdirSync(outbox).filter((f) => f.endsWith('.json')) : [])
   function deliver() {
     if (!inbox || !outgoing().length) return
-    if (!net.linked(inbox)) return net.dial(inbox)
+    if (!net.linked(inbox)) return due(inbox) && net.dial(inbox)
     for (const f of outgoing()) {
       try {
         net.send(inbox, { t: 'report', r: JSON.parse(readFileSync(join(outbox, f), 'utf8')) })
@@ -417,6 +417,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
           relayedVia.set(key, { by, path: net.path(key), at: Date.now() })
           net.send(key, { t: 'relayed', by })
         } else directFailed.delete(key)
+        retries.delete(key)
         diag('network', `linked with …${key.slice(-6)}${by ? ' through a friend' : ''}${known(key) ? '' : key === inbox ? ' (developers inbox)' : ' (not a friend)'}`)
         if (key === inbox) deliver()
         if (wants(key)) greet(key)
@@ -439,7 +440,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         push()
       },
       failed(key, via) {
-        if (!via) directFailed.add(key)
+        if (!via) directFailed.add(key), backOff(key)
         else if (pendingVia.has(key)) relayFailed(key, pendingVia.get(key))
       },
       msg: onMsg,
@@ -451,12 +452,20 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   )
   const relay = createRelay((key, b) => net.packet(key, b))
 
+  // Someone offline is dialled less and less often (15 s, doubling to 5 minutes in use): every dial is a DHT lookup,
+  // and many offline friends would otherwise cost a steady stream of them. Coming back online, they dial us anyway.
+  const retries = new Map<Key, { n: number; next: number }>()
+  const due = (k: Key) => (retries.get(k)?.next ?? 0) <= Date.now()
+  function backOff(k: Key) {
+    const n = (retries.get(k)?.n ?? 0) + 1
+    retries.set(k, { n, next: Date.now() + Math.min(redialMs * 2 ** (n - 1), redialMs * 20) })
+  }
   const redial = () => {
     relayTick()
     const keys = new Set(ours().flatMap((g) => g.members))
     for (const [k, st] of Object.entries(s.friends)) if (st !== 'incoming') keys.add(k)
     keys.delete(me)
-    for (const k of keys) net.dial(k)
+    for (const k of keys) if (due(k)) net.dial(k)
   }
   redial()
   const timer = setInterval(redial, redialMs)
@@ -701,6 +710,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       mkdirSync(outbox, { recursive: true })
       writeFileSync(join(outbox, clean.id + '.json'), JSON.stringify(clean))
       push()
+      if (inbox) retries.delete(inbox) // a new report is worth trying at once
       deliver()
       return clean.id
     },
