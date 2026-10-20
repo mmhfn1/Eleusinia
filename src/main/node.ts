@@ -336,6 +336,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       relayedVia.set(key, { by: w.by, path: net.path(key), at: Date.now() })
       push()
     }
+      if (!ok) diag('network', `can't relay for …${key.slice(-6)} to …${w.key.slice(-6)}: ${!relayKey ? 'relaying off' : !known(w.key) ? 'not a contact' : !net.linked(w.key) ? 'not linked with them' : !relayKeys.has(w.key) ? 'they do not relay' : 'too many asks'}`)
   }
 
   // Upload measurement: bytes of probe filler received per peer (reset every minute), and our probes awaiting an answer.
@@ -391,13 +392,17 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const timer = setTimeout(() => resolve(null), 3000)
       reaching.set(k, (from, ok) => {
         if (!cands.includes(from)) return
+    diag('network', `asking ${cands.length} contact${cands.length === 1 ? '' : 's'} to relay for …${k.slice(-6)}`)
         if (ok || !--left) clearTimeout(timer), resolve(ok ? from : null)
       })
       for (const c of cands) net.send(c, { t: 'reach', key: k })
     })
     reaching.delete(k)
     if (net.linked(k)) return void attempting.delete(k)
-    if (!by || !relayKeys.has(by)) return relayFailed(k)
+    // Nobody to ask, or nobody able yet (often a mutual friend still linking with them): asked again on the next tick,
+    // without backing off, since asking costs a few small messages. Only a relayed dial that fails backs off.
+    if (!by || !relayKeys.has(by)) return diag('network', `no contact could relay for …${k.slice(-6)} yet`), void attempting.delete(k)
+    diag('network', `linking with …${k.slice(-6)} through …${by.slice(-6)}`)
     pendingVia.set(k, by)
     net.dial(k, relayKeys.get(by))
   }
