@@ -19,9 +19,15 @@ if (inboxMode) app.setPath('userData', process.env.ELEUSINIA_INBOX_DIR || join(a
 // Lets several instances run side by side on one machine, each with its own identity.
 else if (process.env.ELEUSINIA_DATA) app.setPath('userData', process.env.ELEUSINIA_DATA)
 // One copy per data folder: opening Eleusinia while it waits in the tray brings that copy back rather than starting a
-// second one with the same identity.
-const firstCopy = inboxMode || app.requestSingleInstanceLock()
-if (!firstCopy) app.quit()
+// second one with the same identity. The inbox too (its own folder): two would file every report twice.
+const firstCopy = app.requestSingleInstanceLock()
+if (!firstCopy) {
+  if (inboxMode) console.log('An inbox is already running here; this one stops.')
+  app.quit()
+}
+
+// Shared pictures, videos and sounds reach the page as eleusinia-file://<hash> (see startApp), never as file:// paths.
+protocol.registerSchemesAsPrivileged([{ scheme: 'eleusinia-file', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }])
 
 // Testing only: join this DHT instead of the public one, as "host:port,host:port" (test/smoke.mjs runs a local
 // one). Unset in normal use, which keeps the public DHT.
@@ -70,7 +76,7 @@ function loadIdentity(dir: string) {
 
 // Closing windows never quits by itself: the tray menu, the close-to-tray setting or an update does, explicitly.
 app.on('window-all-closed', () => {})
-app.whenReady().then(async () => (inboxMode ? startInbox() : firstCopy && (await updateFirst()) && startApp()))
+app.whenReady().then(async () => firstCopy && (inboxMode ? startInbox() : (await updateFirst()) && startApp()))
 
 // Updates: the installed app looks for a newer release of github.com/mmhfn1/Eleusinia (published for every push to
 // main, see .github/workflows/release.yml) on start and every 4 hours, downloads it in the background and tells the
