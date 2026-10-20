@@ -68,15 +68,46 @@ function loadIdentity(dir: string) {
   return { publicKey: secretKey.subarray(32), secretKey } // an ed25519 secret key ends with its public key
 }
 
-app.whenReady().then(() => (inboxMode ? startInbox() : firstCopy && startApp()))
+// Closing windows never quits by itself: the tray menu, the close-to-tray setting or an update does, explicitly.
+app.on('window-all-closed', () => {})
+app.whenReady().then(async () => (inboxMode ? startInbox() : firstCopy && (await updateFirst()) && startApp()))
 
 // Updates: the installed app looks for a newer release of github.com/mmhfn1/Eleusinia (published for every push to
 // main, see .github/workflows/release.yml) on start and every 4 hours, downloads it in the background and tells the
 // window, which offers a restart; otherwise it installs the next time Eleusinia is closed. Copies run from source never
 // update. ELEUSINIA_UPDATE_URL points it at another folder of releases (testing), ELEUSINIA_NO_UPDATES=1 turns it off.
+const updatable = () => app.isPackaged && process.env.ELEUSINIA_NO_UPDATES !== '1'
+const updateFeed = () => process.env.ELEUSINIA_UPDATE_URL && autoUpdater.setFeedURL({ provider: 'generic', url: process.env.ELEUSINIA_UPDATE_URL })
+
+// Every start first asks for a newer release (at most 6 s, so being offline never holds it up). When there is one, a
+// small window shows the download, then it installs quietly and opens the new version; this copy never starts.
+// Resolves true to start this version.
+async function updateFirst() {
+  if (!updatable()) return true
+  updateFeed()
+  autoUpdater.autoDownload = false
+  const found = await Promise.race([autoUpdater.checkForUpdates().catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 6000))])
+  if (!found?.isUpdateAvailable) return true
+  const version = found.updateInfo.version
+  const splash = new BrowserWindow({ width: 380, height: 120, frame: false, resizable: false, backgroundColor: '#0b1119', show: false })
+  const page = (text: string) =>
+    `data:text/html;charset=utf-8,${encodeURIComponent(`<body style="margin:0;height:100vh;display:grid;place-items:center;background:#0b1119;color:#d9e0ec;font:14px 'Segoe UI',sans-serif">${text}</body>`)}`
+  await splash.loadURL(page(`Updating Eleusinia to ${version}…`))
+  splash.show()
+  autoUpdater.on('download-progress', (p) => !splash.isDestroyed() && splash.setProgressBar(p.percent / 100))
+  try {
+    await autoUpdater.downloadUpdate()
+  } catch {
+    splash.destroy() // the download failed: start this version, and the background check tries again later
+    return true
+  }
+  autoUpdater.quitAndInstall(true, true) // quietly, then opens the new version
+  return false
+}
+
 function startUpdates(ready: (version: string) => void, diag: (area: 'app' | 'error', text: string) => void) {
-  if (!app.isPackaged || process.env.ELEUSINIA_NO_UPDATES === '1') return
-  if (process.env.ELEUSINIA_UPDATE_URL) autoUpdater.setFeedURL({ provider: 'generic', url: process.env.ELEUSINIA_UPDATE_URL })
+  if (!updatable()) return
+  updateFeed()
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
   autoUpdater.on('update-available', (i) => diag('app', `update ${i.version} found, downloading`))

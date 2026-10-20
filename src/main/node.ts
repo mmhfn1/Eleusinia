@@ -37,6 +37,7 @@ type Saved = {
   settings: Settings
   declined?: Record<Key, number> // when we declined or removed someone: their announced requests are ignored for a while
   accepted?: Record<Key, number> // requests we accepted that they have not yet confirmed over a link
+  requestedAt?: Record<Key, number> // when each waiting request arrived, so a full list drops the oldest
 }
 
 type Opts = {
@@ -47,6 +48,7 @@ type Opts = {
   redialMs?: number
   noDirect?: boolean // testing: withhold ICE candidates so calls can only connect through the relay
   links?: (key: Key) => boolean // testing: refuse direct links to some peers, as two strict routers would
+  maxRequests?: number // testing: a smaller cap on waiting friend requests
   strict?: boolean // testing: direct connections fail for real, as behind a strict router, so only a relay links
   relayLimits?: RelayLimits // testing: smaller caps on what we relay for contacts
   inbox?: Key // the developers' inbox, where problem and crash reports go
@@ -58,7 +60,7 @@ type Opts = {
 const KEEP_LOGS = 3
 
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
-export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', links, strict, relayLimits }: Opts) {
+export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', links, strict, relayLimits, maxRequests = 200 }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
   const file = join(dir, 'state.json')
   mkdirSync(join(dir, 'msgs'), { recursive: true })
@@ -211,6 +213,21 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     return promise
   }
 
+  // At most 200 waiting requests. New identities cost nothing, so a full list drops its oldest rather than refusing new
+  // ones: a flood of made-up requests can never block real ones for good, and Decline all clears it.
+  const declinedRecently = (k: Key) => (s.declined?.[k] ?? 0) > Date.now() - 30 * 864e5
+  function takeRequest(k: Key) {
+    const waiting = Object.keys(s.friends).filter((f) => s.friends[f] === 'incoming')
+    if (waiting.length >= maxRequests) {
+      const oldest = waiting.reduce((a, b) => ((s.requestedAt?.[a] ?? 0) <= (s.requestedAt?.[b] ?? 0) ? a : b))
+      delete s.friends[oldest]
+      delete s.requestedAt?.[oldest]
+      if (!known(oldest)) delete s.profiles[oldest]
+    }
+    s.friends[k] = 'incoming'
+    s.requestedAt = { ...s.requestedAt, [k]: Date.now() }
+  }
+
   function onMsg(key: Key, w: Wire) {
     if (key === inbox && w.t === 'reportAck') {
       if (typeof w.id !== 'string' || !/^[0-9a-f]{16}$/.test(w.id) || !existsSync(join(outbox, w.id + '.json'))) return
@@ -230,9 +247,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (asks && st === 'outgoing') {
         s.friends[key] = 'friend' // they accepted, or asked us at the same time
         greet(key)
-      } else if (asks && !st) {
-        if (Object.values(s.friends).filter((f) => f === 'incoming').length >= 50) return
-        s.friends[key] = 'incoming'
+      } else if (asks && !st && !declinedRecently(key)) {
+        takeRequest(key) // a declined request stays declined, however it arrives
       } else if (said && !asks && st === 'friend') {
         s.friends[key] = 'outgoing' // they removed us: still wanted on our side, but no longer mutual
       } else if (said && !asks && st === 'incoming') {
@@ -440,7 +456,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         push()
       },
       failed(key, via) {
-        if (!via) directFailed.add(key), backOff(key)
+        if (!via) directFailed.add(key), joined && backOff(key) // dials before we are on the DHT say nothing about them
         else if (pendingVia.has(key)) relayFailed(key, pendingVia.get(key))
       },
       msg: onMsg,
@@ -455,7 +471,10 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   // Someone offline is dialled less and less often (15 s, doubling to 5 minutes in use): every dial is a DHT lookup,
   // and many offline friends would otherwise cost a steady stream of them. Coming back online, they dial us anyway.
   const retries = new Map<Key, { n: number; next: number }>()
-  const due = (k: Key) => (retries.get(k)?.next ?? 0) <= Date.now()
+  let joined = false
+  net.listening.then(() => (joined = true), () => {})
+  // Not while relaying is on: a relay needs its contacts linked as soon as they can be, or pairs wait minutes.
+  const due = (k: Key) => !!relayKey || (retries.get(k)?.next ?? 0) <= Date.now()
   function backOff(k: Key) {
     const n = (retries.get(k)?.n ?? 0) + 1
     retries.set(k, { n, next: Date.now() + Math.min(redialMs * 2 ** (n - 1), redialMs * 20) })
@@ -487,11 +506,11 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   // who it is without connecting. The direct link, when there is one, still carries everything at once.
   const requestTopic = (key: Key) => createHash('sha256').update('eleusinia-request:' + key).digest()
   const ACCEPT_FOR = 7 * 864e5 // an acceptance is announced until they confirm it, at most this long
-  const DECLINED_FOR = 30 * 864e5
-  const requesting = () => [
-    ...Object.keys(s.friends).filter((k) => s.friends[k] === 'outgoing'),
-    ...Object.entries(s.accepted ?? {}).filter(([k, at]) => s.friends[k] === 'friend' && at > Date.now() - ACCEPT_FOR).map(([k]) => k),
-  ]
+  function requesting() {
+    // Acceptances past their time, or for someone no longer a friend, are dropped so the saved state does not grow.
+    for (const [k, at] of Object.entries(s.accepted ?? {})) if (s.friends[k] !== 'friend' || at <= Date.now() - ACCEPT_FOR) delete s.accepted![k]
+    return [...Object.keys(s.friends).filter((k) => s.friends[k] === 'outgoing'), ...Object.keys(s.accepted ?? {})]
+  }
   let published = 0
   function publishCard() {
     if (!s.profile.handle) return
@@ -522,9 +541,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
           diag('network', `request to …${k.slice(-6)} accepted`)
           change = true
           reach(k)
-        } else if (!st && !((s.declined?.[k] ?? 0) > Date.now() - DECLINED_FOR)) {
-          if (Object.values(s.friends).filter((f) => f === 'incoming').length >= 50) continue
-          s.friends[k] = 'incoming'
+        } else if (!st && !declinedRecently(k)) {
+          takeRequest(k)
           diag('network', `request from …${k.slice(-6)} found`)
           change = true
           const card = await fetchCard(k)
@@ -597,6 +615,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (!isKey(key) || key === me) throw new Error('That is not someone you can add')
       if (profile) s.profiles[key] ??= cleanProfile(profile)
       if (s.declined) delete s.declined[key]
+      delete s.requestedAt?.[key]
       if (s.friends[key] === 'incoming') {
         s.friends[key] = 'friend'
         s.accepted = { ...s.accepted, [key]: Date.now() }
@@ -605,8 +624,20 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       reach(key)
       net.announce(requestTopic(key)) // reaches them even if no direct link can be made
     },
+    // Declines every waiting request at once, as after a flood of made-up ones; they stay ignored for 30 days.
+    declineAll() {
+      for (const k of Object.keys(s.friends)) {
+        if (s.friends[k] !== 'incoming') continue
+        delete s.friends[k]
+        s.declined = { ...s.declined, [k]: Date.now() }
+        if (!known(k)) delete s.profiles[k], net.drop(k)
+      }
+      s.requestedAt = {}
+      changed()
+    },
     removeFriend(key: Key) {
       delete s.friends[key]
+      delete s.requestedAt?.[key]
       if (s.accepted) delete s.accepted[key]
       s.declined = { ...s.declined, [key]: Date.now() } // their still-announced request must not come back
       if (!known(key)) {

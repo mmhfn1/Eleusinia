@@ -717,3 +717,29 @@ test('a relay holds to its caps: pairs, per contact, and bytes', async () => {
   await wait(3000)
   expect(linked(a, b)).toBe(false) // and the sender is refused for a while
 }, 180000)
+
+test('a full request list drops its oldest instead of refusing new ones, and Decline all clears it for good', async () => {
+  const b = (() => {
+    const dir = mkdtempSync(join(tmpdir(), 'eleusinia-'))
+    const keyPair = DHT.keyPair()
+    const node = createNode({ dir, keyPair, emit: () => {}, dht: { bootstrap: testnet.bootstrap }, redialMs: 300, maxRequests: 2 })
+    const n = { node, dir, keyPair, key: keyPair.publicKey.toString('hex') as string }
+    nodes.push(n)
+    return n
+  })()
+  await b.node.setProfile({ username: 'full', name: 'Full', about: '', avatar: '' })
+  const askers = [start(), start(), start()]
+  for (const x of askers) {
+    x.node.addFriend(b.key)
+    await until(() => b.node.state().friends[x.key] === 'incoming')
+  }
+  // The first is pushed out by the third: the list never refuses someone new.
+  expect(Object.keys(b.node.state().friends).sort()).toEqual([askers[1].key, askers[2].key].sort())
+  b.node.declineAll()
+  expect(b.node.state().friends).toEqual({})
+  await new Promise((r) => setTimeout(r, 2000)) // their requests are still announced and they still dial
+  // The two declined stay gone; the one the full list dropped was never declined, so its request may come back.
+  const back = Object.keys(b.node.state().friends)
+  expect(back).not.toContain(askers[1].key)
+  expect(back).not.toContain(askers[2].key)
+}, 60000)
