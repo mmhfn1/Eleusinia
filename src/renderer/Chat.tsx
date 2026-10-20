@@ -1,6 +1,7 @@
 // A conversation's messages: history, live updates, delivery marks and the message box.
-import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { type Msg, type State, MAX_TEXT, stack } from '../shared/protocol'
+import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type FileRef, MAX_FILES, inlineKind, sizeLabel } from '../shared/media'
+import { type FileState, type Msg, type State, MAX_TEXT, stack } from '../shared/protocol'
 import * as call from './call'
 import { Avatar, Dialog, Emblem, GroupEmblem, Icon } from './ui'
 import { type People, type Run, api } from './common'
@@ -29,6 +30,11 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   const atBottom = useRef(true)
   const box = useRef<HTMLTextAreaElement>(null)
   const { prof, name, user, isOnline, show } = people
+  const [attached, setAttached] = useState<FileRef[]>([])
+  const [preparing, setPreparing] = useState(0)
+  const [files, setFiles] = useState<Record<string, FileState>>({})
+  const asked = useRef(new Set<string>())
+  const [viewing, setViewing] = useState<FileRef | null>(null)
 
   useEffect(() => {
     api.call('history', conv, limit).then((h) => {
@@ -43,8 +49,46 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
         setTotal((t) => t + 1)
       }
       if (e.type === 'acked' && e.conv === conv) setAcked(e.seq)
+      if (e.type === 'file') setFiles((f) => ({ ...f, [e.file.h]: e.file }))
     })
   }, [conv, limit])
+  // Where each shown file stands (downloaded, loading, …), asked once per file; events keep it current after that.
+  useEffect(() => {
+    const hs = msgs.flatMap((m) => m.files?.map((f) => f.h) ?? []).filter((h) => !asked.current.has(h))
+    if (!hs.length) return
+    hs.forEach((h) => asked.current.add(h))
+    api.call('fileStatus', hs).then((list: FileState[]) => setFiles((f) => ({ ...Object.fromEntries(list.map((x) => [x.h, x])), ...f })))
+  }, [msgs])
+  useEffect(() => setAttached([]), [conv])
+
+  // Files picked, dropped or pasted: pictures are re-encoded without their metadata before they are attached.
+  function attach(items: Parameters<typeof api.attach>[0] | null) {
+    if (!items?.length) return
+    setPreparing((n) => n + 1)
+    run(
+      api
+        .attach(items)
+        .then((refs) => setAttached((a) => [...a, ...refs].slice(0, MAX_FILES)))
+        .finally(() => setPreparing((n) => n - 1)),
+    )
+  }
+  const fromFiles = (list: FileList) =>
+    Promise.all(
+      [...list].map(async (f) => {
+        const path = api.pathOf(f)
+        return path ? { path } : { name: f.name || 'pasted.png', type: f.type, data: new Uint8Array(await f.arrayBuffer()) }
+      }),
+    )
+  function drop(e: DragEvent) {
+    if (!e.dataTransfer.files.length) return
+    e.preventDefault()
+    fromFiles(e.dataTransfer.files).then(attach)
+  }
+  function paste(e: ClipboardEvent) {
+    if (!e.clipboardData.files.length) return
+    e.preventDefault()
+    fromFiles(e.clipboardData.files).then(attach)
+  }
   // Follow new messages only if the reader was already at the bottom, or wrote the newest one themselves.
   useLayoutEffect(() => {
     const el = list.current
@@ -61,9 +105,10 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const input = e.currentTarget.elements.namedItem('text') as HTMLTextAreaElement
-    if (!input.value.trim()) return
-    run(api.call('send', conv, input.value))
+    if ((!input.value.trim() && !attached.length) || preparing) return
+    run(api.call('send', conv, input.value.trim() ? input.value : '', attached))
     input.value = ''
+    setAttached([])
     grow()
   }
   // The composer grows with its text up to a few lines, then scrolls.
@@ -102,7 +147,14 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
               </time>
             </div>
           )}
-          <p className="msg-text">{m.text}</p>
+          {m.text && <p className="msg-text">{m.text}</p>}
+          {m.files && (
+            <div className="msg-files">
+              {m.files.map((f) => (
+                <Attachment key={f.h} f={f} st={files[f.h]} view={() => setViewing(f)} />
+              ))}
+            </div>
+          )}
           {pending && (
             <span className="msg-status pending" title="Not delivered yet. It will be sent automatically when they are online.">
               <Icon name="clock" size={12} /> pending, sends when they are online
@@ -119,7 +171,7 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   })
 
   return (
-    <main className="workspace chat">
+    <main className="workspace chat" onDragOver={(e) => e.dataTransfer.types.includes('Files') && e.preventDefault()} onDrop={drop}>
       <header className="chat-head">
         {group ? (
           <>
@@ -181,6 +233,14 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
         </Dialog>
       )}
 
+      {viewing && (
+        <Dialog label={viewing.n} close={() => setViewing(null)} className="image-view">
+          <img src={`eleusinia-file://${viewing.h}`} alt={viewing.n} />
+          <p className="quiet">
+            {viewing.n} · {sizeLabel(viewing.s)}
+          </p>
+        </Dialog>
+      )}
       {stage}
       <div className="msgs" ref={list} onScroll={(e) => (atBottom.current = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 40)}>
         {loaded && !sorted.length && (
@@ -209,6 +269,35 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
       </div>
 
       <form className="send composer" onSubmit={submit}>
+        {(attached.length > 0 || preparing > 0) && (
+          <ul className="attach-list" aria-label="Attached files">
+            {attached.map((f, i) => (
+              <li key={f.h + i} className="attach-chip">
+                {f.th ? <img src={f.th} alt="" /> : <Icon name="file" size={16} />}
+                <span className="attach-name">{f.n}</span>
+                <span className="attach-size">
+                  {sizeLabel(f.s)}
+                  {/* Only JPEG and PNG are re-encoded; other pictures keep whatever details they carry. */}
+                  {inlineKind(f.t) === 'image' && f.t !== 'image/jpeg' && f.t !== 'image/png' && ' · sent as it is'}
+                </span>
+                <button type="button" className="icon-button" aria-label={`Remove ${f.n}`} onClick={() => setAttached((a) => a.filter((_, j) => j !== i))}>
+                  <Icon name="close" size={14} />
+                </button>
+              </li>
+            ))}
+            {preparing > 0 && <li className="attach-chip quiet">Preparing…</li>}
+          </ul>
+        )}
+        <button
+          type="button"
+          className="icon-button attach-button"
+          aria-label="Attach files"
+          title="Attach files (you can also drop or paste them)"
+          disabled={attached.length >= MAX_FILES}
+          onClick={() => run(api.pickFiles().then((refs) => setAttached((a) => [...a, ...refs].slice(0, MAX_FILES))))}
+        >
+          <Icon name="attach" size={18} />
+        </button>
         <textarea
           ref={box}
           name="text"
@@ -218,6 +307,7 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
           maxLength={MAX_TEXT}
           onInput={grow}
           onKeyDown={keys}
+          onPaste={paste}
           autoFocus
         />
         {length > MAX_TEXT - 500 && (
@@ -225,11 +315,76 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
             {MAX_TEXT - length} left
           </span>
         )}
-        <button className="send-button" aria-label="Send message" title="Send (Enter). New line: Shift+Enter" disabled={!length}>
+        <button className="send-button" aria-label="Send message" title="Send (Enter). New line: Shift+Enter" disabled={(!length && !attached.length) || preparing > 0}>
           <Icon name="send" size={18} />
         </button>
       </form>
     </main>
+  )
+}
+
+// One shared file in a message. Pictures show inline (a tiny preview until they arrive); videos and sounds play
+// inline once downloaded; anything else is a card to download and then find in its folder.
+function Attachment({ f, st, view }: { f: FileRef; st?: FileState; view: () => void }) {
+  const kind = inlineKind(f.t)
+  const done = st?.state === 'done'
+  const src = `eleusinia-file://${f.h}`
+  const pct = st && st.size ? Math.floor((st.got / st.size) * 100) : 0
+  const save = () => api.saveFile(f.h, f.n)
+  const line =
+    st?.state === 'loading' ? `Downloading ${pct}%` : st?.state === 'waiting' ? `Waiting: ${st.why}` : st?.state === 'failed' ? `Failed: ${st.why}` : ''
+  if (kind === 'image' && (done || f.th)) {
+    return (
+      <figure className="msg-image">
+        {done ? (
+          <button className="image-button" onClick={view} aria-label={`View ${f.n}`}>
+            <img src={src} alt={f.n} loading="lazy" />
+          </button>
+        ) : (
+          <img className="image-preview" src={f.th} alt={f.n} />
+        )}
+        {!done && (
+          <figcaption>
+            {line || sizeLabel(f.s)}
+            {(!st || st.state === 'none' || st.state === 'failed') && (
+              <button className="button subtle" onClick={() => api.call('download', f.h)}>
+                <Icon name="download" size={14} /> {st?.state === 'failed' ? 'Try again' : 'Load picture'}
+              </button>
+            )}
+          </figcaption>
+        )}
+      </figure>
+    )
+  }
+  if (done && (kind === 'video' || kind === 'audio')) {
+    return (
+      <figure className={`msg-media ${kind}`}>
+        {kind === 'video' ? <video src={src} controls preload="metadata" /> : <audio src={src} controls preload="metadata" />}
+        <figcaption>
+          {f.n} · {sizeLabel(f.s)}
+        </figcaption>
+      </figure>
+    )
+  }
+  return (
+    <div className="file-card">
+      <Icon name="file" size={22} />
+      <span className="row-text">
+        <span className="row-title">{f.n}</span>
+        <span className="row-sub">{line || sizeLabel(f.s)}</span>
+      </span>
+      {st?.state === 'loading' && <progress max={100} value={pct} aria-label={`Downloading ${f.n}`} />}
+      {done && st?.saved && (
+        <button className="button subtle" onClick={() => api.showFile(f.h)}>
+          <Icon name="folder" size={14} /> Show in folder
+        </button>
+      )}
+      {(!st || st.state === 'none' || st.state === 'failed') && (
+        <button className="button subtle" onClick={save}>
+          <Icon name="download" size={14} /> {st?.state === 'failed' ? 'Try again' : 'Download'}
+        </button>
+      )}
+    </div>
   )
 }
 

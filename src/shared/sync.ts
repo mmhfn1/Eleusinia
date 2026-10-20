@@ -1,7 +1,9 @@
 import crypto from 'hypercore-crypto'
+import { filesBody, validFiles } from './media'
 import { type Add, type Group, type Have, type Msg, MAX_TEXT, isGroupId, isKey } from './protocol'
 
-const body = (m: Omit<Msg, 'sig'>) => Buffer.from(JSON.stringify([m.conv, m.author, m.seq, m.ts, m.text]))
+// Files are signed only when present, so messages from before files existed still verify.
+const body = (m: Omit<Msg, 'sig'>) => Buffer.from(JSON.stringify([m.conv, m.author, m.seq, m.ts, m.text, ...(m.files ? [filesBody(m.files)] : [])]))
 
 const isSig = (s: unknown): s is string => typeof s === 'string' && /^[0-9a-f]{128}$/.test(s)
 const addBody = (id: string, member: string) => Buffer.from(`add:${id}:${member}`)
@@ -32,6 +34,7 @@ export function verifyMsg(m: Msg): boolean {
     typeof m.ts === 'number' &&
     typeof m.text === 'string' &&
     m.text.length <= MAX_TEXT &&
+    (m.files === undefined || validFiles(m.files)) &&
     isSig(m.sig) &&
     crypto.verify(body(m), Buffer.from(m.sig, 'hex'), Buffer.from(m.author, 'hex'))
   )

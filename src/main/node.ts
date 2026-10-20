@@ -23,8 +23,10 @@ import {
   type Version,
   versionOf,
 } from '../shared/protocol'
+import { type FileRef, validFiles } from '../shared/media'
 import { type Area, type Report, cleanReport } from '../shared/reports'
 import { mergeGroup, missing, signAdd, signLeft, signMsg, validGroup, verifyAdd, verifyMsg } from '../shared/sync'
+import { createFiles } from './files'
 import { type RelayLimits, RELAY_LIMITS, createNet } from './network'
 import { createRelay } from './relay'
 
@@ -148,6 +150,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     logs.get(m.conv)?.push(m)
     appendFileSync(logFile(m.conv), JSON.stringify(m) + '\n')
     emit({ type: 'msg', m })
+    if (m.files) files.note(m)
   }
 
   // Reports for the developers wait here, on disk, until their inbox confirms it holds them.
@@ -281,6 +284,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     }
     if (!known(key)) return
 
+    if (w.t === 'get') return files.onGet(key, w.h, w.off)
+    if (w.t === 'part') return files.onPart(key, w.h, w.off, w.d)
+    if (w.t === 'nope') return files.onNope(key, w.h)
     if (w.t === 'have') {
       if (!members(w.conv).includes(key) || !w.have || typeof w.have !== 'object') return
       const have = haveOf(w.conv)
@@ -330,6 +336,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const n = (asked.get(key) ?? 0) + 1
       asked.set(key, n)
       const ok = !!relayKey && n <= 10 && w.key !== key && known(w.key) && net.linked(w.key) && relayKeys.has(w.key)
+      if (!ok) diag('network', `can't relay for …${key.slice(-6)} to …${w.key.slice(-6)}: ${!relayKey ? 'relaying off' : !known(w.key) ? 'not a contact' : !net.linked(w.key) ? 'not linked with them' : !relayKeys.has(w.key) ? 'they do not relay' : 'too many asks'}`)
       net.send(key, { t: 'reach', key: w.key, ok })
     } else if (w.t === 'relayed') {
       if (!isKey(w.by) || !known(w.by) || !relayKey) return
@@ -385,6 +392,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       .sort(() => Math.random() - 0.5)
       .sort((a, b) => +(b === lastGood.get(k)) - +(a === lastGood.get(k)))
       .slice(0, 3)
+    diag('network', `asking ${cands.length} contact${cands.length === 1 ? '' : 's'} to relay for …${k.slice(-6)}`)
     const by = await new Promise<Key | null>((resolve) => {
       let left = cands.length
       if (!left) return resolve(null)
@@ -397,7 +405,10 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     })
     reaching.delete(k)
     if (net.linked(k)) return void attempting.delete(k)
-    if (!by || !relayKeys.has(by)) return relayFailed(k)
+    // Nobody to ask, or nobody able yet (often a mutual friend still linking with them): asked again on the next tick,
+    // without backing off, since asking costs a few small messages. Only a relayed dial that fails backs off.
+    if (!by || !relayKeys.has(by)) return diag('network', `no contact could relay for …${k.slice(-6)} yet`), void attempting.delete(k)
+    diag('network', `linking with …${k.slice(-6)} through …${by.slice(-6)}`)
     pendingVia.set(k, by)
     net.dial(k, relayKeys.get(by))
   }
@@ -438,12 +449,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         if (key === inbox) deliver()
         if (wants(key)) greet(key)
         if (asking.has(key)) net.send(key, { t: 'who' })
+        if (known(key)) files.opened(key)
         push()
       },
       close(key) {
         diag('network', `link closed with …${key.slice(-6)}`)
         relay.close(key)
         relayedVia.delete(key)
+        files.closed(key)
         // A relay went away: everyone linked through it is dropped now and retried through someone else.
         for (const [k, r] of relayedVia) {
           if (r.by !== key) continue
@@ -467,6 +480,17 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     strict,
   )
   const relay = createRelay((key, b) => net.packet(key, b))
+  const files = createFiles({
+    dir,
+    me,
+    send: net.send,
+    linked: net.linked,
+    relayed: (k) => relayedVia.has(k),
+    backlog: net.backlog,
+    members,
+    emit: (file) => emit({ type: 'file', file }),
+    limitMB: () => s.settings.cacheMB,
+  })
 
   // Someone offline is dialled less and less often (15 s, doubling to 5 minutes in use): every dial is a DHT lookup,
   // and many offline friends would otherwise cost a steady stream of them. Coming back online, they dial us anyway.
@@ -673,10 +697,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       return { msgs: all.length > n ? [...all].sort((a, b) => a.ts - b.ts).slice(-n) : all, acked: s.acked[conv] ?? 0, total: all.length }
     },
     // Works with nobody online: the message is logged now and synced whenever a member connects.
-    send(conv: string, text: string) {
+    // refs: files added with addFile or addBytes first, so we can hand them to whoever asks.
+    send(conv: string, text: string, refs?: FileRef[]) {
       const ms = members(conv)
-      if (!ms.length || typeof text !== 'string' || !text || text.length > MAX_TEXT) throw new Error('Cannot send that')
-      const m = signMsg({ conv, author: me, seq: (haveOf(conv)[me] ?? 0) + 1, ts: Date.now(), text }, keyPair.secretKey)
+      const withFiles = refs !== undefined && refs.length > 0
+      if (withFiles && (!validFiles(refs) || refs.some((f) => files.status(f.h).state !== 'done'))) throw new Error('Cannot send those files')
+      if (!ms.length || typeof text !== 'string' || (!text && !withFiles) || text.length > MAX_TEXT) throw new Error('Cannot send that')
+      const base = { conv, author: me, seq: (haveOf(conv)[me] ?? 0) + 1, ts: Date.now(), text }
+      const m = signMsg(withFiles ? { ...base, files: refs.map(({ h, n, s, t, th }) => ({ h, n, s, t, ...(th && { th }) })) } : base, keyPair.secretKey)
       append(m)
       for (const k of ms) if (k !== me) net.send(k, { t: 'msg', m }), used.set(k, Date.now()), need(k)
     },
@@ -687,6 +715,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       s.groups[id] = mergeGroup(undefined, { ...g, left: { ...g.left, [me]: signLeft(id, keyPair) } })
       forget(id)
       rmSync(logFile(id), { force: true })
+      files.forgetConv(id)
       changed()
       for (const k of g.members) if (k !== me) net.send(k, { t: 'group', g: s.groups[id] })
     },
@@ -697,7 +726,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       for (const k of net.keys()) if (s.friends[k] === 'friend') net.send(k, { t: 'gone' })
       await new Promise((r) => setTimeout(r, 1500)) // let those notices leave before the links close
       await this.destroy()
-      for (const f of ['state.json', 'state.json.tmp', 'identity.json', 'msgs']) rmSync(join(dir, f), { recursive: true, force: true })
+      for (const f of ['state.json', 'state.json.tmp', 'identity.json', 'msgs', 'files']) rmSync(join(dir, f), { recursive: true, force: true })
     },
     signal(conv: string, to: Key | null, data: unknown) {
       if (noDirect && (data as { k?: string })?.k === 'ice') return
@@ -727,10 +756,20 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (!(await done)) return null
       return Math.round((sent * 8) / (performance.now() - start))
     },
+    // Shared files: sending one from where it is, or as bytes (a picture without its metadata, or pasted).
+    addFile: (path: string) => files.addPath(String(path)),
+    addBytes: (name: string, type: string, data: Uint8Array) => files.addBytes(String(name), String(type), data),
+    // saveTo: where the user chose to save it (asked in the main process); without one it goes to the picture cache.
+    download: (h: string, saveTo?: string) => files.fetch(String(h), saveTo),
+    fileStatus: (hs: string[]) => (Array.isArray(hs) ? hs.slice(0, 500).map((h) => files.status(String(h))) : []),
+    filePath: (h: string) => files.pathOf(String(h)),
+    cacheSize: () => files.cacheBytes(),
+    clearCache: () => files.clearCache(),
     async setSettings(p: Partial<Settings>) {
       const was = !!s.settings.relay
       Object.assign(s.settings, p)
       changed()
+      if (p.cacheMB !== undefined) files.trim()
       if (was !== !!s.settings.relay) await applyRelay(), push()
     },
     // Queues a problem or crash report for the developers. It is checked and scrubbed here (shared/reports.ts) as
@@ -752,6 +791,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       clearInterval(watcher)
       clearInterval(probeReset)
       relay.closeAll()
+      files.destroy()
       await net.destroy()
     },
   }

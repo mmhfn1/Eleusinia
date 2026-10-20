@@ -160,6 +160,11 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
     send(key: Key, w: Wire) {
       links.get(key)?.sock.write(JSON.stringify(w) + '\n')
     },
+    // Bytes written to that link and not yet sent, so file transfers can wait for a slow link to drain.
+    backlog(key: Key): number {
+      const sock = links.get(key)?.sock
+      return (sock?._writableState?.buffered ?? 0) + (sock?.rawStream?._writableState?.buffered ?? 0)
+    },
     // `via`: a contact's relay key, for peers no direct dial reaches.
     dial(key: Key, via?: Key) {
       const id = via ? key + '@' + via : key

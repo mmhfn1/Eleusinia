@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync } from 'node:fs'
+import { randomBytes } from 'node:crypto'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import DHT from 'hyperdht'
@@ -743,3 +744,51 @@ test('a full request list drops its oldest instead of refusing new ones, and Dec
   expect(back).not.toContain(askers[1].key)
   expect(back).not.toContain(askers[2].key)
 }, 60000)
+
+test('a message with files is signed with them, and changing a file in it breaks the signature', () => {
+  const a = DHT.keyPair()
+  const files = [{ h: 'ab'.repeat(32), n: 'cat.png', s: 10, t: 'image/png' }]
+  const m = signMsg({ conv: 'c', author: a.publicKey.toString('hex'), seq: 1, ts: 1, text: '', files }, a.secretKey)
+  expect(verifyMsg(m)).toBe(true)
+  expect(verifyMsg({ ...m, files: [{ ...files[0], s: 11 }] })).toBe(false)
+  expect(verifyMsg({ ...m, files: undefined })).toBe(false)
+  expect(verifyMsg({ ...m, files: [{ ...files[0], n: '../x' }] })).toBe(false)
+})
+
+test('shared files: a picture arrives by itself, a big file on request, and a group member serves it once the sender is gone', async () => {
+  const a = start()
+  const b = start()
+  let c = start()
+  await befriend(a, b)
+  await befriend(a, c)
+  const dm = dmId(a.key, b.key)
+  const pic = a.node.addBytes('cat.png', 'image/png', randomBytes(100000))
+  const src = join(mkdtempSync(join(tmpdir(), 'eleusinia-src-')), 'big.bin')
+  writeFileSync(src, randomBytes(3 * 2 ** 20))
+  const big = await a.node.addFile(src)
+  expect(() => a.node.send(dm, '', [{ ...big, h: 'cd'.repeat(32) }])).toThrow() // not a file we hold
+  a.node.send(dm, 'look', [pic, big])
+  const state = (n: N, h: string) => n.node.fileStatus([h])[0].state
+  await until(() => state(b, pic.h) === 'done')
+  expect(state(b, big.h)).toBe('none')
+  const to = join(mkdtempSync(join(tmpdir(), 'eleusinia-dl-')), 'big.bin')
+  b.node.download(big.h, to)
+  await until(() => state(b, big.h) === 'done')
+  expect(readFileSync(to).equals(readFileSync(src))).toBe(true)
+
+  // C is offline when A shares a picture in the group, and A is gone by the time C returns: B hands it over.
+  const gid = a.node.createGroup('trio', [b.key, c.key])
+  await until(() => !!b.node.state().groups[gid] && !!c.node.state().groups[gid])
+  await c.node.destroy()
+  const pic2 = a.node.addBytes('dog.png', 'image/png', randomBytes(50000))
+  a.node.send(gid, '', [pic2])
+  await until(() => state(b, pic2.h) === 'done')
+  await a.node.destroy()
+  c = restart(c)
+  await until(() => state(c, pic2.h) === 'done')
+  expect(readFileSync(c.node.filePath(pic2.h)!.path).equals(readFileSync(b.node.filePath(pic2.h)!.path))).toBe(true)
+  // Leaving the group deletes its pictures from this computer.
+  const cached = c.node.filePath(pic2.h)!.path
+  c.node.leaveGroup(gid)
+  expect(existsSync(cached)).toBe(false)
+}, 120000)

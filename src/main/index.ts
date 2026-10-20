@@ -1,12 +1,14 @@
 import { execFile } from 'node:child_process'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
-import { join } from 'node:path'
-import { BrowserWindow, Menu, Tray, app, desktopCapturer, ipcMain, nativeImage, safeStorage, screen, session } from 'electron'
+import { basename, join } from 'node:path'
+import { pathToFileURL } from 'node:url'
+import { BrowserWindow, Menu, Tray, app, desktopCapturer, dialog, ipcMain, nativeImage, net, protocol, safeStorage, screen, session, shell } from 'electron'
 import DHT from 'hyperdht'
 import { autoUpdater } from 'electron-updater'
 import { UiohookKey, uIOhook } from 'uiohook-napi'
 import { type Bindings, type Hotkey, createMatcher, createRecorder } from '../shared/hotkeys'
+import { type FileRef, inlineKind, mimeOf, safeName } from '../shared/media'
 import { isKey } from '../shared/protocol'
 import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared/reports'
 import { kindOf, shareable } from '../shared/sources'
@@ -19,9 +21,15 @@ if (inboxMode) app.setPath('userData', process.env.ELEUSINIA_INBOX_DIR || join(a
 // Lets several instances run side by side on one machine, each with its own identity.
 else if (process.env.ELEUSINIA_DATA) app.setPath('userData', process.env.ELEUSINIA_DATA)
 // One copy per data folder: opening Eleusinia while it waits in the tray brings that copy back rather than starting a
-// second one with the same identity.
-const firstCopy = inboxMode || app.requestSingleInstanceLock()
-if (!firstCopy) app.quit()
+// second one with the same identity. The inbox too (its own folder): two would file every report twice.
+const firstCopy = app.requestSingleInstanceLock()
+if (!firstCopy) {
+  if (inboxMode) console.log('An inbox is already running here; this one stops.')
+  app.quit()
+}
+
+// Shared pictures, videos and sounds reach the page as eleusinia-file://<hash> (see startApp), never as file:// paths.
+protocol.registerSchemesAsPrivileged([{ scheme: 'eleusinia-file', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }])
 
 // Testing only: join this DHT instead of the public one, as "host:port,host:port" (test/smoke.mjs runs a local
 // one). Unset in normal use, which keeps the public DHT.
@@ -70,7 +78,7 @@ function loadIdentity(dir: string) {
 
 // Closing windows never quits by itself: the tray menu, the close-to-tray setting or an update does, explicitly.
 app.on('window-all-closed', () => {})
-app.whenReady().then(async () => (inboxMode ? startInbox() : firstCopy && (await updateFirst()) && startApp()))
+app.whenReady().then(async () => firstCopy && (inboxMode ? startInbox() : (await updateFirst()) && startApp()))
 
 // Updates: the installed app looks for a newer release of github.com/mmhfn1/Eleusinia (published for every push to
 // main, see .github/workflows/release.yml) on start and every 4 hours, downloads it in the background and tells the
@@ -265,6 +273,65 @@ function startApp() {
     chosen = null
     const source = id ? (await desktopCapturer.getSources({ types: ['screen', 'window'] })).find((s) => s.id === id) : undefined
     grant(source ? { video: source, ...(sound ? { audio: 'loopback' as const } : {}) } : {})
+  })
+
+  // Shared files. Only checked, complete files of a type shown inline (never SVG or HTML) are served to the page, with
+  // their stored type and no sniffing; ranges pass through so long videos can seek.
+  protocol.handle('eleusinia-file', async (req) => {
+    const f = node.filePath(new URL(req.url).hostname)
+    if (!f || !inlineKind(f.type)) return new Response(null, { status: 404 })
+    const res = await net.fetch(pathToFileURL(f.path).href, { headers: req.headers, bypassCustomProtocolHandlers: true })
+    const headers = new Headers({ 'content-type': f.type, 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' })
+    for (const h of ['content-length', 'content-range', 'accept-ranges']) if (res.headers.has(h)) headers.set(h, res.headers.get(h)!)
+    return new Response(res.body, { status: res.status, headers })
+  })
+  // Pictures in JPEG or PNG are re-encoded before sending, which leaves out everything but the pixels: no location,
+  // camera or editing details. Other files go as they are. Each picture also gets a tiny preview for the message.
+  // shortcut: re-encoding drops the EXIF rotation too, so a phone photo relying on it may arrive sideways; read the
+  // orientation and rotate first if testers see that.
+  const preview = (img: Electron.NativeImage) => {
+    if (img.isEmpty()) return undefined
+    const small = img.getSize().width > 48 ? img.resize({ width: 48 }) : img
+    const url = 'data:image/jpeg;base64,' + small.toJPEG(50).toString('base64')
+    return url.length <= 12000 ? url : undefined
+  }
+  async function attach(item: { path?: unknown; name?: unknown; type?: unknown; data?: unknown }): Promise<FileRef> {
+    if (typeof item.path === 'string') {
+      const n = basename(item.path)
+      const t = mimeOf(n)
+      const img = inlineKind(t) === 'image' ? nativeImage.createFromPath(item.path) : null
+      if (img && !img.isEmpty() && (t === 'image/jpeg' || t === 'image/png')) {
+        return { ...node.addBytes(n, t, t === 'image/png' ? img.toPNG() : img.toJPEG(90)), th: preview(img) }
+      }
+      const ref = await node.addFile(item.path)
+      return img ? { ...ref, th: preview(img) } : ref
+    }
+    if (!(item.data instanceof Uint8Array) || typeof item.name !== 'string') throw new Error('Cannot attach that')
+    const name = safeName(item.name)
+    const t = typeof item.type === 'string' && item.type ? item.type : mimeOf(name)
+    const img = inlineKind(t) === 'image' ? nativeImage.createFromBuffer(Buffer.from(item.data)) : null
+    if (img && !img.isEmpty() && (t === 'image/jpeg' || t === 'image/png')) {
+      return { ...node.addBytes(name, t, t === 'image/png' ? img.toPNG() : img.toJPEG(90)), th: preview(img) }
+    }
+    const ref = node.addBytes(name, t, item.data)
+    return img ? { ...ref, th: preview(img) } : ref
+  }
+  ipcMain.handle('attach', (_e, items: unknown) => Promise.all((Array.isArray(items) ? items.slice(0, 10) : []).map(attach)))
+  ipcMain.handle('pickFiles', async () => {
+    const r = await dialog.showOpenDialog(win, { properties: ['openFile', 'multiSelections'] })
+    return r.canceled ? [] : Promise.all(r.filePaths.slice(0, 10).map((path) => attach({ path })))
+  })
+  // Downloading a file someone shared: the user picks where it goes.
+  ipcMain.handle('saveFile', async (_e, h: unknown, name: unknown) => {
+    if (typeof h !== 'string') return null
+    const r = await dialog.showSaveDialog(win, { defaultPath: join(app.getPath('downloads'), safeName(String(name))) })
+    if (r.canceled || !r.filePath) return null
+    node.download(h, r.filePath)
+    return r.filePath
+  })
+  ipcMain.handle('showFile', (_e, h: unknown) => {
+    const saved = typeof h === 'string' ? node.fileStatus([h])[0]?.saved : undefined
+    if (saved) shell.showItemInFolder(saved)
   })
 
   if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL)
