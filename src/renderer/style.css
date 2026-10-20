@@ -1336,6 +1336,131 @@ details[open] > summary::before {
   color: var(--mist-2);
 }
 
+.composer {
+  flex-wrap: wrap;
+}
+.attach-button {
+  align-self: flex-end;
+  margin-left: -6px;
+}
+.attach-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+  margin: 0 0 2px;
+  padding: 0;
+  list-style: none;
+}
+.attach-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 280px;
+  padding: 4px 4px 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--obsidian-3);
+  font-size: 12px;
+}
+.attach-chip img {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-sm);
+  object-fit: cover;
+}
+.attach-name {
+  overflow: hidden;
+  color: var(--silver);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attach-size {
+  color: var(--mist-2);
+  white-space: nowrap;
+}
+
+/* Shared files in messages */
+.msg-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.msg-image {
+  margin: 0;
+}
+.msg-image img {
+  display: block;
+  max-width: min(420px, 100%);
+  max-height: 320px;
+  border-radius: var(--r-md);
+  background: var(--obsidian-3);
+}
+.image-button {
+  padding: 0;
+  border: none;
+  border-radius: var(--r-md);
+  background: none;
+  cursor: zoom-in;
+}
+.image-preview {
+  width: 240px;
+  height: 160px;
+  object-fit: cover;
+  filter: blur(8px);
+}
+.msg-image figcaption,
+.msg-media figcaption {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--mist-2);
+  font-size: 12px;
+}
+.msg-media {
+  margin: 0;
+}
+.msg-media video {
+  display: block;
+  max-width: min(480px, 100%);
+  max-height: 360px;
+  border-radius: var(--r-md);
+  background: #000;
+}
+.file-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 260px;
+  max-width: 420px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--obsidian-2);
+  color: var(--mist-2);
+}
+.file-card .row-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-card progress {
+  width: 80px;
+  accent-color: var(--accent);
+}
+dialog.image-view {
+  max-width: calc(100vw - 48px);
+}
+.image-view img {
+  display: block;
+  max-width: calc(100vw - 96px);
+  max-height: calc(100vh - 160px);
+  margin: 0 auto 8px;
+  border-radius: var(--r-md);
+}
+
 /* ---------- Dialogs ---------- */
 dialog {
   padding: 0;

@@ -4,6 +4,7 @@ import { usable } from '../shared/devices'
 import { type Action, type Hotkey, sameKeys } from '../shared/hotkeys'
 import { type Area, type Diag, type Kind, type Meta, BUILD, cleanReport, describe } from '../shared/reports'
 import { GATE_DB, dbOf } from '../shared/speaking'
+import { DEFAULT_CACHE_MB, sizeLabel } from '../shared/media'
 import { type Profile, type State } from '../shared/protocol'
 import * as call from './call'
 import { Avatar, Dialog, Icon, Info } from './ui'
@@ -238,9 +239,13 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
           <input type="checkbox" role="switch" checked={!!st.settings.relay} onChange={(e) => api.call('setSettings', { relay: e.target.checked })} />
           <span>
             Connect through mutual friends when a direct connection fails (experimental). They can see when you talk, never
-            what you say. Voice and text only
+            what you say. Voice, text and pictures only
           </span>
         </label>
+      </section>
+      <section className="settings-section">
+        <h2>Storage</h2>
+        <MediaCache st={st} />
       </section>
       <section className="settings-section">
         <h2>Help and feedback</h2>
@@ -263,6 +268,35 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
 }
 
 const WINDOWS = navigator.userAgent.includes('Windows')
+
+// Pictures that downloaded by themselves are kept up to this much, the oldest deleted first. Files you saved and
+// files you sent are never counted or deleted.
+const CACHE_SIZES = [256, 512, 1024, 2048, 5120]
+function MediaCache({ st }: { st: State }) {
+  const [used, setUsed] = useState<number | null>(null)
+  const measure = () => api.call('cacheSize').then(setUsed)
+  useEffect(() => void measure(), [st.settings.cacheMB])
+  return (
+    <div className="settings-row">
+      <span className="row-text">
+        <label className="row-title" htmlFor="cache-size">
+          Media cache
+        </label>
+        <span className="row-sub">{used === null ? '…' : `${sizeLabel(used)} of downloaded pictures`}</span>
+      </span>
+      <select id="cache-size" value={st.settings.cacheMB ?? DEFAULT_CACHE_MB} onChange={(e) => api.call('setSettings', { cacheMB: Number(e.target.value) })}>
+        {CACHE_SIZES.map((mb) => (
+          <option key={mb} value={mb}>
+            {sizeLabel(mb * 2 ** 20)}
+          </option>
+        ))}
+      </select>
+      <button className="button" onClick={() => api.call('clearCache').then(measure)}>
+        Clear cache
+      </button>
+    </div>
+  )
+}
 
 // Windows keeps key presses in a game run as administrator away from Eleusinia unless it runs as administrator too.
 function RunAsAdmin() {

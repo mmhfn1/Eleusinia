@@ -2,6 +2,7 @@
 // group messages with the recipient online and offline. They meet on a local test DHT, so a run depends on nothing
 // outside this machine; ELEUSINIA_SMOKE_PUBLIC=1 uses the public DHT instead, for an occasional real-network check.
 import { spawn } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
@@ -147,6 +148,31 @@ const open = (text) => `(async () => {
 })()`
 const say = (text) => `(() => { const f = document.querySelector('form.send'); f.elements.text.value = '${text}'; f.requestSubmit() })()`
 const shows = (text) => `!!document.querySelector('.msgs')?.textContent.includes('${text}')`
+// Pastes files made in the page into the message box: a 64x48 red PNG drawn on a canvas, plus `mb` MB of random bytes
+// as big.bin, then sends them with `text`.
+const sendFiles = (mb, text) => `(async () => {
+  const c = document.createElement('canvas')
+  c.width = 64
+  c.height = 48
+  c.getContext('2d').fillRect(0, 0, 64, 48)
+  const dt = new DataTransfer()
+  dt.items.add(new File([await new Promise((r) => c.toBlob(r, 'image/png'))], 'red.png', { type: 'image/png' }))
+  const b = new Uint8Array(${mb} * 2 ** 20)
+  for (let i = 0; i < b.length; i += 65536) crypto.getRandomValues(b.subarray(i, i + 65536))
+  dt.items.add(new File([b], 'big.bin'))
+  document.querySelector('form.send textarea').dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt, bubbles: true, cancelable: true }))
+  for (let i = 0; i < 100 && document.querySelectorAll('.attach-chip:not(.quiet)').length < 2; i++) await new Promise((r) => setTimeout(r, 100))
+  const f = document.querySelector('form.send')
+  f.elements.text.value = '${text}'
+  f.requestSubmit()
+})()`
+const pictureShown = `[...document.querySelectorAll('.msg-image img')].some((i) => i.src.startsWith('eleusinia-file://') && i.naturalWidth === 64)`
+// The big file in the open DM with `other`, downloaded to `to` (the save dialog is skipped); resolves to its hash.
+const fetchBig = (other, to) => `api.call('state').then(async (s) => {
+  const h = (await api.call('history', [s.me, '${other}'].sort().join('_'))).msgs.flatMap((m) => m.files ?? []).find((f) => f.n === 'big.bin').h
+  await api.call('download', h, ${JSON.stringify(to)})
+  return h
+})`
 const pendingMark = `!!document.querySelector('.msgs')?.textContent.includes('pending')`
 const body = (text) => `document.body.innerText.includes('${text}')`
 // Watches the page for up to ms, true as soon as the condition holds: catches a state that comes and goes (a ring
@@ -195,6 +221,11 @@ async function relayedRun(ownTitles) {
     (await a.ev(`api.call('state').then((s) => s.relayed.includes('${kb}'))`)) && b.ev(`api.call('state').then((s) => s.relayed.includes('${ka}'))`))
   await b.ev(say('reply via cy'))
   await until('A shows the reply', () => a.ev(shows('reply via cy')))
+  // A friend's relay carries pictures, but a big file waits for a direct connection.
+  await a.ev(sendFiles(2, 'files via cy'))
+  await until('B shows the picture that came through Cy', () => b.ev(`${shows('files via cy')} && ${pictureShown}`), 30)
+  await b.ev(fetchBig(ka, join(mkdtempSync(join(tmpdir(), 'eleusinia-smoke-dl-')), 'big.bin')))
+  await until('B says the big file waits for a direct connection', () => b.ev(body('waiting for a direct connection')), 10)
   await a.ev(`document.querySelector('.chat-person').click()`)
   await until("Bob's card says online through a friend, voice and text only", () => a.ev(`!!document.querySelector('dialog[open]')?.textContent.includes('Online through a friend')`), 10)
   await a.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
@@ -306,6 +337,16 @@ try {
   await a.ev(say('second line'))
   await until('B stacks the second message under the first (one name, one picture)', () =>
     b.ev(`[...document.querySelectorAll('.msg.continued')].some(p => p.textContent.includes('second line')) && document.querySelectorAll('.msg:not(.continued)').length === 1`))
+
+  console.log('--- Sharing files')
+  await a.ev(sendFiles(8, 'files here'))
+  await until('B shows the pasted picture inline, re-encoded and fetched by itself', () => b.ev(`${shows('files here')} && ${pictureShown}`), 30)
+  await until('B shows big.bin as a card to download, not fetched', () => b.ev(`[...document.querySelectorAll('.file-card')].some((x) => x.textContent.includes('big.bin') && x.textContent.includes('Download'))`), 5)
+  const saved = join(mkdtempSync(join(tmpdir(), 'eleusinia-smoke-dl-')), 'big.bin')
+  const bigHash = await b.ev(fetchBig(await a.ev(`api.call('state').then((s) => s.me)`), saved))
+  await until('B downloads it and can show it in its folder', () => b.ev(`[...document.querySelectorAll('.file-card')].some((x) => x.textContent.includes('Show in folder'))`), 60)
+  if (createHash('sha256').update(readFileSync(saved)).digest('hex') !== bigHash) throw new Error('the saved file does not match')
+  console.log('ok   the saved file matches what Ann sent, byte for byte')
 
   console.log('--- Profile card')
   await b.ev(`document.querySelector('.msg .user').click()`)

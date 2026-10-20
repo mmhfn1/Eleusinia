@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 
 contextBridge.exposeInMainWorld('api', {
   call: (method: string, ...args: unknown[]) => ipcRenderer.invoke('call', method, ...args),
@@ -11,6 +11,12 @@ contextBridge.exposeInMainWorld('api', {
   diag: (area: string, text: string) => ipcRenderer.send('diag', area, text),
   diagnostics: () => ipcRenderer.invoke('diagnostics'),
   installUpdate: () => ipcRenderer.invoke('installUpdate'),
+  // Shared files (see main/index.ts): attach takes { path } or { name, type, data } for pasted pictures.
+  attach: (items: unknown[]) => ipcRenderer.invoke('attach', items),
+  pickFiles: () => ipcRenderer.invoke('pickFiles'),
+  saveFile: (h: string, name: string) => ipcRenderer.invoke('saveFile', h, name),
+  showFile: (h: string) => ipcRenderer.invoke('showFile', h),
+  pathOf: (file: File) => webUtils.getPathForFile(file), // a dropped file's path; empty for pasted ones
   on(fn: (e: unknown) => void) {
     const h = (_: unknown, e: unknown) => fn(e)
     ipcRenderer.on('event', h)

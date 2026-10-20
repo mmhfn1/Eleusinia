@@ -1,11 +1,13 @@
 import type { Action, Bindings } from './hotkeys'
+import type { FileRef } from './media'
 
 export type Key = string // 64 hex chars: ed25519 public key, also the friend code
 export type FriendStatus = 'friend' | 'outgoing' | 'incoming'
 export type Add = { by: Key; sig: string } // proof that `by` added a member to a group
 // left: members who left, each with their own signature, so nobody can be removed by someone else.
 export type Group = { id: string; name: string; members: Key[]; updatedAt: number; adds?: Record<Key, Add>; left?: Record<Key, string> }
-export type Msg = { conv: string; author: Key; seq: number; ts: number; text: string; sig: string }
+// files: shared files, referenced by hash (shared/media.ts); text may then be empty.
+export type Msg = { conv: string; author: Key; seq: number; ts: number; text: string; files?: FileRef[]; sig: string }
 export type Have = Record<Key, number> // highest seq held, per author
 // handle: the unique-ish ID friends type, username#1234. avatar: small image data URL, or ''.
 export type Profile = { handle: string; name: string; about: string; avatar: string }
@@ -29,6 +31,7 @@ export type Settings = {
   closeToTray?: boolean // closing the window keeps Eleusinia running in the tray; on unless turned off
   noiseSuppression?: boolean // RNNoise on the microphone; on unless turned off
   relay?: boolean // connect through mutual friends when no direct link works, and relay for them; off unless turned on
+  cacheMB?: number // how much room downloaded pictures may take before the oldest are deleted (DEFAULT_CACHE_MB)
 }
 
 export type State = {
@@ -74,6 +77,9 @@ export type Wire =
   | { t: 'probed'; id: number } // all of that probe arrived
   | { t: 'report'; r: unknown } // a problem or crash report, only ever sent to the developers' inbox (shared/reports.ts)
   | { t: 'reportAck'; id: string } // the inbox holds that report; the sender deletes its copy
+  | { t: 'get'; h: string; off: number } // a piece of a shared file, from offset `off` (see main/files.ts)
+  | { t: 'part'; h: string; off: number; d: string } // that piece, base64
+  | { t: 'nope'; h: string } // the sender does not have that file, or not for us
 
 export type Event =
   | { type: 'state'; state: State }
@@ -82,8 +88,12 @@ export type Event =
   | { type: 'call'; from: Key; conv: string; data: any }
   | { type: 'hotkey'; action: Action; down: boolean } // from the main process's system-wide key hook
   | { type: 'update'; version: string } // a newer version has downloaded and installs on restart
+  | { type: 'file'; file: FileState }
 
 export const MAX_TEXT = 4000
+
+// Where a shared file stands on this computer. got: bytes held so far. saved: where the user saved it, if they did.
+export type FileState = { h: string; state: 'none' | 'waiting' | 'loading' | 'done' | 'failed'; got: number; size: number; saved?: string; why?: string }
 export const isKey = (s: unknown): s is Key => typeof s === 'string' && /^[0-9a-f]{64}$/.test(s)
 export const isGroupId = (s: unknown): s is string => typeof s === 'string' && /^[0-9a-f]{32}$/.test(s)
 export const dmId = (a: Key, b: Key) => [a, b].sort().join('_')

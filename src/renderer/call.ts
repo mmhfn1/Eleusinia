@@ -41,6 +41,11 @@ declare global {
       restartAsAdmin(): Promise<boolean>
       diag(area: import('../shared/reports').Area, text: string): void
       installUpdate(): Promise<void>
+      attach(items: ({ path: string } | { name: string; type: string; data: Uint8Array })[]): Promise<import('../shared/media').FileRef[]>
+      pickFiles(): Promise<import('../shared/media').FileRef[]>
+      saveFile(h: string, name: string): Promise<string | null>
+      showFile(h: string): Promise<void>
+      pathOf(file: File): string
       diagnostics(): Promise<{ meta: import('../shared/reports').Meta; events: import('../shared/reports').Diag[] }>
     }
   }
