@@ -17,6 +17,9 @@ contextBridge.exposeInMainWorld('api', {
   saveFile: (h: string, name: string) => ipcRenderer.invoke('saveFile', h, name),
   showFile: (h: string) => ipcRenderer.invoke('showFile', h),
   pathOf: (file: File) => webUtils.getPathForFile(file), // a dropped file's path; empty for pasted ones
+  gifProviders: () => ipcRenderer.invoke('gifProviders'),
+  searchGifs: (p: string, q: string) => ipcRenderer.invoke('searchGifs', p, q),
+  gifFile: (p: string, g: unknown) => ipcRenderer.invoke('gifFile', p, g),
   on(fn: (e: unknown) => void) {
     const h = (_: unknown, e: unknown) => fn(e)
     ipcRenderer.on('event', h)

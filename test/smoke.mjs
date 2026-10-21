@@ -173,6 +173,8 @@ const fetchBig = (other, to) => `api.call('state').then(async (s) => {
   await api.call('download', h, ${JSON.stringify(to)})
   return h
 })`
+// The sounds a window has played so far (call.ts notes each one in the diagnostics), in order.
+const sounds = (p) => p.ev(`api.diagnostics().then((d) => d.events.filter((e) => e.area === 'call' && e.text.startsWith('sound: ')).map((e) => e.text.slice(7)))`)
 const pendingMark = `!!document.querySelector('.msgs')?.textContent.includes('pending')`
 const body = (text) => `document.body.innerText.includes('${text}')`
 // Watches the page for up to ms, true as soon as the condition holds: catches a state that comes and goes (a ring
@@ -383,8 +385,10 @@ try {
   }, 20)
   console.log('     ', JSON.stringify(alone))
   await until('B sees the call in its sidebar', () => b.ev(`[...document.querySelectorAll('aside.voice button')].some(x => x.textContent.includes('Join call (1)'))`))
+  await until('A plays the caller tune while waiting, and B rings', async () => (await sounds(a)).includes('calling') && (await sounds(b)).includes('ring'), 10)
   await b.ev(press('Join call'))
   await until('A connected to Bob', () => a.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Bob')`))
+  await until('A hears Bob join (its own join, then his)', async () => (await sounds(a)).filter((x) => x === 'join').length === 2, 10)
   await until('B connected to Ann', () => b.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Ann')`))
   const both = await until('A sign now measures the link to Bob', async () => {
     const s = await sign(a)
@@ -618,6 +622,7 @@ try {
   if (await b.ev(seen(annSpeaking, 3000))) throw new Error('B saw Ann speaking while she is muted')
   console.log('ok   muted: no ring for Ann on either side')
   await until('A shows muted', () => a.ev(`!!document.querySelector('.callers .voice-mark[title=Muted]')`))
+  if (!(await sounds(a)).includes('mute')) throw new Error('no mute sound')
   await until('B sees a muted mark to the right of Ann', () => b.ev(`(() => { const r = [...document.querySelectorAll('.caller')].find((x) => x.textContent.includes('Ann')); return !!r?.querySelector('.row-title .voice-mark[title=Muted]') })()`), 10)
   await a.ev(press('Deafen'))
   await until('A deafened: Deafened shown, both buttons pressed, Bob silenced locally', () =>
@@ -626,8 +631,12 @@ try {
   await a.ev(press('Undeafen'))
   await until('A undeafened: back to muted only', () => a.ev(`!document.querySelector('.callers').textContent.includes('Deafened') && document.querySelector('.callers').textContent.includes('Muted')`), 5)
   await until('B sees muted again', () => b.ev(`!!document.querySelector('.caller .row-title .voice-mark[title=Muted]') && !document.querySelector('.caller .voice-mark[title=Deafened]')`), 10)
+  const played = await sounds(a)
+  if (!['deafen', 'undeafen'].every((x) => played.includes(x))) throw new Error('no deafen or undeafen sound')
+  console.log('ok   A heard each change: ' + played.join(', '))
   await a.ev(press('Leave call'))
   await until('B sees Ann leave', () => b.ev(`document.querySelector('.callers')?.textContent.includes('Waiting')`))
+  await until('B hears her leave', async () => (await sounds(b)).includes('leave'), 5)
   await b.ev(press('Leave call'))
 
   console.log('--- Groups')

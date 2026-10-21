@@ -3,10 +3,12 @@ import rnnoiseWasm from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?inli
 import rnnoiseWorklet from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?raw'
 import { createCandidates, createWatchdog, lightOpus, offers, relayCandidate } from '../shared/callstate'
 import { fellBack, nextDevice, usable } from '../shared/devices'
+import { type Jingle, LOOP_EVERY, loopNow } from '../shared/jingles'
 import { CALL_VERSION, type Event, type Key, type State } from '../shared/protocol'
 import { SAMPLE_EVERY, type Sample, grade, remember, worst } from '../shared/quality'
 import type { SourceKind } from '../shared/sources'
 import { gate, hear, rms } from '../shared/speaking'
+import { play } from './jingles'
 import {
   type Level,
   type Quality,
@@ -46,6 +48,9 @@ declare global {
       saveFile(h: string, name: string): Promise<string | null>
       showFile(h: string): Promise<void>
       pathOf(file: File): string
+      gifProviders(): Promise<import('../shared/gifs').GifProvider[]>
+      searchGifs(p: import('../shared/gifs').GifProvider, q: string): Promise<import('../shared/gifs').Gif[]>
+      gifFile(p: import('../shared/gifs').GifProvider, g: import('../shared/gifs').Gif): Promise<import('../shared/media').FileRef>
       diagnostics(): Promise<{ meta: import('../shared/reports').Meta; events: import('../shared/reports').Diag[] }>
     }
   }
@@ -116,6 +121,32 @@ let notify = () => {}
 export const onChange = (fn: () => void) => void (notify = fn)
 
 const send = (c: string, to: Key | null, data: unknown) => window.api.call('signal', c, to, data)
+
+// Sounds. Joining and leaving are not heard while deafened; mute and deafen always are, to confirm them.
+const sound = (name: Jingle) => (log(`sound: ${name}`), play(name, outVolume(), outId || state.settings.out || ''))
+const isDm = (c: string) => !state.groups[c]
+// Ringing: direct calls we are not in, since when each started. Calling: since when we have waited alone in a direct
+// call. Both repeat for 40 s at most (loopNow); after that the call carries on silently, it is never ended for it.
+const ringing = new Map<string, number>()
+let callingSince: number | null = null
+let looping: { name: 'ring' | 'calling'; at: number } | null = null
+let loopTimer: ReturnType<typeof setInterval> | null = null
+function loops() {
+  const now = Date.now()
+  const name = loopNow(now, callingSince, [...ringing.values()])
+  if (!name) {
+    looping = null
+    if (loopTimer) clearInterval(loopTimer)
+    loopTimer = null
+    return
+  }
+  if (looping?.name !== name || now - looping.at >= LOOP_EVERY[name]) {
+    if (looping?.name !== name) log(`sound: ${name}`)
+    looping = { name, at: now }
+    play(name, outVolume(), outId || state.settings.out || '')
+  }
+  loopTimer ??= setInterval(loops, 250)
+}
 const membersOf = (c: string) => state.groups[c]?.members ?? c.split('_')
 // People on a call version that cannot work with ours are never connected; the call panel says who must update.
 export const callVersionOf = (k: Key) => state.versions?.[k]?.call ?? 1
@@ -777,6 +808,10 @@ export async function join(c: string) {
   listening = setInterval(listenAll, 50)
   navigator.mediaDevices.addEventListener('devicechange', onDeviceChange)
   send(c, null, { k: 'join' })
+  ringing.delete(c)
+  callingSince = isDm(c) && !active.get(c)?.size ? Date.now() : null
+  sound('join')
+  loops()
   followDevices() // device ids are only listed once the microphone is allowed
   sampler = setInterval(measure, SAMPLE_EVERY)
   measure()
@@ -789,6 +824,8 @@ export function leave() {
   stopShare()
   stopCamera()
   send(conv, null, { k: 'leave' })
+  if (!deafened) sound('leave')
+  callingSince = null
   for (const k of [...peers.keys()]) drop(k)
   navigator.mediaDevices.removeEventListener('devicechange', onDeviceChange)
   if (sampler) clearInterval(sampler)
@@ -843,6 +880,7 @@ const sendVoice = (k: Key | null) => conv && send(conv, k, { k: 'voice', muted, 
 export function toggleMute() {
   if (deafened) deafened = muted = false
   else muted = !muted
+  sound(muted ? 'mute' : 'unmute')
   applyDeafen()
   applyMic()
   sendVoice(null)
@@ -851,6 +889,7 @@ export function toggleMute() {
 
 export function toggleDeafen() {
   deafened = !deafened
+  sound(deafened ? 'deafen' : 'undeafen')
   applyDeafen()
   applyMic()
   sendVoice(null)
@@ -862,12 +901,19 @@ async function handle(from: Key, c: string, d: any) {
   const set = active.get(c) ?? new Set()
   active.set(c, set)
   if (d.k === 'leave') {
-    set.delete(from)
+    left(c, from)
     if (c === conv) drop(from)
     return
   }
   if (!set.size && !conv) new Notification('Eleusinia', { body: `${state.profiles[from]?.name || 'Someone'} started a call` })
+  const fresh = !set.has(from)
   set.add(from)
+  if (fresh && c === conv) {
+    callingSince = null // they answered
+    if (!deafened) sound('join')
+  }
+  if (fresh && c !== conv && isDm(c) && !ringing.has(c)) ringing.set(c, Date.now())
+  loops()
   if (c !== conv) return
   if (!compatible(from)) return log(`not connecting ${who(from)}: call version ${callVersionOf(from)}, ours ${CALL_VERSION}`), notify()
 
@@ -916,6 +962,14 @@ async function handle(from: Key, c: string, d: any) {
   }
 }
 
+// Someone left a call, by saying so or by going offline.
+function left(c: string, k: Key) {
+  const had = active.get(c)?.delete(k)
+  if (had && c === conv && !deafened) sound('leave')
+  if (!active.get(c)?.size) ringing.delete(c)
+  loops()
+}
+
 // One at a time, so a candidate never overtakes the offer it belongs to, and a reconnect never
 // interleaves with incoming signals.
 let queue = Promise.resolve()
@@ -930,7 +984,7 @@ export function onState(next: State) {
   if (!prev) return
   for (const k of prev.online) {
     if (next.online.includes(k)) continue
-    for (const set of active.values()) set.delete(k)
+    for (const c of active.keys()) left(c, k)
     const w = peers.has(k) && watchdogs.get(k)
     if (w) w.away(() => (drop(k), notify()))
     else drop(k)

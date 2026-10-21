@@ -8,6 +8,7 @@ import DHT from 'hyperdht'
 import { autoUpdater } from 'electron-updater'
 import { UiohookKey, uIOhook } from 'uiohook-napi'
 import { type Bindings, type Hotkey, createMatcher, createRecorder } from '../shared/hotkeys'
+import { type Gif, type GifProvider, GIF_MAX_BYTES, gifUrl, isGifData, parseGifs, searchUrl } from '../shared/gifs'
 import { type FileRef, inlineKind, mimeOf, safeName } from '../shared/media'
 import { isKey } from '../shared/protocol'
 import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared/reports'
@@ -321,6 +322,25 @@ function startApp() {
     const r = await dialog.showOpenDialog(win, { properties: ['openFile', 'multiSelections'] })
     return r.canceled ? [] : Promise.all(r.filePaths.slice(0, 10).map((path) => attach({ path })))
   })
+  // GIFs: searched here, so the keys never reach the page; the page shows previews from the provider's media hosts
+  // (allowed in index.html's CSP). A chosen GIF is downloaded once and sent as a picture, so nobody receiving it
+  // contacts the provider.
+  const gifKeys: Record<GifProvider, string> = { giphy: process.env.GIPHY_KEY ?? '', klipy: process.env.KLIPY_KEY ?? '' }
+  ipcMain.handle('gifProviders', () => (Object.keys(gifKeys) as GifProvider[]).filter((p) => gifKeys[p]))
+  ipcMain.handle('searchGifs', async (_e, p: GifProvider, q: unknown) => {
+    if (!gifKeys[p]) return []
+    const res = await net.fetch(searchUrl(p, gifKeys[p], String(q ?? '')), { signal: AbortSignal.timeout(10000) })
+    if (!res.ok) throw new Error(`${p === 'giphy' ? 'GIPHY' : 'KLIPY'} did not answer (${res.status})`)
+    return parseGifs(p, await res.json())
+  })
+  ipcMain.handle('gifFile', async (_e, p: GifProvider, g: Gif) => {
+    if (!gifKeys[p] || !gifUrl(p, g?.full?.url) || !/^[\w-]+$/.test(String(g.id))) throw new Error('Cannot send that GIF')
+    const res = await net.fetch(g.full.url, { signal: AbortSignal.timeout(20000) })
+    const data = new Uint8Array(await res.arrayBuffer())
+    if (!res.ok || data.length > GIF_MAX_BYTES || !isGifData(data)) throw new Error('That GIF could not be downloaded')
+    return attach({ name: `${p}-${g.id}.gif`, type: 'image/gif', data })
+  })
+
   // Downloading a file someone shared: the user picks where it goes.
   ipcMain.handle('saveFile', async (_e, h: unknown, name: unknown) => {
     if (typeof h !== 'string') return null
