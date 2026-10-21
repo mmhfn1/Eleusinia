@@ -45,6 +45,7 @@ declare global {
       installUpdate(): Promise<void>
       checkUpdates(): Promise<{ state: 'found' | 'latest' | 'unavailable'; version: string; current: string }>
       quit(): Promise<void>
+      win(action: 'minimize' | 'maximize' | 'close' | 'state'): Promise<boolean>
       attach(items: ({ path: string } | { name: string; type: string; data: Uint8Array })[]): Promise<import('../shared/media').FileRef[]>
       pickFiles(): Promise<import('../shared/media').FileRef[]>
       saveFile(h: string, name: string): Promise<string | null>
