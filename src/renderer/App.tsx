@@ -73,8 +73,14 @@ export default function App() {
     asked.current = now
   }, [st])
 
-  if (!st) return null
-  if (!st.profile.handle || editing) return <ProfileForm st={st} first={!st.profile.handle} done={() => setEditing(false)} />
+  if (!st) return <TitleBar place="" />
+  if (!st.profile.handle || editing)
+    return (
+      <>
+        <TitleBar place={st.profile.handle ? 'Edit profile' : 'Create your account'} />
+        <ProfileForm st={st} first={!st.profile.handle} done={() => setEditing(false)} />
+      </>
+    )
 
   // Runs an action and shows its failure instead of swallowing it.
   const run: Run = (p) => p.then(() => setErr(''), (e) => setErr(String(e.message ?? e).replace(/^.*Error: /, '')))
@@ -93,7 +99,12 @@ export default function App() {
   // A conversation that no longer exists (friend removed) falls back to Home.
   const open = sel && (st.groups[sel] || st.friends[sel.split('_').find((k) => k !== st.me)!] === 'friend') ? sel : null
 
+  const place = open ? (st.groups[open] ? groupName(st.groups[open]) : people.name(open.split('_').find((k) => k !== st.me)!)) : 'Friends'
+  const callAway = call.conv && call.conv !== open ? call.conv : null
+  const callName = callAway && (st.groups[callAway] ? groupName(st.groups[callAway]) : people.name(callAway.split('_').find((k) => k !== st.me)!))
   return (
+    <>
+    <TitleBar place={place} call={callAway ? { name: callName!, back: () => go(callAway) } : undefined} />
     <div className="app">
       <Rail st={st} open={open} go={go} show={setModal} />
       {open ? (
@@ -140,6 +151,45 @@ export default function App() {
       {modal?.kind === 'menu' && <Menu st={st} people={people} close={() => setModal(null)} go={go} report={() => setModal({ kind: 'report' })} />}
       {modal?.kind === 'report' && <ReportDialog st={st} close={() => setModal(null)} />}
     </div>
+    </>
+  )
+}
+
+// The window's own title bar: where you are, a way back to a call you are in elsewhere, and the window buttons. The
+// strip itself drags the window (and double-click maximizes, as Windows does); the buttons opt out of dragging.
+function TitleBar({ place, call: live }: { place: string; call?: { name: string; back: () => void } }) {
+  const [max, setMax] = useState(false)
+  useEffect(() => {
+    window.api.win('state').then(setMax)
+    return api.on((e) => e.type === 'window' && setMax(e.maximized))
+  }, [])
+  return (
+    <header className="titlebar">
+      <span className="titlebar-place">{place}</span>
+      {live && (
+        <button className="titlebar-call" onClick={live.back} title="Back to your call">
+          <span className="titlebar-live" aria-hidden="true" />
+          In a call in {live.name}
+        </button>
+      )}
+      <div className="window-buttons">
+        <button aria-label="Minimize" title="Minimize" onClick={() => window.api.win('minimize')}>
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M0 5.5h10" />
+          </svg>
+        </button>
+        <button aria-label={max ? 'Restore' : 'Maximize'} title={max ? 'Restore' : 'Maximize'} onClick={() => window.api.win('maximize').then(setMax)}>
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+            {max ? <path d="M2.5.5h7v7M.5 2.5h7v7h-7z" /> : <path d="M.5.5h9v9h-9z" />}
+          </svg>
+        </button>
+        <button className="close" aria-label="Close" title="Close" onClick={() => window.api.win('close')}>
+          <svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true">
+            <path d="M.5.5l9 9M9.5.5l-9 9" />
+          </svg>
+        </button>
+      </div>
+    </header>
   )
 }
 

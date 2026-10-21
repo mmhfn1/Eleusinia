@@ -139,11 +139,23 @@ function startApp() {
     minHeight: 600,
     title: 'Eleusinia',
     icon: join(__dirname, '../../build/icon.png'),
-    backgroundColor: '#06081a', // the app's darkest tone, so no white flash before the page paints
+    backgroundColor: '#050608', // the app's darkest tone, so no white flash before the page paints
     autoHideMenuBar: true,
+    // The page draws its own title bar and window buttons (TitleBar in App.tsx); Windows keeps the resize edges and snap.
+    titleBarStyle: 'hidden',
     webPreferences: { preload: join(__dirname, '../preload/index.js') },
   })
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  // The page's window buttons. Closing goes through the close handler below, so the tray setting still applies.
+  ipcMain.handle('window', (_e, action: unknown) => {
+    if (action === 'minimize') win.minimize()
+    else if (action === 'maximize') win.isMaximized() ? win.unmaximize() : win.maximize()
+    else if (action === 'close') win.close()
+    return win.isMaximized()
+  })
+  const sized = () => !win.isDestroyed() && win.webContents.send('event', { type: 'window', maximized: win.isMaximized() })
+  win.on('maximize', sized)
+  win.on('unmaximize', sized)
   win.webContents.on('will-navigate', (e) => e.preventDefault())
 
   // Closing the window keeps Eleusinia running in the tray, so calls, messages, hotkeys and updates carry on; it quits

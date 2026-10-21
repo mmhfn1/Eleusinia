@@ -88,6 +88,7 @@ export type Event =
   | { type: 'call'; from: Key; conv: string; data: any }
   | { type: 'hotkey'; action: Action; down: boolean } // from the main process's system-wide key hook
   | { type: 'update'; version: string } // a newer version has downloaded and installs on restart
+  | { type: 'window'; maximized: boolean } // the window was maximized or restored, for the title bar's button
   | { type: 'file'; file: FileState }
 
 export const MAX_TEXT = 4000
