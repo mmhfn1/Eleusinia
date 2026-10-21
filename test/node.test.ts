@@ -792,3 +792,20 @@ test('shared files: a picture arrives by itself, a big file on request, and a gr
   c.node.leaveGroup(gid)
   expect(existsSync(cached)).toBe(false)
 }, 120000)
+
+test('someone offline is still found by their exact friend ID, and their request is waiting when they come back', async () => {
+  let a = start()
+  const b = start()
+  await a.node.setProfile({ username: 'offlineann', name: 'Ann', about: '', avatar: '' })
+  const handle = a.node.state().profile.handle
+  await a.node.destroy()
+  // Only the ID card can answer now: nothing announces Ann's ID while she is away.
+  await expect.poll(() => b.node.idOwners(handle), { timeout: 20000, interval: 300 }).toContain(a.key)
+  expect(await b.node.idOwners('offlineann#9999')).not.toContain(a.key)
+  const found = await b.node.findFriend(handle)
+  const ann = found.find((f) => f.key === a.key)
+  expect(ann?.linked).toBe(false)
+  b.node.addFriend(a.key, ann!.profile)
+  a = restart(a)
+  await until(() => a.node.state().friends[b.key] === 'incoming')
+}, 120000)
