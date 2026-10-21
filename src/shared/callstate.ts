@@ -28,6 +28,14 @@ export const RESTART_GRACE = 8000
 export const OFFLINE_GRACE = 15000
 const BACKOFF = [2000, 5000, 10000, 15000]
 export const backoff = (attempt: number) => BACKOFF[Math.min(attempt, BACKOFF.length - 1)]
+// A long route (another continent) loses consent checks in bursts while audio still gets through, so it is given
+// longer before a restart: 3 s up to a 100 ms ping, rising to 8 s from 350 ms.
+export const restartAfterFor = (pingMs?: number) =>
+  pingMs !== undefined && Number.isFinite(pingMs) ? Math.round(Math.min(8000, Math.max(RESTART_AFTER, RESTART_AFTER + (pingMs - 100) * 20))) : RESTART_AFTER
+
+// What the watchdog may ask about the link. flowing: their audio is still arriving, so the route still works and a
+// restart or rebuild would only cut it. restartAfter: how long to wait before restarting, in ms.
+export type LinkHealth = { flowing?: () => boolean; restartAfter?: () => number }
 
 // addIceCandidate throws before the remote description is set, so early candidates wait here
 // until flush() runs right after setRemoteDescription.
@@ -57,7 +65,9 @@ export type Recovery = {
 
 // Watches one peer across rebuilt connections, so the backoff keeps counting until a connection holds.
 // Only the offering side acts; the other side answers whatever offer arrives.
-export function createWatchdog(me: string, them: string, act: Recovery, timers: Timers = realTimers) {
+export function createWatchdog(me: string, them: string, act: Recovery, timers: Timers = realTimers, health: LinkHealth = {}) {
+  const flowing = health.flowing ?? (() => false)
+  const restartAfter = health.restartAfter ?? (() => RESTART_AFTER)
   let state = 'new'
   let attempt = 0
   let timer: unknown = null
@@ -84,8 +94,10 @@ export function createWatchdog(me: string, them: string, act: Recovery, timers: 
     if (away !== null) timers.clear(away)
     away = null
   }
-  const rebuild = () => (act.rebuild(), rebuildLater())
+  // While audio still arrives, nothing is torn down: the same step is checked again later.
+  const rebuild = () => (flowing() ? arm('rebuild', backoff(attempt), rebuild) : (act.rebuild(), rebuildLater()))
   const rebuildLater = () => arm('rebuild', backoff(attempt++), rebuild)
+  const restartSoon = () => arm('restart', restartAfter(), () => (flowing() ? restartSoon() : (act.restart(), arm('rebuild', RESTART_GRACE, rebuild))))
 
   return {
     update(next: string) {
@@ -95,7 +107,7 @@ export function createWatchdog(me: string, them: string, act: Recovery, timers: 
         clear()
         attempt = 0
       } else if (!leader) return
-      else if (next === 'disconnected' && !pending) arm('restart', RESTART_AFTER, () => (act.restart(), arm('rebuild', RESTART_GRACE, rebuild)))
+      else if (next === 'disconnected' && !pending) restartSoon()
       else if (next === 'failed' && pending !== 'rebuild') rebuildLater()
     },
     // The peer went offline: drop them unless they are back within the grace period. A call that is still

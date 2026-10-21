@@ -1,11 +1,11 @@
 import { RnnoiseWorkletNode } from '@sapphi-red/web-noise-suppressor'
 import rnnoiseWasm from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?inline'
 import rnnoiseWorklet from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?raw'
-import { createCandidates, createWatchdog, lightOpus, offers, relayCandidate } from '../shared/callstate'
+import { createCandidates, createWatchdog, lightOpus, offers, relayCandidate, restartAfterFor } from '../shared/callstate'
 import { fellBack, nextDevice, usable } from '../shared/devices'
 import { type Jingle, LOOP_EVERY, loopNow } from '../shared/jingles'
 import { CALL_VERSION, type Event, type Key, type State } from '../shared/protocol'
-import { SAMPLE_EVERY, type Sample, grade, remember, worst } from '../shared/quality'
+import { type PingReading, SAMPLE_EVERY, type Sample, grade, jitterTarget, pingSummary, remember, rememberPing, worst } from '../shared/quality'
 import type { SourceKind } from '../shared/sources'
 import { gate, hear, rms } from '../shared/speaking'
 import { play } from './jingles'
@@ -93,6 +93,14 @@ let outId = ''
 let relayMissing = false // no network address the relay port could use
 // Connection samples per person in the call, or '' for the network while nobody is connected. Memory only.
 const samples = new Map<string, Sample[]>()
+// Fresh ping readings per link over the last minute, for the number shown (pingSummary), and the stat counters they
+// were taken from, so a value that has not updated is never read twice.
+const pingReadings = new Map<string, PingReading[]>()
+const counters = new Map<string, { stun: number; stunTotal: number; rtcp: number; rtcpTotal: number }>()
+// Their voice arriving: packets so far, and when that count last grew. A link whose audio still arrives is never
+// restarted or rebuilt (createWatchdog's flowing), since that would cut a call that still works.
+const heardFrom = new Map<Key, { n: number; at: number }>()
+const flowing = (k: Key) => Date.now() - (heardFrom.get(k)?.at ?? 0) < SAMPLE_EVERY * 2 + 500
 let sampler: ReturnType<typeof setInterval> | null = null
 let measuring = false
 
@@ -224,10 +232,16 @@ async function setEncoding(sender: RTCRtpSender, e: object) {
   await sender.setParameters(p).catch(() => {})
 }
 
-const bitrate = (pc: RTCPeerConnection) => {
+// Voice goes first when the link is short of room: video gives way (priority on each sender), so a busy or long
+// route drops picture quality before words. Set apart from the bitrate, so a browser that refused the priorities
+// would still get it.
+const bitrate = async (pc: RTCPeerConnection) => {
   const voice = slotsOf(pc).voice
-  if (voice) setEncoding(voice.sender, { maxBitrate: state.settings.audioKbps * 1000 })
+  if (!voice) return
+  await setEncoding(voice.sender, { maxBitrate: state.settings.audioKbps * 1000 })
+  await setEncoding(voice.sender, { priority: 'high', networkPriority: 'high' })
 }
+const LOW = { priority: 'low', networkPriority: 'low' }
 
 // One AudioContext for the whole app. Each person plays through source → gain (their volume) → master (deafen)
 // → output, and feeds an analyser for the speaking ring. Your own microphone only feeds an analyser.
@@ -377,7 +391,16 @@ function connect(k: Key) {
     notify()
   }
   if (!watchdogs.has(k))
-    watchdogs.set(k, createWatchdog(state.me, k, { restart: () => serial(() => restart(k)), rebuild: () => (log(`rebuilding the connection to ${who(k)}`), serial(() => offer(k))) }))
+    watchdogs.set(
+      k,
+      createWatchdog(
+        state.me,
+        k,
+        { restart: () => serial(() => restart(k)), rebuild: () => (log(`rebuilding the connection to ${who(k)}`), serial(() => offer(k))) },
+        undefined,
+        { flowing: () => flowing(k), restartAfter: () => restartAfterFor(pingSummary(pingReadings.get(k) ?? [])?.ms) },
+      ),
+    )
   pc.onconnectionstatechange = async () => {
     if (peers.get(k) !== peer) return // a replaced connection
     log(`connection to ${who(k)}: ${pc.connectionState}`)
@@ -477,6 +500,7 @@ async function applyLevel(k: Key) {
   if (screen && s.screen) await setEncoding(s.screen.sender, encodingFor(want('screen', k), screen.q, streamKbps(screen.src, screen.q)))
   if (screen?.sound && s.sound) await setEncoding(s.sound.sender, { active: want('screen', k) !== 'off', maxBitrate: SOUND_KBPS * 1000 })
   if (camera && s.camera) await setEncoding(s.camera.sender, encodingFor(want('camera', k), camera.q, streamKbps(camera.src, camera.q)))
+  for (const t of [s.screen, s.camera]) if (t) await setEncoding(t.sender, LOW)
 }
 
 const describeOut = (o: Out<Source & { name: string }>) => ({
@@ -677,16 +701,45 @@ async function checkLimits() {
 }
 
 // Round trip, loss and jitter of what we send, as the other side reports it; the route's round trip until it has.
-async function sampleLink(pc: RTCPeerConnection): Promise<Sample | null> {
+// fresh: a round trip measured since the last sample, if any. The connection's own checks (STUN, every few seconds
+// whether or not anyone talks) come first; the voice reports (RTCP) go quiet in silence, so they only fill in.
+async function sampleLink(k: Key, pc: RTCPeerConnection): Promise<{ s: Sample | null; fresh: number | null }> {
   const stats = await pc.getStats()
   let s: Sample | null = null
   let pair: any
+  let rtcp: any
   stats.forEach((r) => {
-    if (r.type === 'remote-inbound-rtp' && r.kind === 'audio' && r.roundTripTime !== undefined)
+    if (r.type === 'remote-inbound-rtp' && r.kind === 'audio' && r.roundTripTime !== undefined) {
+      rtcp = r
       s = { rtt: r.roundTripTime * 1000, loss: r.fractionLost ?? 0, jitter: (r.jitter ?? 0) * 1000 }
+    }
     if (r.type === 'transport') pair = stats.get(r.selectedCandidatePairId)
   })
-  return s ?? (pair?.currentRoundTripTime !== undefined ? { rtt: pair.currentRoundTripTime * 1000 } : null)
+  const was = counters.get(k)
+  const now = { stun: pair?.responsesReceived ?? 0, stunTotal: pair?.totalRoundTripTime ?? 0, rtcp: rtcp?.roundTripTimeMeasurements ?? 0, rtcpTotal: rtcp?.totalRoundTripTime ?? 0 }
+  counters.set(k, now)
+  // After a new route (ICE restart) the counters start again from zero, which reads as nothing new this time.
+  const delta = (n: number, total: number, n0 = 0, total0 = 0) => (n > n0 ? ((total - total0) / (n - n0)) * 1000 : null)
+  const fresh = delta(now.stun, now.stunTotal, was?.stun, was?.stunTotal) ?? delta(now.rtcp, now.rtcpTotal, was?.rtcp, was?.rtcpTotal)
+  return { s: s ?? (pair?.currentRoundTripTime !== undefined ? { rtt: pair.currentRoundTripTime * 1000 } : null), fresh: fresh !== null && fresh >= 0 ? fresh : null }
+}
+
+// Whether their voice still arrives (for the watchdog), and how much the player keeps in hand for it (jitterTarget).
+async function hearing(k: Key, pc: RTCPeerConnection, at: number) {
+  const voice = slotsOf(pc).voice?.receiver as (RTCRtpReceiver & { jitterBufferTarget?: number | null }) | undefined
+  if (!voice || pc.signalingState === 'closed') return
+  let n = 0
+  let jitter = 0
+  ;(await voice.getStats()).forEach((r) => {
+    if (r.type === 'inbound-rtp') (n = r.packetsReceived ?? 0), (jitter = (r.jitter ?? 0) * 1000)
+  })
+  const was = heardFrom.get(k)
+  if (!was || n !== was.n) heardFrom.set(k, { n, at: n > (was?.n ?? 0) ? at : (was?.at ?? 0) })
+  const target = jitterTarget(jitter)
+  if ('jitterBufferTarget' in voice && voice.jitterBufferTarget !== target) {
+    if (target !== null || voice.jitterBufferTarget) log(`holding ${target ?? 0} ms of ${who(k)}'s voice (jitter ${Math.round(jitter)} ms)`)
+    voice.jitterBufferTarget = target
+  }
 }
 
 // Samples every connected link; with nobody connected, the network itself, so the sign works when alone in a call.
@@ -695,20 +748,25 @@ async function measure() {
   measuring = true
   try {
     const live = [...peers].filter(([, p]) => p.pc.connectionState === 'connected')
-    for (const k of samples.keys()) if (k && !live.some(([l]) => l === k)) samples.delete(k)
+    for (const m of [samples, pingReadings, counters]) for (const k of m.keys()) if (k && !live.some(([l]) => l === k)) m.delete(k)
+    const at = Date.now()
+    for (const [k, p] of peers) await hearing(k, p.pc, at).catch(() => {}) // every connection, connected or not
     if (live.length) {
       samples.delete('')
+      pingReadings.delete('')
       for (const [k, p] of live) {
-        const s = await sampleLink(p.pc).catch(() => null)
+        const { s, fresh } = await sampleLink(k, p.pc).catch(() => ({ s: null, fresh: null }))
         if (s) samples.set(k, remember(samples.get(k), s))
+        if (fresh !== null) pingReadings.set(k, rememberPing(pingReadings.get(k), { ms: fresh, at }))
       }
     } else {
       const ms: number | null = await window.api.call('ping').catch(() => null)
       samples.set('', remember(samples.get(''), { rtt: ms ?? Infinity }))
+      pingReadings.set('', rememberPing(pingReadings.get(''), { ms: ms ?? Infinity, at }))
     }
     await checkLimits()
     const now = signal()
-    if (now.grade !== lastGrade) log(`connection ${now.grade ?? 'unknown'}; ping ${now.pings.map((p) => `${p.k ? who(p.k) : 'network'} ${Number.isFinite(p.ms) ? Math.round(p.ms) + ' ms' : 'none'}`).join(', ')}`)
+    if (now.grade !== lastGrade) log(`connection ${now.grade ?? 'unknown'}; ping ${now.pings.map((p) => `${p.k ? who(p.k) : 'network'} ${Number.isFinite(p.ms) ? `${p.ms} ms ±${p.spread} (${p.steadiness})` : 'none'}`).join(', ')}`)
     lastGrade = now.grade
   } finally {
     measuring = false
@@ -716,11 +774,11 @@ async function measure() {
   if (conv) notify()
 }
 
-// For the Voice Connected sign: the weakest of your links (or the network while alone), and the latest ping of each.
-// A link that is reconnecting counts as poor.
+// For the Voice Connected sign: the weakest of your links (or the network while alone), and each one's ping over
+// the last minute with how steady it is. A link that is reconnecting counts as poor.
 export function signal() {
   const reconnecting = [...peers.values()].some((p) => ['disconnected', 'failed'].includes(p.pc.connectionState))
-  const pings = [...samples].map(([k, s]) => ({ k, ms: s[s.length - 1].rtt }))
+  const pings = [...pingReadings].flatMap(([k, list]) => ((p) => (p ? [{ k, ...p }] : []))(pingSummary(list)))
   return { grade: reconnecting ? ('poor' as const) : worst([...samples.values()].map(grade)), pings }
 }
 
@@ -834,6 +892,9 @@ export function leave() {
   speaking.clear()
   ctx?.suspend()
   samples.clear()
+  pingReadings.clear()
+  counters.clear()
+  heardFrom.clear()
   shares.clear()
   cameras.clear()
   wants.clear()
