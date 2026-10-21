@@ -48,9 +48,6 @@ declare global {
       saveFile(h: string, name: string): Promise<string | null>
       showFile(h: string): Promise<void>
       pathOf(file: File): string
-      gifProviders(): Promise<import('../shared/gifs').GifProvider[]>
-      searchGifs(p: import('../shared/gifs').GifProvider, q: string): Promise<import('../shared/gifs').Gif[]>
-      gifFile(p: import('../shared/gifs').GifProvider, g: import('../shared/gifs').Gif): Promise<import('../shared/media').FileRef>
       diagnostics(): Promise<{ meta: import('../shared/reports').Meta; events: import('../shared/reports').Diag[] }>
     }
   }

@@ -58,14 +58,10 @@ jobs:
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
           echo "Releasing $VERSION"
 
-      # GIF search keys (repository secrets; see electron.vite.config.ts). Without them the GIF button is not shown.
       - name: Build
         run: |
           npx electron-vite build
           npx electron-builder --win --publish never
-        env:
-          GIPHY_KEY: ${{ secrets.GIPHY_KEY }}
-          KLIPY_KEY: ${{ secrets.KLIPY_KEY }}
 
       # One step publishes the installer with its update files (latest.yml, which installed copies read, and the
       # blockmap for small updates). electron-builder's own publishing uploads them in parallel, and each upload

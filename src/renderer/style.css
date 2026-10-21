@@ -1450,51 +1450,6 @@ details[open] > summary::before {
   width: 80px;
   accent-color: var(--accent);
 }
-.gif-button {
-  align-self: flex-end;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-dialog.gif-picker {
-  width: min(520px, calc(100vw - 32px));
-}
-.gif-picker input[type='search'] {
-  width: 100%;
-  margin: 8px 0;
-}
-.gif-tabs {
-  display: flex;
-  gap: 6px;
-}
-.gif-tabs .on {
-  border-color: var(--accent);
-  color: var(--silver);
-}
-.gif-grid {
-  display: grid;
-  grid-template-columns: repeat(3, 1fr);
-  gap: 6px;
-  max-height: 50vh;
-  overflow-y: auto;
-}
-.gif-cell {
-  padding: 0;
-  border: none;
-  border-radius: var(--r-md);
-  background: var(--obsidian-3);
-  overflow: hidden;
-}
-.gif-cell img {
-  display: block;
-  width: 100%;
-  height: 110px;
-  object-fit: cover;
-}
-.gif-footer {
-  margin-top: 8px;
-  font-size: 11px;
-}
 dialog.image-view {
   max-width: calc(100vw - 48px);
 }

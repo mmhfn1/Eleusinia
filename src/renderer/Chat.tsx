@@ -1,6 +1,5 @@
 // A conversation's messages: history, live updates, delivery marks and the message box.
 import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import type { Gif, GifProvider } from '../shared/gifs'
 import { type FileRef, MAX_FILES, inlineKind, sizeLabel } from '../shared/media'
 import { type FileState, type Msg, type State, MAX_TEXT, stack } from '../shared/protocol'
 import * as call from './call'
@@ -36,9 +35,6 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   const [files, setFiles] = useState<Record<string, FileState>>({})
   const asked = useRef(new Set<string>())
   const [viewing, setViewing] = useState<FileRef | null>(null)
-  const [gifs, setGifs] = useState<GifProvider[]>([])
-  const [pickingGif, setPickingGif] = useState(false)
-  useEffect(() => void api.gifProviders().then(setGifs), [])
 
   useEffect(() => {
     api.call('history', conv, limit).then((h) => {
@@ -237,22 +233,6 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
         </Dialog>
       )}
 
-      {pickingGif && (
-        <GifPicker
-          providers={gifs}
-          close={() => setPickingGif(false)}
-          pick={(p, g) => {
-            setPickingGif(false)
-            setPreparing((n) => n + 1)
-            run(
-              api
-                .gifFile(p, g)
-                .then((ref) => api.call('send', conv, '', [ref]))
-                .finally(() => setPreparing((n) => n - 1)),
-            )
-          }}
-        />
-      )}
       {viewing && (
         <Dialog label={viewing.n} close={() => setViewing(null)} className="image-view">
           <img src={`eleusinia-file://${viewing.h}`} alt={viewing.n} />
@@ -318,11 +298,6 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
         >
           <Icon name="attach" size={18} />
         </button>
-        {gifs.length > 0 && (
-          <button type="button" className="icon-button gif-button" aria-label="Send a GIF" title="Send a GIF" onClick={() => setPickingGif(true)}>
-            GIF
-          </button>
-        )}
         <textarea
           ref={box}
           name="text"
@@ -345,53 +320,6 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
         </button>
       </form>
     </main>
-  )
-}
-
-// Searching GIPHY or KLIPY, with what is trending (or featured) before anything is typed. Their terms ask for the
-// placeholder text and the "Powered by" mark.
-function GifPicker({ providers, close, pick }: { providers: GifProvider[]; close: () => void; pick: (p: GifProvider, g: Gif) => void }) {
-  const [p, setP] = useState(providers[0])
-  const [q, setQ] = useState('')
-  const [found, setFound] = useState<Gif[] | null>(null)
-  const [err, setErr] = useState('')
-  const brand = p === 'giphy' ? 'GIPHY' : 'KLIPY'
-  useEffect(() => {
-    let live = true
-    setErr('')
-    const t = setTimeout(
-      () =>
-        api
-          .searchGifs(p, q)
-          .then((g) => live && setFound(g))
-          .catch((e) => live && (setFound([]), setErr(String(e.message ?? e).replace(/^.*Error: /, '')))),
-      q ? 350 : 0,
-    )
-    return () => ((live = false), clearTimeout(t))
-  }, [p, q])
-  return (
-    <Dialog label="Send a GIF" close={close} className="gif-picker">
-      {providers.length > 1 && (
-        <div className="gif-tabs" role="tablist">
-          {providers.map((x) => (
-            <button key={x} role="tab" aria-selected={x === p} className={`button subtle ${x === p ? 'on' : ''}`} onClick={() => (setP(x), setFound(null))}>
-              {x === 'giphy' ? 'GIPHY' : 'KLIPY'}
-            </button>
-          ))}
-        </div>
-      )}
-      <input type="search" aria-label={`Search ${brand}`} placeholder={`Search ${brand}`} value={q} onChange={(e) => setQ(e.target.value)} autoFocus />
-      <div className="gif-grid">
-        {found?.map((g) => (
-          <button key={g.id} className="gif-cell" title={g.title} aria-label={g.title || 'GIF'} onClick={() => pick(p, g)}>
-            <img src={g.preview.url} alt="" width={g.preview.w} height={g.preview.h} loading="lazy" />
-          </button>
-        ))}
-        {found && !found.length && <p className="quiet">{err || 'No GIFs found.'}</p>}
-        {!found && <p className="quiet">Loading…</p>}
-      </div>
-      <p className="gif-footer quiet">Powered by {brand}. Searches go to {brand}; whoever you send a GIF to gets it from you, not from them.</p>
-    </Dialog>
   )
 }
 
