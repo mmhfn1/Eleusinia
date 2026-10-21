@@ -16,4 +16,4 @@ export type Run = (p: Promise<unknown>) => Promise<void>
 // What every screen needs to show people: their profile, their name, and their name as a button opening their card.
 // show opens a person's profile card, the same one wherever they are clicked.
 export type People = { prof: (k: Key) => Profile; name: (k: Key) => string; user: (k: Key) => ReactNode; isOnline: (k: Key) => boolean; show: (k: Key) => void }
-export type Modal = { kind: 'card'; k: Key } | { kind: 'settings' } | { kind: 'group' } | { kind: 'delete' } | null
+export type Modal = { kind: 'card'; k: Key } | { kind: 'settings' } | { kind: 'group' } | { kind: 'delete' } | { kind: 'menu' } | { kind: 'report' } | null

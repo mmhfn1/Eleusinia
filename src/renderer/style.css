@@ -1,35 +1,36 @@
-/* Eleusinia: an Awoken chamber deep in a fractured throne.
-   Colour roles: void/abyss/obsidian = surfaces (darkest outside, lighter inward), silver = text and identity,
-   mist = secondary text, Awoken blue = the one interactive accent (selection, focus, primary actions),
-   cyan = presence and live states, violet = rare depth in atmosphere, gold = not yet as chosen (messages still to send, calls reconnecting, a device standing in). */
+/* Eleusinia, Ink and fog: the black and white of the emblem, with the Shattered Throne's fog as the only light.
+   The colours were sampled from the reference art: blue-black shadows, fog and stone (#425a6b), cyan-grey haze (#b5c3c6).
+   Colour roles: void/abyss/obsidian = surfaces (darkest outside, lighter inward), silver = text, identity and the one
+   interactive accent (selection, focus, primary actions: white on black, like the emblem), mist = secondary text,
+   cyan-grey = presence and live states, gold = not yet as chosen (messages still to send, calls reconnecting, a device standing in). */
 :root {
   color-scheme: dark;
 
-  --void: #080c12;
-  --abyss: #0b1119;
-  --abyss-2: #0f1722;
-  --obsidian: #131c28;
-  --obsidian-2: #162130;
-  --obsidian-3: #1c2939;
-  --obsidian-4: #243345;
-  --line: #203043;
-  --line-strong: #34475f;
-  --fog: #7f97b3; /* the haze colour of the throne world, only ever used faintly */
+  --void: #050608;
+  --abyss: #07080a;
+  --abyss-2: #0a0c0f;
+  --obsidian: #0d1013;
+  --obsidian-2: #111418;
+  --obsidian-3: #171b20;
+  --obsidian-4: #20252b;
+  --line: #1b1f24;
+  --line-strong: #2c3238;
+  --fog: #425a6b; /* the throne's fog, sampled; only ever used faintly */
   --stone: #596273;
 
-  --silver: #d9e0ec;
-  --silver-2: #bcc6d6;
-  --mist: #a6b6ca;
-  --mist-2: #8290a6;
+  --silver: #f4f5f6;
+  --silver-2: #d4d8dc;
+  --mist: #b4b9bf;
+  --mist-2: #9a9fa5;
 
-  --accent: #91b9f0;
-  --accent-strong: #6e9ae0;
-  --accent-deep: #27416b;
-  --accent-veil: rgb(145 185 240 / 0.08);
-  --accent-glow: rgb(145 185 240 / 0.28);
-  --cyan: #82d6e5;
+  --accent: #f4f5f6;
+  --accent-strong: #ffffff;
+  --accent-deep: #f4f5f6;
+  --accent-veil: rgb(244 245 246 / 0.07);
+  --accent-glow: rgb(220 226 230 / 0.30);
+  --cyan: #b5c3c6;
   --violet: #a998d6;
-  --gold: #c5b08a;
+  --gold: #d8c39c;
 
   --danger: #ec8a99;
   /* Call quality only: the one place traffic-light colours are wanted, so they read at a glance. */
@@ -43,8 +44,8 @@
   --shadow-2: 0 16px 40px rgb(0 0 0 / 0.5);
   --shadow-3: 0 30px 80px rgb(0 0 0 / 0.55);
 
-  --display: 'Zen Kaku Gothic New', 'Inter Variable', 'Segoe UI', system-ui, sans-serif; /* wordmark and titles; no italic */
-  --sans: 'Inter Variable', 'Inter', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', sans-serif;
+  --display: 'Bricolage Grotesque Variable', 'Instrument Sans Variable', 'Segoe UI', system-ui, sans-serif; /* wordmark and titles */
+  --sans: 'Instrument Sans Variable', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', sans-serif;
   --mono: 'Cascadia Mono', ui-monospace, 'SF Mono', Consolas, monospace;
 
   --r-sm: 4px;
@@ -71,10 +72,7 @@ body,
 body {
   margin: 0;
   color: var(--silver);
-  background:
-    radial-gradient(1100px 620px at 12% -12%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 62%),
-    radial-gradient(900px 520px at 105% 110%, color-mix(in srgb, var(--accent) 8%, transparent), transparent 60%),
-    linear-gradient(180deg, var(--abyss-2), var(--abyss));
+  background: radial-gradient(90% 60% at 50% -10%, rgb(66 90 107 / 0.5), transparent 62%), var(--void);
   -webkit-font-smoothing: antialiased;
 }
 h1,
@@ -190,7 +188,9 @@ input[type='checkbox']::before {
   height: 14px;
   border-radius: 50%;
   background: var(--mist);
-  transition: transform var(--t-fast);
+  transition:
+    transform var(--t) var(--ease),
+    background var(--t-fast);
 }
 input[type='checkbox']:checked {
   border-color: var(--accent-strong);
@@ -198,7 +198,7 @@ input[type='checkbox']:checked {
 }
 input[type='checkbox']:checked::before {
   transform: translateX(14px);
-  background: var(--silver);
+  background: var(--void); /* a dark knob on the white track */
 }
 input[type='checkbox']:focus-visible {
   outline: 2px solid var(--accent);
@@ -2201,4 +2201,434 @@ hr {
   display: flex;
   align-items: center;
   justify-content: space-between;
+}
+
+/* ---------- Ink and fog ----------
+   The black and white of the emblem over the throne's fog: surfaces are near-black and see-through, the one light is
+   cold white, and everything you press answers with a short ease. Placed last so it settles the look of what is above. */
+.workspace,
+.threshold {
+  background: radial-gradient(90% 55% at 50% -12%, rgb(66 90 107 / 0.42), transparent 62%), transparent;
+}
+.workspace::before,
+.threshold::before {
+  display: none; /* no drawn light shafts: the fog gradient alone */
+}
+.workspace::after,
+.threshold::after {
+  background: linear-gradient(0deg, rgb(66 90 107 / 0.08), transparent 30%);
+}
+aside {
+  background: rgb(10 12 15 / 0.72);
+}
+.rail {
+  background: rgb(3 4 6 / 0.9);
+}
+.voice,
+.voice.live {
+  background: rgb(10 12 15 / 0.72);
+}
+
+/* The emblem: white on a black disc inside its ring, like the logo, and a button that opens the menu. */
+.rail-mark {
+  width: 48px;
+  height: 48px;
+  padding: 0;
+  border: 1.5px solid color-mix(in srgb, var(--silver) 55%, transparent);
+  border-radius: 50%;
+  background: var(--void);
+  cursor: pointer;
+  transition:
+    border-color var(--t-fast),
+    box-shadow var(--t);
+}
+.rail-mark:hover,
+.rail-mark:focus-visible {
+  border-color: var(--silver);
+  box-shadow: 0 0 22px var(--accent-glow);
+}
+.rail-mark .emblem {
+  background: var(--silver);
+  filter: none;
+}
+.emblem.glow {
+  background: var(--silver);
+  filter: drop-shadow(0 0 30px rgb(181 195 198 / 0.35));
+}
+
+/* Buttons: white on black for the main action, quiet outlines for the rest. */
+.button {
+  border-radius: 999px;
+  background: transparent;
+  border-color: color-mix(in srgb, var(--silver) 20%, transparent);
+}
+.button:hover:not(:disabled) {
+  background: var(--accent-veil);
+  border-color: color-mix(in srgb, var(--silver) 40%, transparent);
+}
+.button.primary {
+  border-color: var(--silver);
+  background: var(--silver);
+  color: var(--void);
+  font-weight: 600;
+  box-shadow: none;
+}
+.button.primary:hover:not(:disabled) {
+  background: #ffffff;
+  box-shadow: 0 0 20px -4px var(--accent-glow);
+}
+.button.danger {
+  background: rgb(110 36 51 / 0.6);
+  color: #f5c2ca;
+}
+.button.active {
+  border-color: var(--silver);
+  background: var(--accent-veil);
+}
+.button:active:not(:disabled),
+.round:active,
+.rail-item:active {
+  transform: scale(0.97);
+}
+input,
+select,
+textarea {
+  transition:
+    border-color var(--t-fast),
+    box-shadow var(--t-fast);
+}
+kbd {
+  padding: 2px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  color: var(--mist-2);
+  font: 12px var(--sans);
+}
+
+/* Round, icon-only buttons: call controls, row actions, the ringing bar. */
+.round {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--silver) 22%, transparent);
+  border-radius: 50%;
+  background: rgb(5 6 8 / 0.6);
+  color: var(--silver);
+  transition:
+    background var(--t-fast),
+    border-color var(--t-fast),
+    color var(--t-fast),
+    transform var(--t-fast) var(--ease);
+}
+.round:hover {
+  background: rgb(244 245 246 / 0.1);
+  transform: translateY(-1px);
+}
+.round.on {
+  border-color: color-mix(in srgb, var(--gold) 70%, transparent);
+  color: var(--gold);
+}
+.round.primary {
+  border-color: var(--silver);
+  background: var(--silver);
+  color: var(--void);
+}
+.round.leave {
+  border-color: color-mix(in srgb, var(--danger) 55%, transparent);
+  background: #6e2433;
+  color: #f5c2ca;
+}
+.call-controls {
+  flex-wrap: nowrap;
+  justify-content: center;
+  gap: 10px;
+}
+.call-controls .leave {
+  margin-left: 6px;
+}
+.call-controls .leave .icon {
+  rotate: 135deg;
+}
+
+/* Home: the whole width. Friends on the left, what is happening now on the right; sections sit on the background. */
+.page-body {
+  max-width: none;
+  padding: 20px 40px 36px;
+}
+.search-box input {
+  height: 48px !important;
+  border-radius: 12px !important;
+}
+.home-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 28px;
+  align-items: flex-start;
+}
+.home-list {
+  flex: 999 1 520px;
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+}
+.home-side {
+  flex: 1 1 300px;
+  max-width: 400px;
+  display: grid;
+  gap: 18px;
+}
+.home-list > section,
+.home-side > section {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.home-list > section > h2,
+.home-side > section > h2 {
+  padding: 0 10px 6px;
+}
+.friend-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: 10px;
+  transition: background var(--t-fast);
+}
+.friend-row:hover {
+  background: rgb(244 245 246 / 0.05);
+}
+.friend-row .row-button:hover:not(:disabled) {
+  background: none;
+}
+.row-where {
+  flex: 1;
+  color: var(--cyan);
+  font-size: 13px;
+}
+.row-actions {
+  display: flex;
+  gap: 6px;
+  padding-right: 10px;
+  opacity: 0.45;
+  transition: opacity var(--t-fast);
+}
+.row-actions .round {
+  width: 36px;
+  height: 36px;
+}
+.friend-row:hover .row-actions,
+.friend-row:focus-within .row-actions {
+  opacity: 1;
+}
+.requests {
+  padding: 16px 0 0;
+  border: none;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: none;
+}
+.live-call {
+  padding: 18px;
+  border: 1px solid color-mix(in srgb, var(--silver) 22%, transparent);
+  border-radius: 16px;
+  background: radial-gradient(240px 140px at 50% -20%, rgb(220 226 230 / 0.18), transparent 70%), rgb(5 6 8 / 0.7);
+}
+.live-call > h2 {
+  padding: 0 0 10px !important;
+}
+.live-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.live-row .row-sub {
+  flex: 1;
+}
+.live-faces {
+  display: flex;
+}
+.live-faces .avatar + .avatar {
+  margin-left: -10px;
+}
+.result.away .avatar {
+  opacity: 0.65;
+}
+.results {
+  border-color: var(--line);
+  background: rgb(10 12 15 / 0.92);
+}
+
+/* The call: everyone under one pool of light above the chat, the speaker lifted and breathing. */
+.oculus {
+  display: flex;
+  justify-content: center;
+  align-items: flex-end;
+  gap: 48px;
+  min-height: 220px;
+  padding: 28px 20px 22px;
+  border-bottom: 1px solid var(--line);
+  background: radial-gradient(420px 260px at 50% -10%, rgb(220 226 230 / 0.26), rgb(66 90 107 / 0.1) 45%, transparent 75%);
+  animation: settle var(--t) var(--ease);
+}
+.oculus-person {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  margin: 0;
+  transition: transform 320ms var(--ease);
+}
+.oculus-person figcaption {
+  display: grid;
+  justify-items: center;
+}
+.oculus-person .row-sub.held {
+  color: var(--gold);
+}
+.oculus-person .row-sub.live {
+  color: var(--cyan);
+}
+.oculus-person.speaking {
+  transform: translateY(-14px);
+}
+.oculus-person .avatar > img,
+.oculus-person .avatar > svg {
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--silver) 35%, transparent);
+  transition: box-shadow 320ms var(--ease);
+}
+.oculus-person.speaking .avatar > img,
+.oculus-person.speaking .avatar > svg {
+  animation: breathe 2.4s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%,
+  100% {
+    box-shadow:
+      0 0 0 2.5px var(--silver),
+      0 0 0 7px rgb(244 245 246 / 0.08),
+      0 0 34px rgb(220 226 230 / 0.35);
+  }
+  50% {
+    box-shadow:
+      0 0 0 2.5px var(--silver),
+      0 0 0 11px rgb(244 245 246 / 0.12),
+      0 0 54px rgb(220 226 230 / 0.55);
+  }
+}
+.caller.speaking .avatar img,
+.caller.speaking .avatar svg,
+.member.speaking .avatar img,
+.member.speaking .avatar svg {
+  box-shadow:
+    0 0 0 2px var(--silver),
+    0 0 14px var(--accent-glow);
+}
+
+/* A direct call ringing, until joined or silenced. */
+.ring-bar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 14px 20px 0;
+  padding: 12px 16px;
+  border: 1px solid color-mix(in srgb, var(--silver) 22%, transparent);
+  border-radius: 16px;
+  background: radial-gradient(300px 120px at 10% 0%, rgb(220 226 230 / 0.14), transparent 70%), rgb(10 12 15 / 0.85);
+  animation: settle var(--t) var(--ease);
+}
+.ring-bar.ringing > .avatar {
+  border-radius: 50%;
+  animation: ring 1.6s ease-in-out infinite;
+}
+@keyframes ring {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgb(181 195 198 / 0.5);
+  }
+  60% {
+    box-shadow: 0 0 0 12px rgb(181 195 198 / 0);
+  }
+}
+
+/* The emblem's menu: a small panel at the top left, under the emblem. */
+dialog.menu-dialog {
+  margin: 14px auto auto 84px;
+  width: 340px;
+}
+dialog.menu-dialog .dialog-body {
+  width: 340px;
+  padding: 10px;
+  gap: 0;
+}
+dialog.menu-dialog .dialog-close {
+  display: none;
+}
+.menu {
+  display: grid;
+  gap: 2px;
+}
+.menu .field input {
+  width: 100%;
+  height: 40px;
+  padding-right: 64px !important;
+}
+.menu .field kbd {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  translate: 0 -50%;
+}
+.menu hr {
+  width: 100%;
+  margin: 6px 0;
+  border: none;
+  border-top: 1px solid var(--line);
+}
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  color: var(--silver);
+  text-align: left;
+  transition: background var(--t-fast);
+}
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: rgb(244 245 246 / 0.08);
+}
+.menu-item .row-title {
+  flex: 1;
+}
+.menu-item.danger {
+  color: var(--danger);
+}
+.menu-none {
+  padding: 8px 10px;
+}
+
+.identity dd.plain {
+  font-family: var(--sans);
+  color: var(--silver-2);
+}
+.chamber-id.person {
+  width: 100%;
+  padding: 10px 8px 12px;
+  border: none;
+  border-radius: 12px;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  transition: background var(--t-fast);
+}
+.chamber-id.person:hover,
+.chamber-id.person:focus-visible {
+  background: rgb(244 245 246 / 0.05);
 }

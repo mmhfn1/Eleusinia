@@ -205,6 +205,16 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
     // A small record signed by this key (under 1 KB), kept by the DHT for up to 48 hours: anyone can read it by key
     // without a link. Each publish needs a higher seq than the last.
     publish: (value: Buffer, seq: number) => dht.mutablePut(keyPair, value, { seq }).then(() => true, () => false) as Promise<boolean>,
+    // A record under a key pair made from `seed`, which anyone who knows the seed can write too (see shared/idcard.ts).
+    putShared: (seed: Buffer, value: Buffer, seq: number) => dht.mutablePut(DHT.keyPair(seed), value, { seq }).then(() => true, () => false) as Promise<boolean>,
+    async getShared(seed: Buffer): Promise<{ value: Buffer; seq: number } | null> {
+      try {
+        const r = await dht.mutableGet(DHT.keyPair(seed).publicKey, { latest: true })
+        return r ? { value: r.value, seq: r.seq } : null
+      } catch {
+        return null
+      }
+    },
     async fetch(key: Key): Promise<Buffer | null> {
       try {
         return (await dht.mutableGet(Buffer.from(key, 'hex'), { latest: false }))?.value ?? null

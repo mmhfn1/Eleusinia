@@ -5,7 +5,7 @@ import { type Key, type State } from '../shared/protocol'
 import type { Steadiness } from '../shared/quality'
 import { type Quality, SOUND_KBPS, type Verdict, choices, defaultQuality, fitQuality, heightLabel, streamKbps } from '../shared/video'
 import * as call from './call'
-import { Dialog, Icon } from './ui'
+import { Avatar, Dialog, Icon } from './ui'
 import type { SourceKind } from '../shared/sources'
 import { api } from './common'
 
@@ -38,6 +38,55 @@ export function VoiceSignal({ name }: { name: (k: Key) => string }) {
         </span>
       </span>
       <span className="signal-text">Voice Connected</span>
+    </div>
+  )
+}
+
+// The call itself, above the chat while nobody shares video: everyone in it under one pool of light, whoever is talking
+// lifted and glowing. It gives way to the stage once a screen or camera is on.
+export function Oculus({ st, name }: { st: State; name: (k: Key) => string }) {
+  if (call.shares.size || call.cameras.size || call.sharing() || call.filming()) return null
+  const people = [st.me, ...call.peers.keys()]
+  const prof = (k: Key) => (k === st.me ? st.profile : st.profiles[k])
+  const state = (k: Key) => {
+    const v = k === st.me ? { muted: call.muted, deafened: call.deafened } : call.voices.get(k)
+    return v?.deafened ? 'Deafened' : v?.muted ? 'Muted' : call.speaking.has(k) ? 'Talking' : k === st.me ? '' : STATE_WORDS[call.peers.get(k)?.pc.connectionState ?? ''] ?? ''
+  }
+  return (
+    <section className="oculus" aria-label="People in the call">
+      {people.map((k) => (
+        <figure key={k} className={`oculus-person ${call.speaking.has(k) ? 'speaking' : ''}`}>
+          <Avatar k={k} p={prof(k) ?? { handle: '', name: '', about: '', avatar: '' }} size={call.speaking.has(k) ? 96 : 80} />
+          <figcaption>
+            <span className="row-title">{k === st.me ? 'You' : name(k)}</span>
+            <span className={`row-sub ${state(k) === 'Muted' || state(k) === 'Deafened' ? 'held' : state(k) === 'Talking' ? 'live' : ''}`}>{state(k)}</span>
+          </figcaption>
+        </figure>
+      ))}
+    </section>
+  )
+}
+
+// A direct call you have not joined: it rings for up to 40 s (jingles.ts), and stays here to join for as long as it lasts.
+export function RingBar({ conv, who, st, name, join }: { conv: string; who: Key; st: State; name: (k: Key) => string; join: (muted: boolean) => void }) {
+  const [quiet, setQuiet] = useState(false)
+  return (
+    <div className={`ring-bar ${quiet ? '' : 'ringing'}`} role="status">
+      <Avatar k={who} p={st.profiles[who] ?? { handle: '', name: '', about: '', avatar: '' }} size={44} />
+      <span className="row-text">
+        <span className="row-title">{name(who)} is calling you</span>
+      </span>
+      <button className="round" aria-label="Join with your microphone muted" title="Join muted" onClick={() => join(true)}>
+        <Icon name="micOff" size={18} />
+      </button>
+      <button className="round primary" aria-label="Join the call" title="Join" onClick={() => join(false)}>
+        <Icon name="phone" size={18} />
+      </button>
+      {!quiet && (
+        <button className="round leave" aria-label="Silence the ringing" title="Silence" onClick={() => (call.silence(conv), setQuiet(true))}>
+          <Icon name="close" size={18} />
+        </button>
+      )}
     </div>
   )
 }

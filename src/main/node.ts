@@ -23,6 +23,7 @@ import {
   type Version,
   versionOf,
 } from '../shared/protocol'
+import { idSeed, readClaims, signClaim, withClaim, writeClaims } from '../shared/idcard'
 import { type FileRef, validFiles } from '../shared/media'
 import { type Area, type Report, cleanReport } from '../shared/reports'
 import { mergeGroup, missing, signAdd, signLeft, signMsg, validGroup, verifyAdd, verifyMsg } from '../shared/sync'
@@ -551,6 +552,35 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       return null
     }
   }
+  // Our ID card (shared/idcard.ts), so search finds us by friend ID while we are offline. Written with our claim first
+  // every 6 hours (records last 48); friends' cards are kept alive the same way, so someone away for days stays
+  // findable while any of their friends is online.
+  let idPublished = 0
+  const withTimeout = <T>(p: Promise<T>, fallback: T) => Promise.race([p, new Promise<T>((r) => setTimeout(() => r(fallback), 6000))])
+  async function publishId() {
+    const h = s.profile.handle
+    if (!h) return
+    idPublished = Date.now()
+    const r = await withTimeout(net.getShared(idSeed(h)), null)
+    const claims = withClaim(signClaim(h, keyPair), r ? readClaims(h, r.value) : [])
+    await net.putShared(idSeed(h), writeClaims(claims), Math.max((r?.seq ?? 0) + 1, Math.floor(Date.now() / 1000)))
+  }
+  async function keepFriendsFindable() {
+    for (const k of Object.keys(s.friends)) {
+      const h = s.friends[k] === 'friend' ? s.profiles[k]?.handle : undefined
+      if (!h) continue
+      const r = await withTimeout(net.getShared(idSeed(h)), null)
+      const claims = r ? readClaims(h, r.value) : []
+      // Only rewritten with their own claim in it, and only with claims that verify: nothing they did not sign spreads.
+      if (r && claims.some((c) => c.key === k)) await net.putShared(idSeed(h), writeClaims(claims), r.seq + 1)
+    }
+  }
+  // Everyone whose signed claim to this friend ID is on the DHT, online or not.
+  async function idOwners(handle: string): Promise<Key[]> {
+    const r = await withTimeout(net.getShared(idSeed(handle)), null)
+    return r ? readClaims(handle, r.value).map((c) => c.key) : []
+  }
+
   let checking = false
   async function checkRequests() {
     if (checking || !s.profile.handle) return
@@ -581,6 +611,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const announce = async () => {
     if (!s.profile.handle) return
     if (Date.now() / 1000 - published > 6 * 3600) publishCard() // records last 48 hours
+    if (Date.now() - idPublished > 6 * 3600e3) publishId().then(keepFriendsFindable).catch(() => {})
     await Promise.all([...topicsOf(s.profile.handle), ...requesting().map(requestTopic)].map(net.announce))
   }
   const ready = Promise.all([applyRelay(), announce().then(checkRequests)])
@@ -608,16 +639,18 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       changed()
       publishCard()
       for (const k of net.keys()) if (wants(k)) hi(k)
-      if (fresh) await announce() // so the ID can be found as soon as setup finishes
+      if (fresh) await Promise.all([announce(), publishId().catch(() => {})]) // so the ID can be found as soon as setup finishes
     },
-    // People online matching what has been typed so far: an exact friend ID, or (from 4 letters) usernames
-    // starting with it. Nothing central keeps IDs unique, so one ID can match several people; the user picks.
+    // People matching what has been typed so far: an exact friend ID (online, or offline through their ID card), or
+    // (from 4 letters) usernames of people online starting with it. Nothing central keeps IDs unique, so one ID can
+    // match several people; the user picks.
     async findFriend(text: string) {
       const q = normHandle(String(text)).slice(0, 25)
       const user = q.split('#')[0]
       const exact = isHandle(q)
       if (!exact && (user.length < 4 || !isUsername(user))) return []
-      const keys = (await net.lookup(exact ? topic(q) : prefixTopic(user))).filter((k) => k !== me).slice(0, 8)
+      const [around, owners] = await Promise.all([net.lookup(exact ? topic(q) : prefixTopic(user)), exact ? idOwners(q) : Promise.resolve([] as Key[])])
+      const keys = [...new Set([...around, ...owners])].filter((k) => k !== me).slice(0, 8)
       // Their card over a link (with their picture) and their published record (without) are asked for together:
       // the record answers even when no link can be made.
       // linked: false means only the record answered so far (no picture); asking again may find the link made.
@@ -634,6 +667,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       )
       return exact ? found : found.filter((f) => f.profile.handle.startsWith(q))
     },
+    idOwners: (handle: string) => (isHandle(handle) ? idOwners(handle) : Promise.resolve([] as Key[])),
     // Sends a friend request to one exact person, or accepts theirs. `profile` labels the pending request.
     addFriend(key: Key, profile?: Profile) {
       if (!isKey(key) || key === me) throw new Error('That is not someone you can add')
