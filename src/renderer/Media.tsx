@@ -2,6 +2,7 @@
 import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { usable } from '../shared/devices'
 import { type Key, type State } from '../shared/protocol'
+import type { Steadiness } from '../shared/quality'
 import { type Quality, SOUND_KBPS, type Verdict, choices, defaultQuality, fitQuality, heightLabel, streamKbps } from '../shared/video'
 import * as call from './call'
 import { Dialog, Icon } from './ui'
@@ -9,6 +10,12 @@ import type { SourceKind } from '../shared/sources'
 import { api } from './common'
 
 const GRADE_WORDS = { good: 'good and stable', fair: 'degraded', poor: 'poor' }
+// How much the ping moved over the last minute, next to the number itself.
+const STEADY_WORDS: Record<Steadiness, (spread: number) => string> = {
+  steady: () => 'steady',
+  varies: (s) => `varies ±${s} ms`,
+  unstable: (s) => `unstable ±${s} ms`,
+}
 
 // Your voice connection while in a call: a wifi sign coloured by quality, with ping on hover or focus.
 export function VoiceSignal({ name }: { name: (k: Key) => string }) {
@@ -21,9 +28,10 @@ export function VoiceSignal({ name }: { name: (k: Key) => string }) {
         </button>
         <span role="tooltip" id="ping-tip" className="tip">
           {pings.length
-            ? pings.map(({ k, ms }) => (
+            ? pings.map(({ k, ms, spread, steadiness }) => (
                 <span key={k} className="ping-row">
-                  {k ? name(k) : 'Ping'}: <b>{Number.isFinite(ms) ? `${Math.round(ms)} ms` : 'no response'}</b>
+                  {k ? name(k) : 'Ping'}: <b>{Number.isFinite(ms) ? `${ms} ms` : 'no response'}</b>
+                  {Number.isFinite(ms) && <span className={`ping-steady ${steadiness}`}>{STEADY_WORDS[steadiness](spread)}</span>}
                 </span>
               ))
             : 'Measuring ping…'}

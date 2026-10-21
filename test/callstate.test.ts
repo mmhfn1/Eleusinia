@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { type IceCandidate, OFFLINE_GRACE, RESTART_AFTER, RESTART_GRACE, backoff, createCandidates, createWatchdog, offers } from '../src/shared/callstate'
+import { type IceCandidate, OFFLINE_GRACE, RESTART_AFTER, RESTART_GRACE, backoff, createCandidates, createWatchdog, offers, restartAfterFor } from '../src/shared/callstate'
 
 // Stands in for RTCPeerConnection: rejects candidates until a remote description is set, as the real one does.
 function fakePc() {
@@ -40,10 +40,10 @@ function fakeTimers() {
   }
 }
 
-function watch(me: string, them: string) {
+function watch(me: string, them: string, health = {}) {
   const timers = fakeTimers()
   const log: string[] = []
-  const w = createWatchdog(me, them, { restart: () => log.push('restart'), rebuild: () => log.push('rebuild') }, timers)
+  const w = createWatchdog(me, them, { restart: () => log.push('restart'), rebuild: () => log.push('rebuild') }, timers, health)
   return { w, timers, log }
 }
 
@@ -282,4 +282,37 @@ test('stopping cancels a pending offline drop', () => {
   timers.advance(60000)
   expect(dropped).toBe(0)
   expect(timers.pending).toBe(0)
+})
+
+test('while their audio still arrives, a disconnect is waited out: no restart, no rebuild, until it stops', () => {
+  let flowing = true
+  const { w, timers, log } = watch('aa', 'bb', { flowing: () => flowing })
+  w.update('connected')
+  w.update('disconnected')
+  timers.advance(60000)
+  expect(log).toEqual([])
+  flowing = false
+  timers.advance(RESTART_AFTER)
+  expect(log).toEqual(['restart'])
+  flowing = true // came back during the grace period: the rebuild waits too
+  timers.advance(RESTART_GRACE + 60000)
+  expect(log).toEqual(['restart'])
+  flowing = false
+  timers.advance(backoff(0))
+  expect(log).toEqual(['restart', 'rebuild'])
+})
+
+test('a long route waits longer before restarting', () => {
+  expect(restartAfterFor(undefined)).toBe(RESTART_AFTER)
+  expect(restartAfterFor(40)).toBe(RESTART_AFTER)
+  expect(restartAfterFor(250)).toBe(6000)
+  expect(restartAfterFor(900)).toBe(8000)
+  expect(restartAfterFor(Infinity)).toBe(RESTART_AFTER)
+  const { w, timers, log } = watch('aa', 'bb', { restartAfter: () => restartAfterFor(250) })
+  w.update('connected')
+  w.update('disconnected')
+  timers.advance(5999)
+  expect(log).toEqual([])
+  timers.advance(1)
+  expect(log).toEqual(['restart'])
 })

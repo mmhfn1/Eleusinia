@@ -389,10 +389,12 @@ try {
   await b.ev(press('Join call'))
   await until('A connected to Bob', () => a.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Bob')`))
   await until('A hears Bob join (its own join, then his)', async () => (await sounds(a)).filter((x) => x === 'join').length === 2, 10)
+  await until('A sends voice ahead of video when the link is short of room', () =>
+    a.ev(`(() => { const pc = window.__pcs.find((p) => p.connectionState === 'connected'); const e = pc?.getTransceivers().find((t) => t.receiver.track.kind === 'audio')?.sender.getParameters().encodings?.[0]; return e?.priority === 'high' && e?.networkPriority === 'high' })()`), 10)
   await until('B connected to Ann', () => b.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Ann')`))
   const both = await until('A sign now measures the link to Bob', async () => {
     const s = await sign(a)
-    return graded(s) && /Bob: \d+ ms/.test(s[2]) && s
+    return graded(s) && /Bob: \d+ ms(steady|(varies|unstable) ±\d+ ms)/.test(s[2]) && s
   }, 20)
   console.log('     ', JSON.stringify(both))
   await a.ev(`document.activeElement.blur()`)

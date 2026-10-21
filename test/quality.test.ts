@@ -1,15 +1,16 @@
 import { expect, test } from 'vitest'
 import { lightOpus } from '../src/shared/callstate'
 import { clampOffset, cropRect } from '../src/shared/crop'
-import { WINDOW, grade, remember, worst } from '../src/shared/quality'
+import { WINDOW, grade, jitterTarget, pingSummary, remember, rememberPing, worst } from '../src/shared/quality'
 
 const many = (n: number, s: object) => Array.from({ length: n }, () => ({ rtt: 40, ...s }))
 
 test('grades follow round trip, loss and jitter', () => {
   expect(grade([])).toBe(null)
   expect(grade(many(5, { rtt: 40 }))).toBe('good')
-  expect(grade(many(5, { rtt: 180 }))).toBe('fair')
-  expect(grade(many(5, { rtt: 320 }))).toBe('poor')
+  expect(grade(many(5, { rtt: 250 }))).toBe('good') // another continent, but even
+  expect(grade(many(5, { rtt: 320 }))).toBe('fair')
+  expect(grade(many(5, { rtt: 500 }))).toBe('poor')
   expect(grade(many(5, { loss: 0.03 }))).toBe('fair')
   expect(grade(many(5, { loss: 0.1 }))).toBe('poor')
   expect(grade(many(5, { jitter: 40 }))).toBe('fair')
@@ -61,4 +62,30 @@ test('a picture is cut from under the frame and can never leave an empty edge', 
   expect(r.size).toBe(100)
   expect(r.x + r.size).toBe(400)
   expect(r.y + r.size).toBe(200)
+})
+
+test('an even link keeps the player as it is; an uneven one holds twice its jitter, within limits', () => {
+  expect(jitterTarget(5)).toBe(null)
+  expect(jitterTarget(15)).toBe(40)
+  expect(jitterTarget(30)).toBe(60)
+  expect(jitterTarget(120)).toBe(150)
+})
+
+const readings = (ms: number[]) => ms.map((m, i) => ({ ms: m, at: i * 2000 }))
+
+test('the ping shown is the typical one, with how much it moves, judged against its size', () => {
+  expect(pingSummary([])).toBe(null)
+  expect(pingSummary(readings([20, 21, 19, 22, 20, 300]))).toEqual({ ms: 21, spread: 1, steadiness: 'steady' }) // one late reply
+  expect(pingSummary(readings([240, 255, 250, 262, 245, 250]))?.steadiness).toBe('steady') // far but even
+  expect(pingSummary(readings([20, 80, 30, 90, 25, 70, 35, 85]))?.steadiness).toBe('unstable')
+  expect(pingSummary(readings([180, 230, 200, 250, 190, 240]))?.steadiness).toBe('varies')
+  expect(pingSummary(readings([30, Infinity, 31, 30]))?.steadiness).not.toBe('steady') // a reply missing
+  expect(pingSummary(readings([Infinity, Infinity, 30]))).toEqual({ ms: Infinity, spread: 0, steadiness: 'unstable' })
+})
+
+test('ping readings older than a minute are forgotten', () => {
+  let l = rememberPing([], { ms: 10, at: 0 })
+  l = rememberPing(l, { ms: 20, at: 30000 })
+  l = rememberPing(l, { ms: 30, at: 61000 })
+  expect(l.map((p) => p.ms)).toEqual([20, 30])
 })
