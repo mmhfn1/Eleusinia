@@ -390,7 +390,7 @@ const SHARE: { area: Area; label: string }[] = [
   { area: 'error', label: 'Errors' },
 ]
 
-function ReportDialog({ st, close }: { st: State; close: () => void }) {
+export function ReportDialog({ st, close }: { st: State; close: () => void }) {
   const [kind, setKind] = useState<Kind>('bug')
   const [title, setTitle] = useState('')
   const [body, setBody] = useState('')

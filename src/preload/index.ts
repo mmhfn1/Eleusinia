@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('api', {
   diag: (area: string, text: string) => ipcRenderer.send('diag', area, text),
   diagnostics: () => ipcRenderer.invoke('diagnostics'),
   installUpdate: () => ipcRenderer.invoke('installUpdate'),
+  checkUpdates: () => ipcRenderer.invoke('checkUpdates'),
+  quit: () => ipcRenderer.invoke('quit'),
   // Shared files (see main/index.ts): attach takes { path } or { name, type, data } for pasted pictures.
   attach: (items: unknown[]) => ipcRenderer.invoke('attach', items),
   pickFiles: () => ipcRenderer.invoke('pickFiles'),

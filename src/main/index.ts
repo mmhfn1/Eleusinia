@@ -195,6 +195,14 @@ function startApp() {
   })
   startUpdates((version) => !win.isDestroyed() && win.webContents.send('event', { type: 'update', version }), diagnostics.add)
   ipcMain.handle('installUpdate', () => autoUpdater.quitAndInstall(true, true)) // quietly, then opens the new version
+  // From the emblem's menu. A copy run from source (or with updates off) never updates, and says so.
+  ipcMain.handle('checkUpdates', async () => {
+    const current = app.getVersion()
+    if (!updatable()) return { state: 'unavailable', version: current, current }
+    const r = await autoUpdater.checkForUpdates()
+    return { state: r?.isUpdateAvailable ? 'found' : 'latest', version: r?.updateInfo.version ?? current, current }
+  })
+  ipcMain.handle('quit', () => app.quit())
   ipcMain.on('diag', (_e, area: unknown, text: unknown) => AREAS.includes(area as any) && typeof text === 'string' && diagnostics.add(area as any, text))
   ipcMain.handle('diagnostics', () => ({ meta: meta(), events: diagnostics.list() }))
 

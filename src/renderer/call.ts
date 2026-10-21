@@ -43,6 +43,8 @@ declare global {
       restartAsAdmin(): Promise<boolean>
       diag(area: import('../shared/reports').Area, text: string): void
       installUpdate(): Promise<void>
+      checkUpdates(): Promise<{ state: 'found' | 'latest' | 'unavailable'; version: string; current: string }>
+      quit(): Promise<void>
       attach(items: ({ path: string } | { name: string; type: string; data: Uint8Array })[]): Promise<import('../shared/media').FileRef[]>
       pickFiles(): Promise<import('../shared/media').FileRef[]>
       saveFile(h: string, name: string): Promise<string | null>
@@ -1018,6 +1020,12 @@ async function handle(from: Key, c: string, d: any) {
       await applyLevel(from)
     }
   }
+}
+
+// Stops a direct call ringing without joining it; it can still be joined for as long as it lasts.
+export function silence(c: string) {
+  ringing.delete(c)
+  loops()
 }
 
 // Someone left a call, by saying so or by going offline.

@@ -1,7 +1,6 @@
-// Bundled, so every system shows the same type: Inter for text, Zen Kaku Gothic New for the wordmark and titles.
-import '@fontsource-variable/inter/wght.css'
-import '@fontsource/zen-kaku-gothic-new/latin-500.css'
-import '@fontsource/zen-kaku-gothic-new/latin-700.css'
+// Bundled, so every system shows the same type: Instrument Sans for text, Bricolage Grotesque for the wordmark and titles.
+import '@fontsource-variable/bricolage-grotesque/wght.css'
+import '@fontsource-variable/instrument-sans/wght.css'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import './style.css'

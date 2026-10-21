@@ -138,7 +138,7 @@ async function until(label, fn, secs = 90) {
 // Goes Home first, since friends and groups are only listed there, and waits for the row: the Home list
 // is drawn after the click returns.
 const open = (text) => `(async () => {
-  document.querySelector('button.home')?.click()
+  document.querySelector('.rail-item[aria-label^="Home"]')?.click()
   for (let i = 0; i < 50; i++) {
     const row = [...document.querySelectorAll('.row-button')].find(x => x.textContent.includes('${text}'))
     if (row) return row.click()
@@ -323,7 +323,7 @@ try {
     await until(`typing "${typed}" suggests ${n}: ${n === 'Cy' ? 'generated' : 'uploaded'} picture, ID, Unique Key ${tail}`, () =>
       a.ev(`(() => { const r = document.querySelectorAll('.result'); return r.length === 1 && !!r[0].querySelector('${pic}') && r[0].textContent.includes('${ids[n]}') && r[0].querySelector('.tail').textContent === '${tail}' })()`))
     await a.ev(`document.querySelector('.result .add-friend').click()`)
-    await until(`${n} sees the request with Ann's picture`, () => p.ev(`[...document.querySelectorAll('.request')].some(r => r.textContent.includes('Ann wants') && r.querySelector('.avatar img'))`))
+    await until(`${n} sees the request with Ann's picture`, () => p.ev(`[...document.querySelectorAll('.request')].some(r => r.textContent.includes('Ann') && r.querySelector('.avatar img'))`))
     await p.ev(`[...document.querySelectorAll('.request button')].find(x => x.textContent === 'Accept').click()`)
   }
 
@@ -362,7 +362,10 @@ try {
   await b.ev(`document.querySelector('.chat-person').click()`)
   await until('clicking the DM header opens the same card', () => b.ev(annCard), 5)
   await b.ev(closeCard)
-  await b.ev(`document.querySelector('button.home').click()`)
+  await b.ev(`document.querySelector('aside.voice .chamber-id.person').click()`)
+  await until('clicking her in the voice sidebar opens the same card', () => b.ev(annCard), 5)
+  await b.ev(closeCard)
+  await b.ev(`document.querySelector('.rail-item[aria-label^="Home"]').click()`)
   await b.ev(`[...document.querySelectorAll('.online .row-button')].find((x) => x.textContent.includes('Ann')).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
   await until('right-clicking Ann in the friends list opens the same card', () => b.ev(annCard), 5)
   await b.ev(closeCard)
@@ -642,16 +645,16 @@ try {
   await b.ev(press('Leave call'))
 
   console.log('--- Groups')
-  await a.ev(`document.querySelector('button.home').click()`)
+  await a.ev(`document.querySelector('.rail-item[aria-label^="Home"]').click()`)
   for (const g of ['Trio', 'Second']) {
     await a.ev(`document.querySelector('.rail-item[aria-label="Create a group"]').click()`)
     await a.ev(`(() => { const f = document.querySelector('form.new-group'); f.elements.name.value = '${g}'; f.querySelectorAll('[name=member]').forEach(x => x.checked = true); f.requestSubmit() })()`)
     await sleep(500)
-    await a.ev(`document.querySelector('button.home')?.click()`)
+    await a.ev(`document.querySelector('.rail-item[aria-label^="Home"]')?.click()`)
   }
   await until('A, B and C list both groups in the Home sidebar', async () => {
     for (const p of [a, b, c]) {
-      await p.ev(`document.querySelector('button.home')?.click()`)
+      await p.ev(`document.querySelector('.rail-item[aria-label^="Home"]')?.click()`)
       if (!(await p.ev(`['Trio','Second'].every(g => [...document.querySelectorAll('aside .item')].some(x => x.textContent.includes(g)))`))) return false
     }
     return true
@@ -683,7 +686,7 @@ try {
   console.log('     ', JSON.stringify(widths), '->', JSON.stringify(after))
   if (!(after[0] === 336 && after[1] === 246 && after[2] === '336' && after[3] === '246')) throw new Error('sidebars did not resize and persist')
   console.log('ok   voice and members sidebars grew by 16px and the widths were saved')
-  await a.ev(`document.querySelector('button.home').click()`)
+  await a.ev(`document.querySelector('.rail-item[aria-label^="Home"]').click()`)
   const home = await a.ev(`(() => { const s = document.querySelector('.splitter'); s.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); return new Promise(r => setTimeout(() => r(document.querySelector('aside').getBoundingClientRect().width), 200)) })()`)
   if (home !== 276) throw new Error('home sidebar did not resize: ' + home)
   console.log('ok   home sidebar resized independently (260 -> 276), narrower than the voice sidebar')
