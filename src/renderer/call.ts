@@ -131,7 +131,9 @@ export const onChange = (fn: () => void) => void (notify = fn)
 const send = (c: string, to: Key | null, data: unknown) => window.api.call('signal', c, to, data)
 
 // Sounds. Joining and leaving are not heard while deafened; mute and deafen always are, to confirm them.
-const sound = (name: Jingle) => (log(`sound: ${name}`), play(name, outVolume(), outId || state.settings.out || ''))
+// The app's sounds follow both the master volume and their own (Settings: Sound volume).
+const soundLevel = () => outVolume() * soundVolume()
+const sound = (name: Jingle) => (log(`sound: ${name}`), play(name, soundLevel(), outId || state.settings.out || ''))
 const isDm = (c: string) => !state.groups[c]
 // Ringing: direct calls we are not in, since when each started. Calling: since when we have waited alone in a direct
 // call. Both repeat for 40 s at most (loopNow); after that the call carries on silently, it is never ended for it.
@@ -151,7 +153,7 @@ function loops() {
   if (looping?.name !== name || now - looping.at >= LOOP_EVERY[name]) {
     if (looping?.name !== name) log(`sound: ${name}`)
     looping = { name, at: now }
-    play(name, outVolume(), outId || state.settings.out || '')
+    play(name, soundLevel(), outId || state.settings.out || '')
   }
   loopTimer ??= setInterval(loops, 250)
 }
@@ -167,6 +169,7 @@ export function mismatched() {
 const clampVolume = (v: number | undefined) => Math.min(2, Math.max(0, v ?? 1))
 export const volumeOf = (k: Key) => clampVolume(state.settings.volumes?.[k])
 export const outVolume = () => clampVolume(state.settings.outVolume)
+export const soundVolume = () => Math.min(1, Math.max(0, state.settings.soundVolume ?? 1))
 // How loud each person's shared screen sound plays here, set beside their stream; for this session only.
 const streamVolumes = new Map<Key, number>()
 export const streamVolumeOf = (k: Key) => streamVolumes.get(k) ?? 1
@@ -926,6 +929,8 @@ const applyMic = () => stream?.getAudioTracks().forEach((t) => (t.enabled = send
 // A hotkey pressed anywhere, even with the app in the background. They only act during a call.
 export function onHotkey(action: string, down: boolean) {
   if (action === 'ptt') {
+    // A tick when the microphone opens and closes, only in a call and only when it changes (keys repeat while held).
+    if (conv && down !== talking && !muted && !deafened) sound(down ? 'talk' : 'untalk')
     talking = down
     applyMic()
     return notify()

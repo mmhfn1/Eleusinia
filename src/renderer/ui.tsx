@@ -137,6 +137,7 @@ export function Avatar({ k, p, size = 32, online }: { k: Key; p: Profile; size?:
 // A group's tile: its first letter on a tinted stone square, coloured from the group id.
 export function GroupEmblem({ g, size = 32 }: { g: Group; size?: number }) {
   const hue = 190 + (parseInt(g.id.slice(0, 4), 16) % 80)
+  if (g.avatar) return <img className="crest" src={g.avatar} alt="" style={{ width: size, height: size }} />
   return (
     <span className="crest" style={{ width: size, height: size, fontSize: size * 0.46, ['--hue' as string]: hue }} aria-hidden="true">
       {(g.name.trim()[0] ?? '?').toUpperCase()}

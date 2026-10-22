@@ -935,6 +935,7 @@ type ConvProps = { st: State; conv: string; people: People; run: Run; home: () =
 // A group or direct chat: the voice chamber on the left, text in the middle, group members on the right.
 function Conversation({ st, conv, people, run, home }: ConvProps) {
   const [shareDialog, setShareDialog] = useState(false)
+  const [picking, setPicking] = useState<File | null>(null)
   const [cameraDialog, setCameraDialog] = useState(false)
   const [left, setLeft] = useWidth('voice', 320)
   const [right, setRight] = useWidth('members', 230)
@@ -977,8 +978,42 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
         </button>
         {group ? (
           <div className="chamber-id">
-            <GroupEmblem g={group} size={56} />
+            <label className="crest-pick" title="Change the group picture">
+              <GroupEmblem g={group} size={56} />
+              <span className="crest-edit" aria-hidden="true">
+                <Icon name="camera" size={16} />
+              </span>
+              <input
+                type="file"
+                accept="image/png,image/jpeg,image/webp"
+                className="visually-hidden"
+                aria-label="Change the group picture"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  e.target.value = '' // so the same file can be chosen again
+                  if (f) setPicking(f)
+                }}
+              />
+            </label>
             <h1>{title}</h1>
+            {group.avatar && (
+              <button className="button subtle" onClick={() => run(api.call('setGroupPicture', conv, ''))}>
+                Remove picture
+              </button>
+            )}
+            {picking && (
+              <Cropper
+                file={picking}
+                done={(url) => {
+                  setPicking(null)
+                  run(api.call('setGroupPicture', conv, url))
+                }}
+                close={(err) => {
+                  setPicking(null)
+                  if (err) run(Promise.reject(new Error(err)))
+                }}
+              />
+            )}
           </div>
         ) : (
           <button className="chamber-id person" onClick={() => show(other)} aria-label={`Open ${title}'s profile`}>

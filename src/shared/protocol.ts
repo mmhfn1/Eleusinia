@@ -5,7 +5,8 @@ export type Key = string // 64 hex chars: ed25519 public key, also the friend co
 export type FriendStatus = 'friend' | 'outgoing' | 'incoming'
 export type Add = { by: Key; sig: string } // proof that `by` added a member to a group
 // left: members who left, each with their own signature, so nobody can be removed by someone else.
-export type Group = { id: string; name: string; members: Key[]; updatedAt: number; adds?: Record<Key, Add>; left?: Record<Key, string> }
+// avatar: the group's picture, a small image data URL like a profile's (any member can change it).
+export type Group = { id: string; name: string; members: Key[]; updatedAt: number; adds?: Record<Key, Add>; left?: Record<Key, string>; avatar?: string }
 // files: shared files, referenced by hash (shared/media.ts); text may then be empty.
 export type Msg = { conv: string; author: Key; seq: number; ts: number; text: string; files?: FileRef[]; sig: string }
 export type Have = Record<Key, number> // highest seq held, per author
@@ -26,6 +27,7 @@ export type Settings = {
   cam?: string
   camLabel?: string
   outVolume?: number
+  soundVolume?: number // the app's own sounds (mute, joins, ringing, push to talk), 0 to 1 on top of outVolume; default 1
   micGate?: number
   crashReports?: boolean // send crash reports to the developers automatically; on unless turned off
   closeToTray?: boolean // closing the window keeps Eleusinia running in the tray; on unless turned off
@@ -100,9 +102,11 @@ export const isGroupId = (s: unknown): s is string => typeof s === 'string' && /
 export const dmId = (a: Key, b: Key) => [a, b].sort().join('_')
 
 // Profiles arrive from other people, so every field is checked and capped before it is stored or shown.
+// A small picture as a data URL: JPEG, PNG or WebP only (never SVG, which can carry scripts), and capped in size.
+export const isPicture = (v: unknown): v is string => typeof v === 'string' && v.length <= 60000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(v)
 export function cleanProfile(p: any): Profile {
   const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '')
-  const ok = typeof p?.avatar === 'string' && p.avatar.length <= 60000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(p.avatar)
+  const ok = isPicture(p?.avatar)
   return { handle: isHandle(p?.handle) ? p.handle : '', name: str(p?.name, 40), about: str(p?.about, 200), avatar: ok ? p.avatar : '' }
 }
 

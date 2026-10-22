@@ -18,6 +18,7 @@ import {
   dmId,
   isHandle,
   isKey,
+  isPicture,
   isUsername,
   normHandle,
   type Version,
@@ -713,6 +714,16 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       changed()
       spread(g)
       return g.id
+    },
+    // A new picture for a group (or '' to go back to its letter), told to every member like any other change.
+    setGroupPicture(id: string, avatar: string) {
+      const g = Object.hasOwn(s.groups, id) ? s.groups[id] : undefined
+      if (!g || !g.members.includes(me)) throw new Error('You are not in that group')
+      if (avatar !== '' && !isPicture(avatar)) throw new Error('That picture cannot be used')
+      const { avatar: _old, ...rest } = g
+      s.groups[id] = mergeGroup(undefined, { ...rest, ...(avatar && { avatar }), updatedAt: Math.max(Date.now(), g.updatedAt + 1) })
+      changed()
+      spread(s.groups[id])
     },
     addToGroup(id: string, key: Key) {
       const g = Object.hasOwn(s.groups, id) ? s.groups[id] : undefined

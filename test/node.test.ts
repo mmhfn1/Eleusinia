@@ -809,3 +809,29 @@ test('someone offline is still found by their exact friend ID, and their request
   a = restart(a)
   await until(() => a.node.state().friends[b.key] === 'incoming')
 }, 120000)
+
+test('a group picture follows the latest change, is checked like a profile picture, and can be removed', () => {
+  const g: Group = { id: 'ab'.repeat(16), name: 'Trio', members: [], updatedAt: 1 }
+  const pic = 'data:image/jpeg;base64,AAAA'
+  expect(mergeGroup(g, { ...g, avatar: pic, updatedAt: 2 }).avatar).toBe(pic)
+  expect(mergeGroup({ ...g, avatar: pic, updatedAt: 2 }, g).avatar).toBe(pic) // an older copy does not undo it
+  expect(mergeGroup({ ...g, avatar: pic, updatedAt: 2 }, { ...g, updatedAt: 3 }).avatar).toBeUndefined() // removed later
+  expect(mergeGroup(g, { ...g, avatar: pic })).toEqual(mergeGroup({ ...g, avatar: pic }, g)) // same result either way
+  expect(validGroup({ ...g, avatar: pic })).toBe(true)
+  expect(validGroup({ ...g, avatar: 'data:image/svg+xml;base64,AAAA' })).toBe(false)
+  expect(validGroup({ ...g, avatar: 'https://example.com/a.png' })).toBe(false)
+})
+
+test('a member changes the group picture and the others get it', async () => {
+  const a = start()
+  const b = start()
+  await befriend(a, b)
+  const gid = a.node.createGroup('pics', [b.key])
+  await until(() => !!b.node.state().groups[gid])
+  const pic = 'data:image/png;base64,AAAA'
+  b.node.setGroupPicture(gid, pic)
+  await until(() => a.node.state().groups[gid]?.avatar === pic)
+  expect(() => a.node.setGroupPicture(gid, 'data:image/svg+xml;base64,AAAA')).toThrow()
+  a.node.setGroupPicture(gid, '')
+  await until(() => b.node.state().groups[gid]?.avatar === undefined)
+}, 60000)

@@ -3,7 +3,7 @@
 // someone joining rises and someone leaving falls. Ringing and the caller tune repeat for RING_MS at most; the call
 // itself never ends because nobody answered.
 
-export type Jingle = 'mute' | 'unmute' | 'deafen' | 'undeafen' | 'join' | 'leave' | 'ring' | 'calling'
+export type Jingle = 'mute' | 'unmute' | 'deafen' | 'undeafen' | 'join' | 'leave' | 'ring' | 'calling' | 'talk' | 'untalk'
 export type Note = { f: number; t: number; d: number; wave: 'sine' | 'triangle' | 'square'; gain?: number } // Hz, start s, length s
 
 export const JINGLES: Record<Jingle, Note[]> = {
@@ -36,6 +36,9 @@ export const JINGLES: Record<Jingle, Note[]> = {
     { f: 659, t: 0.13, d: 0.12, wave: 'sine' },
     { f: 440, t: 0.26, d: 0.26, wave: 'sine' },
   ],
+  // Push to talk held and let go: a single soft tick up and down, short enough to use constantly.
+  talk: [{ f: 1175, t: 0, d: 0.045, wave: 'sine', gain: 0.6 }],
+  untalk: [{ f: 880, t: 0, d: 0.04, wave: 'sine', gain: 0.45 }],
   // An incoming direct call: two quick trills, like a phone.
   ring: [0, 0.7].flatMap((at) => Array.from({ length: 8 }, (_, i) => ({ f: i % 2 ? 1568 : 1319, t: at + i * 0.055, d: 0.05, wave: 'square' as const, gain: 0.35 }))),
   // Calling someone: a soft rising tune while you wait for them to answer.
