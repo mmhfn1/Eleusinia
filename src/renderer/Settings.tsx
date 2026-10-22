@@ -40,12 +40,22 @@ function AudioSettings({ st }: { st: State }) {
       {pick('audiooutput', 'Speakers', 'out')}
       <div className="setting">
         <label htmlFor="out-volume">
-          Output volume <b>{Math.round(call.outVolume() * 100)}%</b>
+          Master volume <b>{Math.round(call.outVolume() * 100)}%</b>
         </label>
         <input id="out-volume" type="range" min={0} max={200} step={5} value={Math.round(call.outVolume() * 100)} onChange={(e) => set({ outVolume: Number(e.target.value) / 100 })} />
         <div className="range-ends" aria-hidden="true">
           <span>0%</span>
           <span>200%</span>
+        </div>
+      </div>
+      <div className="setting">
+        <label htmlFor="sound-volume">
+          Sound volume <b>{Math.round(call.soundVolume() * 100)}%</b>
+        </label>
+        <input id="sound-volume" type="range" min={0} max={100} step={5} value={Math.round(call.soundVolume() * 100)} onChange={(e) => set({ soundVolume: Number(e.target.value) / 100 })} />
+        <div className="range-ends" aria-hidden="true">
+          <span>Off</span>
+          <span>100%</span>
         </div>
       </div>
       {pick('audioinput', 'Microphone', 'mic')}

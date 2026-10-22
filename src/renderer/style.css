@@ -2760,3 +2760,45 @@ dialog.menu-dialog .dialog-close {
 .window-buttons .close svg {
   shape-rendering: geometricPrecision;
 }
+
+/* Presence: green while online, grey while offline (and hollow, so it never relies on colour alone). */
+.presence {
+  border-color: #6b7178;
+  background: var(--obsidian);
+}
+.presence.on {
+  border-color: var(--good);
+  background: var(--good);
+  box-shadow:
+    0 0 0 2px var(--obsidian),
+    0 0 8px color-mix(in srgb, var(--good) 55%, transparent);
+}
+
+/* A group's picture: click it to change. */
+img.crest {
+  object-fit: cover;
+}
+.crest-pick {
+  position: relative;
+  display: inline-grid;
+  border-radius: 28%;
+  cursor: pointer;
+}
+.crest-edit {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 28%;
+  background: rgb(5 6 8 / 0.6);
+  color: var(--silver);
+  opacity: 0;
+  transition: opacity var(--t-fast);
+}
+.crest-pick:hover .crest-edit,
+.crest-pick:focus-within .crest-edit {
+  opacity: 1;
+}
+.crest-pick:focus-within {
+  box-shadow: var(--focus-ring);
+}

@@ -546,8 +546,8 @@ try {
   console.log('ok   no hotkeys are bound by default')
   // Set them the way a person would: Settings, Set, press the keys.
   await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
-  const order = await a.ev(`(() => { const t = document.querySelector('.audio-settings').textContent; return ['Speakers', 'Output volume', 'Microphone', 'Mic sensitivity', 'Voice bitrate'].map((x) => t.indexOf(x)) })()`)
-  if (order.some((n, i) => n < 0 || (i && n < order[i - 1]))) throw new Error('Audio settings are not in the order Speakers, Output volume, Microphone, Mic sensitivity, Voice bitrate: ' + order)
+  const order = await a.ev(`(() => { const t = document.querySelector('.audio-settings').textContent; return ['Speakers', 'Master volume', 'Sound volume', 'Microphone', 'Mic sensitivity', 'Voice bitrate'].map((x) => t.indexOf(x)) })()`)
+  if (order.some((n, i) => n < 0 || (i && n < order[i - 1]))) throw new Error('Audio settings are not in the order Speakers, Master volume, Sound volume, Microphone, Mic sensitivity, Voice bitrate: ' + order)
   console.log('ok   Settings: Speakers then output volume, Microphone then mic sensitivity, then bitrate')
   const row = (name) => `[...document.querySelectorAll('.hotkey')].find((x) => x.querySelector('.row-title').textContent === '${name}')`
   const setKey = async (name, code) => {
@@ -578,6 +578,7 @@ try {
     const during = await sent()
     await key(UiohookKey.F24, false)
     await until('releasing it: back to push to talk', async () => (await you()).includes('Push to talk: hold F24'), 5)
+    await until('push to talk ticked when held and when let go', async () => { const l = await sounds(a); return l.includes('talk') && l.includes('untalk') }, 5)
     await sleep(500)
     return [before, during, await sent()]
   })

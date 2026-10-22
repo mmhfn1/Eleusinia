@@ -1,6 +1,6 @@
 import crypto from 'hypercore-crypto'
 import { filesBody, validFiles } from './media'
-import { type Add, type Group, type Have, type Msg, MAX_TEXT, isGroupId, isKey } from './protocol'
+import { type Add, type Group, type Have, type Msg, MAX_TEXT, isGroupId, isKey, isPicture } from './protocol'
 
 // Files are signed only when present, so messages from before files existed still verify.
 const body = (m: Omit<Msg, 'sig'>) => Buffer.from(JSON.stringify([m.conv, m.author, m.seq, m.ts, m.text, ...(m.files ? [filesBody(m.files)] : [])]))
@@ -53,16 +53,17 @@ export function validGroup(g: Group): boolean {
     Array.isArray(g.members) &&
     g.members.length <= 100 &&
     g.members.every(isKey) &&
+    (g.avatar === undefined || g.avatar === '' || isPicture(g.avatar)) &&
     (g.adds === undefined || (!!g.adds && typeof g.adds === 'object' && Object.keys(g.adds).length <= 100)) &&
     (g.left === undefined || (!!g.left && typeof g.left === 'object' && Object.keys(g.left).length <= 100 && Object.entries(g.left).every(([k, sig]) => verifyLeft(g.id, k, sig))))
   )
 }
 
-// Members are the union of both sides minus everyone who has left (leaving is permanent); the name follows the
-// latest edit. Same result on every peer in any order.
+// Members are the union of both sides minus everyone who has left (leaving is permanent); the name and picture follow
+// the latest edit. Same result on every peer in any order.
 export function mergeGroup(a: Group | undefined, b: Group): Group {
   a ??= { ...b, members: [], adds: {}, left: {} }
-  const newer = b.updatedAt > a.updatedAt || (b.updatedAt === a.updatedAt && b.name > a.name) ? b : a
+  const newer = b.updatedAt > a.updatedAt || (b.updatedAt === a.updatedAt && (b.name > a.name || (b.name === a.name && (b.avatar ?? '') > (a.avatar ?? '')))) ? b : a
   const left: Record<string, string> = {}
   for (const k of [...new Set([...Object.keys(a.left ?? {}), ...Object.keys(b.left ?? {})])].sort()) left[k] = a.left?.[k] ?? b.left![k]
   const members = [...new Set([...a.members, ...b.members])].filter((k) => !left[k]).sort()
@@ -72,5 +73,5 @@ export function mergeGroup(a: Group | undefined, b: Group): Group {
     const pick = x && y ? (String(x.sig) <= String(y.sig) ? x : y) : (x ?? y)
     if (pick) adds[k] = { by: pick.by, sig: pick.sig }
   }
-  return { id: a.id, name: newer.name, members, updatedAt: newer.updatedAt, adds, left }
+  return { id: a.id, name: newer.name, members, updatedAt: newer.updatedAt, adds, left, ...(newer.avatar && { avatar: newer.avatar }) }
 }
