@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Download Eleusinia</title>
+<meta name="description" content="Eleusinia: chat and voice calls that go straight to your friends, with no server in between. Download for Windows.">
+<link rel="icon" href="emblem.png">
+<style>
+  /* Fonts ship with the page, so visiting it contacts nobody but GitHub. */
+  @font-face {
+    font-family: 'Bricolage Grotesque';
+    src: url('fonts/bricolage-grotesque-latin-wght-normal.woff2') format('woff2');
+    font-weight: 200 800;
+    font-display: swap;
+  }
+  @font-face {
+    font-family: 'Instrument Sans';
+    src: url('fonts/instrument-sans-latin-wght-normal.woff2') format('woff2');
+    font-weight: 400 700;
+    font-display: swap;
+  }
+
+  /* Light mode, sampled from the Shattered Throne art: the fog's cyan-grey haze as the ground,
+     its navy body as ink, and stone for everything secondary. */
+  :root {
+    --paper: #f4f5f6;   /* the near-white peaks */
+    --haze: #c8d6d3;    /* the haze */
+    --fog: #dfe7ea;     /* the haze, thinned */
+    --stone: #425a6b;   /* fog and stone */
+    --ink: #010d25;     /* the navy body of every frame */
+    --line: rgb(66 90 107 / 0.22);
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    display: grid;
+    place-items: center;
+    min-height: 100%;
+    padding: 48px 16px;
+    background:
+      radial-gradient(70% 45% at 50% 0%, var(--haze), transparent 70%),
+      linear-gradient(180deg, var(--fog), var(--paper) 60%);
+    color: var(--ink);
+    font: 16px/1.55 'Instrument Sans', 'Segoe UI', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  main {
+    width: min(420px, 100%);
+    display: grid;
+    justify-items: center;
+    gap: 16px;
+    text-align: center;
+  }
+  .emblem {
+    width: 96px;
+    height: 96px;
+    background: var(--ink);
+    -webkit-mask: url('emblem.png') center / contain no-repeat;
+    mask: url('emblem.png') center / contain no-repeat;
+  }
+  h1 {
+    margin: 4px 0 0;
+    font: 700 40px/1.1 'Bricolage Grotesque', 'Segoe UI', sans-serif;
+    letter-spacing: -0.01em;
+  }
+  .lede {
+    margin: 0;
+    max-width: 34ch;
+    color: var(--stone);
+  }
+  .download {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    margin-top: 12px;
+    padding: 14px 32px;
+    border-radius: 999px;
+    background: var(--ink);
+    color: var(--paper);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 17px;
+    transition: transform 160ms ease, box-shadow 200ms ease;
+  }
+  .download:hover { box-shadow: 0 10px 28px -12px rgb(1 13 37 / 0.55); transform: translateY(-1px); }
+  .download:active { transform: translateY(0); }
+  .download:focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
+  .download small { font-weight: 400; font-size: 13px; opacity: 0.75; }
+  .meta {
+    margin: 0;
+    color: var(--stone);
+    font-size: 14px;
+  }
+  .meta a { color: var(--ink); }
+  .note {
+    margin: 20px 0 0;
+    padding-top: 16px;
+    border-top: 1px solid var(--line);
+    color: var(--stone);
+    font-size: 13px;
+  }
+  @media (prefers-reduced-motion: reduce) { .download { transition: none; } }
+</style>
+</head>
+<body>
+<main>
+  <div class="emblem" aria-hidden="true"></div>
+  <h1>Eleusinia</h1>
+  <p class="lede">Chat and voice calls that go straight to your friends, with no server in between.</p>
+  <a class="download" id="download" href="https://github.com/mmhfn1/Eleusinia/releases/latest">
+    Download for Windows
+    <small id="version">Latest version</small>
+  </a>
+  <p class="meta">Windows 10 or 11, 64-bit · <a href="https://github.com/mmhfn1/Eleusinia/releases">All releases</a></p>
+  <p class="note">The installer is not code-signed yet, so Windows may warn you. Choose More info, then Run anyway. Eleusinia updates itself after that.</p>
+</main>
+<script>
+  // Points the button straight at the newest installer. If GitHub cannot be reached, the button still opens the
+  // latest release page, so the download always works.
+  fetch('https://api.github.com/repos/mmhfn1/Eleusinia/releases/latest')
+    .then((r) => (r.ok ? r.json() : Promise.reject()))
+    .then((rel) => {
+      const exe = rel.assets.find((a) => /^Eleusinia-Setup-.*\.exe$/.test(a.name))
+      if (!exe) return
+      document.getElementById('download').href = exe.browser_download_url
+      document.getElementById('version').textContent = `Version ${rel.tag_name.replace(/^v/, '')}, ${Math.round(exe.size / 2 ** 20)} MB`
+    })
+    .catch(() => {})
+</script>
+</body>
+</html>
