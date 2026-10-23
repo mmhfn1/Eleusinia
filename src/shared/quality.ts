@@ -27,8 +27,10 @@ export function grade(samples: Sample[]): Grade | null {
 
 // How much audio a voice's player should keep in hand, in ms, from the jitter of what arrives: none (Chromium's own
 // choice) on an even link, otherwise twice the jitter, between 40 and 150 ms. A little delay beats stretched and
-// clipped words on an uneven link.
-export const jitterTarget = (jitterMs: number) => (jitterMs < 15 ? null : Math.round(Math.min(150, Math.max(40, jitterMs * 2))))
+// clipped words on an uneven link. Once holding, it lets go only below 10 ms: a link hovering at 15 ms flipped the
+// player every few seconds, and each flip is an audible stretch or squeeze.
+export const jitterTarget = (jitterMs: number, holding = false) =>
+  jitterMs < (holding ? 10 : 15) ? null : Math.round(Math.min(150, Math.max(40, jitterMs * 2)))
 
 const ORDER: Grade[] = ['good', 'fair', 'poor']
 // A call is only as good as its weakest link.

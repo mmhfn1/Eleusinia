@@ -2478,7 +2478,9 @@ kbd {
   justify-items: center;
   gap: 8px;
   margin: 0;
-  transition: transform 320ms var(--ease);
+  /* settles only after 1.2 s of quiet, so pauses between words never start an animation (each runs at the display's
+     rate, 240 frames a second on a gaming monitor) */
+  transition: transform 320ms var(--ease) 1.2s;
 }
 .oculus-person figcaption {
   display: grid;
@@ -2492,30 +2494,20 @@ kbd {
 }
 .oculus-person.speaking {
   transform: translateY(-14px);
+  transition-delay: 0s;
 }
 .oculus-person .avatar > img,
 .oculus-person .avatar > svg {
   box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--silver) 35%, transparent);
-  transition: box-shadow 320ms var(--ease);
 }
 .oculus-person.speaking .avatar > img,
 .oculus-person.speaking .avatar > svg {
-  animation: breathe 2.4s ease-in-out infinite;
-}
-@keyframes breathe {
-  0%,
-  100% {
-    box-shadow:
-      0 0 0 2.5px var(--silver),
-      0 0 0 7px rgb(244 245 246 / 0.08),
-      0 0 34px rgb(220 226 230 / 0.35);
-  }
-  50% {
-    box-shadow:
-      0 0 0 2.5px var(--silver),
-      0 0 0 11px rgb(244 245 246 / 0.12),
-      0 0 54px rgb(220 226 230 / 0.55);
-  }
+  /* no animation or transition on the glow: speaking flips several times a second and each repaint runs at the
+     display's rate (240 per second on a gaming monitor), which cost about a core during a call */
+  box-shadow:
+    0 0 0 2.5px var(--silver),
+    0 0 0 7px rgb(244 245 246 / 0.08),
+    0 0 34px rgb(220 226 230 / 0.35);
 }
 .caller.speaking .avatar img,
 .caller.speaking .avatar svg,
@@ -2540,7 +2532,8 @@ kbd {
 }
 .ring-bar.ringing > .avatar {
   border-radius: 50%;
-  animation: ring 1.6s ease-in-out infinite;
+  /* 25 x 1.6 s = the 40 s the ringing sound lasts (loopNow); endless, it repainted for as long as a call went on without us */
+  animation: ring 1.6s ease-in-out 25;
 }
 @keyframes ring {
   0%,
@@ -2690,12 +2683,6 @@ dialog.menu-dialog .dialog-close {
   height: 6px;
   border-radius: 50%;
   background: var(--cyan);
-  animation: pulse 2s ease-in-out infinite;
-}
-@keyframes pulse {
-  50% {
-    opacity: 0.35;
-  }
 }
 .window-buttons {
   display: flex;

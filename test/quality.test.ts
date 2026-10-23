@@ -69,6 +69,9 @@ test('an even link keeps the player as it is; an uneven one holds twice its jitt
   expect(jitterTarget(15)).toBe(40)
   expect(jitterTarget(30)).toBe(60)
   expect(jitterTarget(120)).toBe(150)
+  expect(jitterTarget(12)).toBe(null)
+  expect(jitterTarget(12, true)).toBe(40) // holding: no flapping around 15 ms
+  expect(jitterTarget(9, true)).toBe(null)
 })
 
 const readings = (ms: number[]) => ms.map((m, i) => ({ ms: m, at: i * 2000 }))
