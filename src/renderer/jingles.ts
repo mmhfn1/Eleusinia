@@ -4,6 +4,8 @@ import { JINGLES, type Jingle } from '../shared/jingles'
 
 let ctx: AudioContext | null = null
 let sink: string | null = null
+let doneAt = 0
+let idle: ReturnType<typeof setTimeout> | undefined
 
 // volume: 0 to 2, the output volume from Settings. out: the chosen speakers ('' for the system default).
 export async function play(name: Jingle, volume: number, out: string) {
@@ -30,5 +32,9 @@ export async function play(name: Jingle, volume: number, out: string) {
     osc.connect(amp).connect(ctx.destination)
     osc.start(t0)
     osc.stop(t0 + n.d + 0.02)
+    doneAt = Math.max(doneAt, t0 + n.d + 0.02)
   }
+  // Suspended between sounds: a running context keeps an output stream open, which costs CPU and keeps Windows awake.
+  clearTimeout(idle)
+  idle = setTimeout(() => ctx?.suspend().catch(() => {}), (doneAt - ctx.currentTime + 0.5) * 1000)
 }

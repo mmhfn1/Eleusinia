@@ -741,7 +741,7 @@ async function hearing(k: Key, pc: RTCPeerConnection, at: number) {
   })
   const was = heardFrom.get(k)
   if (!was || n !== was.n) heardFrom.set(k, { n, at: n > (was?.n ?? 0) ? at : (was?.at ?? 0) })
-  const target = jitterTarget(jitter)
+  const target = jitterTarget(jitter, !!voice.jitterBufferTarget)
   if ('jitterBufferTarget' in voice && voice.jitterBufferTarget !== target) {
     if (target !== null || voice.jitterBufferTarget) log(`holding ${target ?? 0} ms of ${who(k)}'s voice (jitter ${Math.round(jitter)} ms)`)
     voice.jitterBufferTarget = target
