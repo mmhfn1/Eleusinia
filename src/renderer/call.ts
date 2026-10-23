@@ -1,11 +1,11 @@
 import { RnnoiseWorkletNode } from '@sapphi-red/web-noise-suppressor'
 import rnnoiseWasm from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?inline'
 import rnnoiseWorklet from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?raw'
-import { createCandidates, createWatchdog, lightOpus, offers, relayCandidate, restartAfterFor } from '../shared/callstate'
+import { createCandidates, createWatchdog, lightOpus, offers, quickVideo, relayCandidate, restartAfterFor } from '../shared/callstate'
 import { fellBack, nextDevice, usable } from '../shared/devices'
 import { type Jingle, LOOP_EVERY, loopNow } from '../shared/jingles'
 import { CALL_VERSION, type Event, type Key, type State } from '../shared/protocol'
-import { type PingReading, SAMPLE_EVERY, type Sample, grade, jitterTarget, pingSummary, remember, rememberPing, worst } from '../shared/quality'
+import { type PingReading, SAMPLE_EVERY, type Sample, grade, jitterTarget, pingSummary, remember, rememberPing, videoHold, worst } from '../shared/quality'
 import type { SourceKind } from '../shared/sources'
 import { gate, hear, rms } from '../shared/speaking'
 import { play } from './jingles'
@@ -439,9 +439,9 @@ async function addRelay(k: Key, pc: RTCPeerConnection) {
 // Answers echo their offer's id, so an answer to an older offer is never applied to a newer connection.
 let offerId = 0
 
-// Every description we send asks for Opus silence suppression (see lightOpus).
+// Every description we send asks for Opus silence suppression (see lightOpus) and a quick video start (quickVideo).
 async function local(pc: RTCPeerConnection, d: RTCSessionDescriptionInit) {
-  await pc.setLocalDescription({ type: d.type, sdp: lightOpus(d.sdp ?? '') })
+  await pc.setLocalDescription({ type: d.type, sdp: quickVideo(lightOpus(d.sdp ?? '')) })
 }
 
 // A connection's slots once they exist: video prefers VP9 (sharp text at low bitrates), then H.264 and VP8, and
@@ -748,6 +748,18 @@ async function hearing(k: Key, pc: RTCPeerConnection, at: number) {
   }
 }
 
+// Their screen and camera wait for resent pieces on a long lossy link (videoHold).
+function holdVideo(k: Key, pc: RTCPeerConnection) {
+  const hold = videoHold(samples.get(k))
+  const { screen, camera } = slotsOf(pc)
+  for (const t of [screen, camera]) {
+    const r = t?.receiver as (RTCRtpReceiver & { jitterBufferTarget?: number | null }) | undefined
+    if (!r || !('jitterBufferTarget' in r) || r.jitterBufferTarget === hold) continue
+    if (t === camera) log(`holding ${hold ?? 0} ms of ${who(k)}'s video`)
+    r.jitterBufferTarget = hold
+  }
+}
+
 // Samples every connected link; with nobody connected, the network itself, so the sign works when alone in a call.
 async function measure() {
   if (measuring || !conv) return
@@ -763,6 +775,7 @@ async function measure() {
       for (const [k, p] of live) {
         const { s, fresh } = await sampleLink(k, p.pc).catch(() => ({ s: null, fresh: null }))
         if (s) samples.set(k, remember(samples.get(k), s))
+        holdVideo(k, p.pc)
         if (fresh !== null) pingReadings.set(k, rememberPing(pingReadings.get(k), { ms: fresh, at }))
       }
     } else {

@@ -32,6 +32,17 @@ export function grade(samples: Sample[]): Grade | null {
 export const jitterTarget = (jitterMs: number, holding = false) =>
   jitterMs < (holding ? 10 : 15) ? null : Math.round(Math.min(150, Math.max(40, jitterMs * 2)))
 
+// How long a screen or camera's player waits for late pieces, in ms. On a long route that loses packets, a lost
+// piece is resent and arrives a round trip later; without the wait it misses its frame and the picture freezes (about
+// 10 % of the time at 340 ms and 3 % loss). Smooth video a little behind the voice beats a stuttering one; any loss in
+// the last ~10 s keeps it, and 50 ms steps keep it from following every wobble of the round trip. Short or clean links: none (Chromium's own choice).
+export function videoHold(samples: Sample[] = []): number | null {
+  if (!samples.length) return null
+  const rtt = median(samples.map((s) => s.rtt))
+  const lossy = samples.some((s) => (s.loss ?? 0) >= 0.005)
+  return lossy && rtt >= 100 && Number.isFinite(rtt) ? Math.min(500, Math.ceil((rtt * 1.2) / 50) * 50) : null
+}
+
 const ORDER: Grade[] = ['good', 'fair', 'poor']
 // A call is only as good as its weakest link.
 export const worst = (grades: (Grade | null)[]) =>
