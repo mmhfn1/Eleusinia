@@ -28,6 +28,7 @@ import { idSeed, readClaims, signClaim, withClaim, writeClaims } from '../shared
 import { type FileRef, validFiles } from '../shared/media'
 import { type Area, type Report, cleanReport } from '../shared/reports'
 import { mergeGroup, missing, signAdd, signLeft, signMsg, validGroup, verifyAdd, verifyMsg } from '../shared/sync'
+import { createImpairment, parseNetSim } from '../shared/netsim'
 import { createFiles } from './files'
 import { type RelayLimits, RELAY_LIMITS, createNet } from './network'
 import { createRelay } from './relay'
@@ -53,6 +54,7 @@ type Opts = {
   noDirect?: boolean // testing: withhold ICE candidates so calls can only connect through the relay
   links?: (key: Key) => boolean // testing: refuse direct links to some peers, as two strict routers would
   maxRequests?: number // testing: a smaller cap on waiting friend requests
+  netsim?: string // testing: a simulated bad line on relayed call packets (ELEUSINIA_TEST_NET, shared/netsim.ts)
   strict?: boolean // testing: direct connections fail for real, as behind a strict router, so only a relay links
   relayLimits?: RelayLimits // testing: smaller caps on what we relay for contacts
   inbox?: Key // the developers' inbox, where problem and crash reports go
@@ -64,7 +66,7 @@ type Opts = {
 const KEEP_LOGS = 3
 
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
-export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', links, strict, relayLimits, maxRequests = 200 }: Opts) {
+export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', links, strict, relayLimits, maxRequests = 200, netsim }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
   const file = join(dir, 'state.json')
   mkdirSync(join(dir, 'msgs'), { recursive: true })
@@ -481,7 +483,10 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     links,
     strict,
   )
-  const relay = createRelay((key, b) => net.packet(key, b))
+  // Testing only: a simulated bad line on the relayed call path (shared/netsim.ts).
+  const sim = parseNetSim(netsim)
+  const impair = sim && createImpairment(sim)
+  const relay = createRelay((key, b) => (impair ? impair(() => net.packet(key, b)) : net.packet(key, b)))
   const files = createFiles({
     dir,
     me,
