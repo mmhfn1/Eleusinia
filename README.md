@@ -93,6 +93,7 @@ Both people must have the app open when one searches for the other's ID.
 | `npm run inbox` | Runs the developers' inbox, which receives problem and crash reports and files them as GitHub issues (see [docs/reports.md](docs/reports.md)) |
 | `npm run installer-art` | Redraws the installer's sidebar and header pictures in the app's look |
 | `ELEUSINIA_SMOKE_PUBLIC=1 npm run smoke` | Same, over the public DHT: an occasional real-network check, slower and sometimes flaky when the DHT is |
+| `ELEUSINIA_TEST_NET="delay=150,jitter=30,loss=0.03,burst=4"` | Testing only: a simulated bad line (delay, jitter, average loss, loss burst length, `outage=30:8` for 8 s of nothing from 30 s in) on relayed call packets; use with `ELEUSINIA_NO_DIRECT=1` so every packet takes that path |
 
 ## Known limits
 
