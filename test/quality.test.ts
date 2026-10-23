@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { lightOpus } from '../src/shared/callstate'
 import { clampOffset, cropRect } from '../src/shared/crop'
-import { WINDOW, grade, jitterTarget, pingSummary, remember, rememberPing, worst } from '../src/shared/quality'
+import { WINDOW, grade, jitterTarget, pingSummary, remember, rememberPing, videoHold, worst } from '../src/shared/quality'
 
 const many = (n: number, s: object) => Array.from({ length: n }, () => ({ rtt: 40, ...s }))
 
@@ -91,4 +91,12 @@ test('ping readings older than a minute are forgotten', () => {
   l = rememberPing(l, { ms: 20, at: 30000 })
   l = rememberPing(l, { ms: 30, at: 61000 })
   expect(l.map((p) => p.ms)).toEqual([20, 30])
+})
+
+test('video waits for resent pieces only on long lossy links', () => {
+  expect(videoHold([])).toBe(null)
+  expect(videoHold(many(5, { rtt: 340 }))).toBe(null) // long but clean
+  expect(videoHold(many(5, { rtt: 30, loss: 0.05 }))).toBe(null) // short: resends arrive in time anyway
+  expect(videoHold([...many(4, { rtt: 340 }), { rtt: 340, loss: 0.03 }])).toBe(450)
+  expect(videoHold(many(5, { rtt: 900, loss: 0.03 }))).toBe(500)
 })

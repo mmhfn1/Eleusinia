@@ -143,6 +143,18 @@ export function lightOpus(sdp: string) {
   return sdp.replace(new RegExp(`a=fmtp:${pt} [^\\r\\n]*`), (line) => (/usedtx=/.test(line) ? line : line + ';usedtx=1'))
 }
 
+// Video starts at 1 Mbps instead of WebRTC's 300 kbps guess, which began a camera or screen at 180p and took about
+// 25 s to climb to 720p even on a fast link. A link that cannot carry it is found out within a second or two.
+export const VIDEO_START_KBPS = 1000
+export function quickVideo(sdp: string, kbps = VIDEO_START_KBPS) {
+  const param = `x-google-start-bitrate=${kbps}`
+  const video = new Set([...sdp.matchAll(/a=rtpmap:(\d+) (?:VP8|VP9|H264|AV1)\//gi)].map((m) => m[1]))
+  const withParams = new Set([...sdp.matchAll(/a=fmtp:(\d+) /g)].map((m) => m[1]))
+  return sdp
+    .replace(/a=fmtp:(\d+) ([^\r\n]*)/g, (line, pt, params) => (video.has(pt) && !params.includes('x-google-start-bitrate') ? `${line};${param}` : line))
+    .replace(/(a=rtpmap:(\d+) [^\r\n]*)(\r?\n)/g, (all, line, pt, nl) => (video.has(pt) && !withParams.has(pt) ? `${line}${nl}a=fmtp:${pt} ${param}${nl}` : all))
+}
+
 // The relay port as an ICE candidate for our own connection. Low priority, so any direct route wins.
 // raddr is the unspecified address of the same family, as the candidate grammar expects.
 export const relayCandidate = (ip: string, port: number) =>

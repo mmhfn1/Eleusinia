@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { type IceCandidate, OFFLINE_GRACE, RESTART_AFTER, RESTART_GRACE, backoff, createCandidates, createWatchdog, offers, restartAfterFor } from '../src/shared/callstate'
+import { type IceCandidate, OFFLINE_GRACE, RESTART_AFTER, RESTART_GRACE, backoff, createCandidates, createWatchdog, offers, quickVideo, restartAfterFor } from '../src/shared/callstate'
 
 // Stands in for RTCPeerConnection: rejects candidates until a remote description is set, as the real one does.
 function fakePc() {
@@ -315,4 +315,14 @@ test('a long route waits longer before restarting', () => {
   expect(log).toEqual([])
   timers.advance(1)
   expect(log).toEqual(['restart'])
+})
+
+test('video codecs start at a useful bitrate, audio and others untouched', () => {
+  const sdp = ['a=rtpmap:111 opus/48000/2', 'a=fmtp:111 minptime=10;useinbandfec=1', 'a=rtpmap:96 VP8/90000', 'a=rtpmap:98 VP9/90000', 'a=fmtp:98 profile-id=0', 'a=rtpmap:97 rtx/90000', 'a=fmtp:97 apt=96', ''].join('\r\n')
+  const out = quickVideo(sdp, 1000)
+  expect(out).toContain('a=rtpmap:96 VP8/90000\r\na=fmtp:96 x-google-start-bitrate=1000\r\n')
+  expect(out).toContain('a=fmtp:98 profile-id=0;x-google-start-bitrate=1000')
+  expect(out).toContain('a=fmtp:111 minptime=10;useinbandfec=1\r\n')
+  expect(out).toContain('a=fmtp:97 apt=96\r\n')
+  expect(quickVideo(out, 1000)).toBe(out) // applied twice, still once
 })
