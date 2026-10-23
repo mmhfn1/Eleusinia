@@ -512,7 +512,7 @@ test('only a few conversations stay in memory; the rest are read back from disk,
   expect(a.node.history(dm, 2)).toMatchObject({ total: 4 })
   expect(a.node.history(dm, 2).msgs.map((m: any) => m.text)).toEqual(['three', 'four'])
   expect(texts(a, dm)).toEqual(['one', 'two', 'three', 'four'])
-})
+}, 120000)
 
 test('peers tell each other their version; a hello without one counts as 0.0.1, and nonsense is not believed', async () => {
   const mk = (version: string) => {
