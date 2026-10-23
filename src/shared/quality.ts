@@ -29,18 +29,23 @@ export function grade(samples: Sample[]): Grade | null {
 // choice) on an even link, otherwise twice the jitter, between 40 and 150 ms. A little delay beats stretched and
 // clipped words on an uneven link. Once holding, it lets go only below 10 ms: a link hovering at 15 ms flipped the
 // player every few seconds, and each flip is an audible stretch or squeeze.
-export const jitterTarget = (jitterMs: number, holding = false) =>
-  jitterMs < (holding ? 10 : 15) ? null : Math.round(Math.min(150, Math.max(40, jitterMs * 2)))
+export const jitterTarget = (jitterMs: number, current: number | null = null) =>
+  settle(jitterMs < (current ? 10 : 15) ? null : Math.min(150, Math.max(40, Math.ceil((jitterMs * 2) / 10) * 10)), current, 20)
+
+// A hold rises at once but comes down only by a clear step, so it does not follow every wobble of the link (each
+// change nudges the player): voice went 40, 50, 40, 50 ms every few seconds on a long route.
+export const settle = (want: number | null, current: number | null, gap: number) =>
+  want !== null && current ? (want >= current || current - want >= gap ? want : current) : want
 
 // How long a screen or camera's player waits for late pieces, in ms. On a long route that loses packets, a lost
 // piece is resent and arrives a round trip later; without the wait it misses its frame and the picture freezes (about
 // 10 % of the time at 340 ms and 3 % loss). Smooth video a little behind the voice beats a stuttering one; any loss in
 // the last ~10 s keeps it, and 50 ms steps keep it from following every wobble of the round trip. Short or clean links: none (Chromium's own choice).
-export function videoHold(samples: Sample[] = []): number | null {
+export function videoHold(samples: Sample[] = [], current: number | null = null): number | null {
   if (!samples.length) return null
   const rtt = median(samples.map((s) => s.rtt))
   const lossy = samples.some((s) => (s.loss ?? 0) >= 0.005)
-  return lossy && rtt >= 100 && Number.isFinite(rtt) ? Math.min(500, Math.ceil((rtt * 1.2) / 50) * 50) : null
+  return settle(lossy && rtt >= 100 && Number.isFinite(rtt) ? Math.min(500, Math.ceil((rtt * 1.2) / 50) * 50) : null, current, 100)
 }
 
 const ORDER: Grade[] = ['good', 'fair', 'poor']

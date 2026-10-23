@@ -68,10 +68,14 @@ test('an even link keeps the player as it is; an uneven one holds twice its jitt
   expect(jitterTarget(5)).toBe(null)
   expect(jitterTarget(15)).toBe(40)
   expect(jitterTarget(30)).toBe(60)
+  expect(jitterTarget(21)).toBe(50) // 10 ms steps
   expect(jitterTarget(120)).toBe(150)
   expect(jitterTarget(12)).toBe(null)
-  expect(jitterTarget(12, true)).toBe(40) // holding: no flapping around 15 ms
-  expect(jitterTarget(9, true)).toBe(null)
+  expect(jitterTarget(12, 40)).toBe(40) // holding: no flapping around 15 ms
+  expect(jitterTarget(9, 40)).toBe(null)
+  expect(jitterTarget(21, 60)).toBe(60) // 50 is not a clear step down from 60
+  expect(jitterTarget(14, 60)).toBe(40)
+  expect(jitterTarget(40, 60)).toBe(80) // up at once
 })
 
 const readings = (ms: number[]) => ms.map((m, i) => ({ ms: m, at: i * 2000 }))
@@ -99,4 +103,6 @@ test('video waits for resent pieces only on long lossy links', () => {
   expect(videoHold(many(5, { rtt: 30, loss: 0.05 }))).toBe(null) // short: resends arrive in time anyway
   expect(videoHold([...many(4, { rtt: 340 }), { rtt: 340, loss: 0.03 }])).toBe(450)
   expect(videoHold(many(5, { rtt: 900, loss: 0.03 }))).toBe(500)
+  expect(videoHold(many(5, { rtt: 320, loss: 0.03 }), 450)).toBe(450) // 400 is not a clear step down
+  expect(videoHold(many(5, { rtt: 290 }), 450)).toBe(null) // clean again: let go
 })
