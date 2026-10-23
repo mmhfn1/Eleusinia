@@ -456,6 +456,17 @@ async function useSlots(k: Key) {
     try {
       t?.setCodecPreferences(codecs)
     } catch {} // the order is a preference; the default list works too
+  // Voice with spare copies (RED: each packet also carries the one before), the third line after Opus's own repair
+  // and the jitter hold. A longer hold cannot bring back lost voice (it is never resent), a spare copy can: on an
+  // intercontinental test line (4-6 % loss in bursts) it cut the voice patched over from about 3 % to about 1 %. The
+  // spare is only played when a packet is lost; it costs about 17 kbps more upload per person at the default 32 kbps,
+  // so not through a friend's relay (capped) or at high voice bitrates. Chromium cannot switch it mid-call.
+  const lower = (m: string) => m.toLowerCase()
+  const spare = !state.relayed.includes(k) && state.settings.audioKbps <= 64
+  const voice = (RTCRtpReceiver.getCapabilities('audio')?.codecs ?? []).filter((c) => spare || lower(c.mimeType) !== 'audio/red')
+  try {
+    s.voice?.setCodecPreferences(voice.sort((a, b) => Number(lower(b.mimeType) === 'audio/red') - Number(lower(a.mimeType) === 'audio/red')))
+  } catch {}
   if (screen) await s.screen?.sender.replaceTrack(screen.track)
   if (screen?.sound) await s.sound?.sender.replaceTrack(screen.sound)
   if (camera) await s.camera?.sender.replaceTrack(camera.track)
@@ -741,7 +752,7 @@ async function hearing(k: Key, pc: RTCPeerConnection, at: number) {
   })
   const was = heardFrom.get(k)
   if (!was || n !== was.n) heardFrom.set(k, { n, at: n > (was?.n ?? 0) ? at : (was?.at ?? 0) })
-  const target = jitterTarget(jitter, !!voice.jitterBufferTarget)
+  const target = jitterTarget(jitter, voice.jitterBufferTarget ?? null)
   if ('jitterBufferTarget' in voice && voice.jitterBufferTarget !== target) {
     if (target !== null || voice.jitterBufferTarget) log(`holding ${target ?? 0} ms of ${who(k)}'s voice (jitter ${Math.round(jitter)} ms)`)
     voice.jitterBufferTarget = target
@@ -750,11 +761,12 @@ async function hearing(k: Key, pc: RTCPeerConnection, at: number) {
 
 // Their screen and camera wait for resent pieces on a long lossy link (videoHold).
 function holdVideo(k: Key, pc: RTCPeerConnection) {
-  const hold = videoHold(samples.get(k))
   const { screen, camera } = slotsOf(pc)
   for (const t of [screen, camera]) {
     const r = t?.receiver as (RTCRtpReceiver & { jitterBufferTarget?: number | null }) | undefined
-    if (!r || !('jitterBufferTarget' in r) || r.jitterBufferTarget === hold) continue
+    if (!r || !('jitterBufferTarget' in r)) continue
+    const hold = videoHold(samples.get(k), r.jitterBufferTarget ?? null)
+    if (r.jitterBufferTarget === hold) continue
     if (t === camera) log(`holding ${hold ?? 0} ms of ${who(k)}'s video`)
     r.jitterBufferTarget = hold
   }
