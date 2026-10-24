@@ -24,10 +24,12 @@ import {
   type Version,
   versionOf,
 } from '../shared/protocol'
+import DHT from 'hyperdht'
 import { idSeed, readClaims, signClaim, withClaim, writeClaims } from '../shared/idcard'
 import { type FileRef, validFiles } from '../shared/media'
 import { type Area, type Report, cleanReport } from '../shared/reports'
 import { groupIdOf, mergeGroup, missing, ownerOf, signAdd, signEdit, signLeft, signMsg, signRemoved, validGroup, verifyAdd, verifyMsg } from '../shared/sync'
+import { openRequest, requestSeed, sealRequest } from '../shared/sealed'
 import { createImpairment, parseNetSim } from '../shared/netsim'
 import { createFiles } from './files'
 import { type RelayLimits, RELAY_LIMITS, createNet } from './network'
@@ -43,6 +45,9 @@ type Saved = {
   declined?: Record<Key, number> // when we declined or removed someone: their announced requests are ignored for a while
   accepted?: Record<Key, number> // requests we accepted that they have not yet confirmed over a link
   requestedAt?: Record<Key, number> // when each waiting request arrived, so a full list drops the oldest
+  // Per conversation and peer: the most of each author's messages that peer has ever confirmed holding. What they
+  // confirmed is never sent to them again, so someone who steals a key cannot ask friends for the old history.
+  confirmed?: Record<string, Record<Key, Have>>
 }
 
 type Opts = {
@@ -55,6 +60,7 @@ type Opts = {
   links?: (key: Key) => boolean // testing: refuse direct links to some peers, as two strict routers would
   maxRequests?: number // testing: a smaller cap on waiting friend requests
   netsim?: string // testing: a simulated bad line on relayed call packets (ELEUSINIA_TEST_NET, shared/netsim.ts)
+  thumbnail?: (avatar: string) => Buffer | null // a JPEG of the picture under 1 KB for search (index.ts, Electron's nativeImage)
   strict?: boolean // testing: direct connections fail for real, as behind a strict router, so only a relay links
   relayLimits?: RelayLimits // testing: smaller caps on what we relay for contacts
   inbox?: Key // the developers' inbox, where problem and crash reports go
@@ -66,7 +72,7 @@ type Opts = {
 const KEEP_LOGS = 3
 
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
-export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', links, strict, relayLimits, maxRequests = 200, netsim }: Opts) {
+export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', links, strict, relayLimits, maxRequests = 200, netsim, thumbnail }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
   const file = join(dir, 'state.json')
   mkdirSync(join(dir, 'msgs'), { recursive: true })
@@ -115,6 +121,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     relayed: net.keys().filter((k) => known(k) && relayedVia.has(k)),
   })
   const push = () => emit({ type: 'state', state: state() })
+  // For frequent small changes (receipts in a busy group): written within 2 s rather than once per message.
+  let saving: ReturnType<typeof setTimeout> | null = null
+  const saveSoon = () => (saving ??= setTimeout(() => ((saving = null), save()), 2000))
   const changed = () => {
     save()
     push()
@@ -135,9 +144,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (existsSync(logFile(conv))) {
         for (const line of readFileSync(logFile(conv), 'utf8').split('\n')) {
           try {
-            const m: Msg = JSON.parse(line)
-            msgs.push(m)
-            have[m.author] = m.seq
+            const m: Msg | { skip: Have } = JSON.parse(line)
+            if ('skip' in m) for (const [a, n] of Object.entries(m.skip)) have[a] = Math.max(have[a] ?? 0, n)
+            else msgs.push(m), (have[m.author] = m.seq)
           } catch {} // blank or torn last line
         }
       }
@@ -151,6 +160,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   function forget(conv: string) {
     logs.delete(conv)
     haves.delete(conv)
+    delete s.confirmed?.[conv]
   }
   function append(m: Msg) {
     haveOf(m.conv)[m.author] = m.seq
@@ -185,6 +195,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     })
   const sendHave = (key: Key, conv: string, re?: boolean) =>
     net.send(key, { t: 'have', conv, have: haveOf(conv), re })
+  // Group receipts also go to every linked member, at most every 5 s per group, so each of them knows what we hold
+  // and never sends it to our key again (see `confirmed`), not only whoever passed a message on.
+  const receipts = new Set<string>()
+  const sendReceipts = () => {
+    for (const conv of receipts) for (const k of members(conv)) if (k !== me && net.linked(k)) sendHave(k, conv, true)
+    receipts.clear()
+  }
+  const receiptTimer = setInterval(sendReceipts, 5000)
 
   function greet(key: Key) {
     const shared = Object.values(s.groups).filter((g) => g.members.includes(key))
@@ -199,29 +217,6 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     greet(key)
   }
   const spread = (g: Group) => g.members.forEach((m) => m !== me && reach(m))
-
-  // Profile cards we asked strangers for during friend search. Only their answers are accepted.
-  const asking = new Map<Key, { done: (p: Profile) => void; promise: Promise<Profile> }>()
-  function card(key: Key): Promise<Profile> {
-    if (known(key) && s.profiles[key]) return Promise.resolve(s.profiles[key])
-    const pending = asking.get(key)
-    if (pending) return pending.promise
-    let resolve!: (p: Profile) => void
-    const promise = new Promise<Profile>((r) => (resolve = r))
-    // No answer still lets the caller list the person, with the picture generated from their key.
-    const timer = setTimeout(() => done(cleanProfile(null)), 4000)
-    function done(p: Profile) {
-      clearTimeout(timer)
-      asking.delete(key)
-      // Kept a couple of minutes, so sending them a request right after the search needs no new connection.
-      setTimeout(() => !wants(key) && s.friends[key] !== 'incoming' && net.drop(key), 120000)
-      resolve(p)
-    }
-    asking.set(key, { done, promise })
-    if (net.linked(key)) net.send(key, { t: 'who' })
-    else net.dial(key)
-    return promise
-  }
 
   // At most 200 waiting requests. New identities cost nothing, so a full list drops its oldest rather than refusing new
   // ones: a flood of made-up requests can never block real ones for good, and Decline all clears it.
@@ -247,7 +242,6 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       return push()
     }
     if (w.t === 'who') return net.send(key, { t: 'card', ...s.profile })
-    if (w.t === 'card') return asking.get(key)?.done(cleanProfile(w))
     if (w.t === 'hello') {
       if (typeof w.name !== 'string') return
       const st = s.friends[key]
@@ -297,9 +291,29 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     if (w.t === 'have') {
       if (!members(w.conv).includes(key) || !w.have || typeof w.have !== 'object') return
       const have = haveOf(w.conv)
+      const was = s.confirmed?.[w.conv]?.[key] ?? {}
+      const now: Have = { ...was }
+      for (const a of Object.keys(have)) now[a] = Math.max(was[a] ?? 0, Math.min(Number(w.have[a]) || 0, have[a]))
+      if (Object.keys(now).some((a) => now[a] !== was[a])) (((s.confirmed ??= {})[w.conv] ??= {})[key] = now), saveSoon()
+      // Asking again for what it had confirmed: lost data or someone else with that key. Either way it is not sent
+      // again; it is told where to carry on from, so new messages still reach it.
+      if (Object.keys(was).some((a) => (Number(w.have[a]) || 0) < was[a])) {
+        diag('network', `…${key.slice(-6)} asked again for messages it had confirmed; not sent again`)
+        net.send(key, { t: 'have', conv: w.conv, have, re: true, held: was })
+      }
+      // We are told we confirmed holding more than we have (our messages were lost): carry on after them. Logged as a
+      // skip line, so the gap stays known after a restart.
+      const held = w.held && typeof w.held === 'object' ? Object.entries(w.held).filter(([a, n]) => isKey(a) && Number.isSafeInteger(n) && n > (have[a] ?? 0)) : []
+      if (held.length) {
+        const skip = Object.fromEntries(held)
+        for (const [a, n] of held) have[a] = n
+        appendFileSync(logFile(w.conv), JSON.stringify({ skip }) + '\n')
+        diag('network', `…${key.slice(-6)} says we already had ${held.length === 1 ? 'some messages' : 'messages'} we no longer hold; carrying on after them`)
+        sendHave(key, w.conv, true)
+      }
       // Read the log only when they lack something; a receipt for what they already hold costs nothing.
-      if (Object.entries(have).some(([a, n]) => n > (Number(w.have[a]) || 0))) {
-        for (const m of missing(msgsOf(w.conv), w.have)) net.send(key, { t: 'msg', m })
+      if (Object.entries(have).some(([a, n]) => n > (now[a] ?? 0))) {
+        for (const m of missing(msgsOf(w.conv), now)) net.send(key, { t: 'msg', m })
       }
       if (!w.re) sendHave(key, w.conv, true)
       const seq = Math.min(Number(w.have[me]) || 0, have[me] ?? 0)
@@ -319,12 +333,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (!verifyMsg(m)) return
       append(m)
       sendHave(key, m.conv, true) // delivery receipt
+      if (Object.hasOwn(s.groups, m.conv)) receipts.add(m.conv)
       for (const k of ms) if (k !== me && k !== key && k !== m.author) net.send(k, { t: 'msg', m })
     } else if (w.t === 'call') {
       used.set(key, Date.now())
       if (members(w.conv).includes(key)) emit({ type: 'call', from: key, conv: w.conv, data: w.data })
     } else if (w.t === 'gone') {
       delete s.friends[key]
+      s.declined = { ...s.declined, [key]: Date.now() } // their old request, still announced for a while, must not come back
       if (!known(key)) delete s.profiles[key]
       changed()
     } else if (w.t === 'pkt') {
@@ -441,6 +457,15 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const net = createNet(
     keyPair,
     {
+      // Friends, fellow group members and people we asked. A stranger, even one sending a request (it arrives through
+      // the DHT instead), cannot link, so cannot learn our address or see that we are online by dialing.
+      // Someone we asked dialing us has most likely accepted: look now, which matters when the link itself cannot form
+      // (two strict routers) and the acceptance only travels through the DHT. They dial as they accept, so their
+      // announcement may land a moment later: one more look follows in 3 s.
+      admit: (key) => (s.friends[key] === 'outgoing' && ring(key, 3000), known(key) || s.friends[key] === 'outgoing'),
+      // A stranger dialing is how a new request rings: they announce it first, then dial, so looking now finds it at
+      // once instead of at the next 30 s check.
+      knock: (key) => !s.friends[key] && !declinedRecently(key) && ring(key),
       open(key) {
         const by = pendingVia.get(key)
         if (by) {
@@ -455,7 +480,6 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         diag('network', `linked with …${key.slice(-6)}${by ? ' through a friend' : ''}${known(key) ? '' : key === inbox ? ' (developers inbox)' : ' (not a friend)'}`)
         if (key === inbox) deliver()
         if (wants(key)) greet(key)
-        if (asking.has(key)) net.send(key, { t: 'who' })
         if (known(key)) files.opened(key)
         push()
       },
@@ -527,18 +551,37 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
 
   const topic = (id: string) => createHash('sha256').update('eleusinia:' + id).digest()
   const prefixTopic = (prefix: string) => createHash('sha256').update('eleusinia-prefix:' + prefix).digest()
-  // The exact ID, plus every username prefix from 4 letters up so people can be suggested while their ID is typed.
+  // Only with Settings → suggest: every username prefix from 4 letters up, so people can be suggested while typing.
+  // The exact ID is no longer announced (it said whether that ID was online to anyone asking); search finds people
+  // by exact ID through their ID card instead. topic() is still looked up, for copies older than this.
   function topicsOf(handle: string) {
     const user = handle.split('#')[0]
-    const topics = [topic(handle)]
-    for (let n = 4; n <= user.length; n++) topics.push(prefixTopic(user.slice(0, n)))
+    const topics: Buffer[] = []
+    if (s.settings.suggest) for (let n = 4; n <= user.length; n++) topics.push(prefixTopic(user.slice(0, n)))
     return topics
   }
-  // Friend requests do not depend on a direct link, which two strict routers may never manage. Asking someone announces
-  // us on a topic only they watch, and accepting announces back; each side looks at its own topic every 30 seconds.
+  // Friend requests do not depend on a direct link, which two strict routers may never manage, and strangers cannot
+  // link at all. Asking someone announces a sealed request on a topic only they watch (shared/sealed.ts: observers see
+  // a one-off key, not who asks), and accepting announces back; each side looks at its own topic every 30 seconds.
   // Our profile card (no picture) is published as a record signed by our key, so a request or a search result shows
   // who it is without connecting. The direct link, when there is one, still carries everything at once.
   const requestTopic = (key: Key) => createHash('sha256').update('eleusinia-request:' + key).digest()
+  async function announceRequest(to: Key) {
+    const seed = requestSeed(keyPair, to)
+    await net.putShared(seed, sealRequest(keyPair, to, DHT.keyPair(seed).publicKey), Math.floor(Date.now() / 1000))
+    await net.announce(requestTopic(to), seed)
+  }
+  // Who is behind each one-off key on our request topic. Copies older than sealed requests announce their own key:
+  // those are recognised by the profile card published under it.
+  // Not found is retried after 10 minutes: the record may not have spread yet.
+  const senders = new Map<Key, { from: Key | null; at: number }>()
+  async function senderOf(k: Key): Promise<Key | null> {
+    const got = senders.get(k)
+    if (got && (got.from || got.at > Date.now() - 600000)) return got.from
+    const from = openRequest(keyPair, Buffer.from(k, 'hex'), await withTimeout(net.fetch(k), null)) ?? ((await fetchCard(k)) ? k : null)
+    senders.set(k, { from, at: Date.now() })
+    return from
+  }
   const ACCEPT_FOR = 7 * 864e5 // an acceptance is announced until they confirm it, at most this long
   function requesting() {
     // Acceptances past their time, or for someone no longer a friend, are dropped so the saved state does not grow.
@@ -546,16 +589,27 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     return [...Object.keys(s.friends).filter((k) => s.friends[k] === 'outgoing'), ...Object.keys(s.accepted ?? {})]
   }
   let published = 0
+  // Search and requests show a stranger's picture without a link: a small thumbnail is published in a record of its
+  // own (a key pair only we hold, which the signed card points to); the full picture arrives once linked.
+  const thumbSeed = createHash('sha256').update('eleusinia-thumb:').update(keyPair.secretKey).digest()
   function publishCard() {
     if (!s.profile.handle) return
     published = Math.max(published + 1, Math.floor(Date.now() / 1000))
-    const { name, handle, about } = s.profile
-    net.publish(Buffer.from(JSON.stringify({ name, handle, about })), published)
+    const { name, handle } = s.profile
+    const thumb = s.profile.avatar ? thumbnail?.(s.profile.avatar) : null
+    if (thumb) net.putShared(thumbSeed, thumb, published)
+    const card = (about: string) => Buffer.from(JSON.stringify({ name, handle, about, ...(thumb && { thumb: DHT.keyPair(thumbSeed).publicKey.toString('hex') }) }))
+    let about = s.profile.about
+    while (card(about).length > 1000) about = about.slice(0, -10) // records hold 1000 bytes; friends get it whole
+    net.publish(card(about), published)
   }
   async function fetchCard(key: Key): Promise<Profile | null> {
-    const value = await Promise.race([net.fetch(key), new Promise<null>((r) => setTimeout(() => r(null), 6000))])
+    const value = await withTimeout(net.fetch(key), null)
     try {
-      const p = cleanProfile({ ...JSON.parse(String(value)), avatar: '' })
+      const card = JSON.parse(String(value))
+      const thumb = isKey(card.thumb) ? await withTimeout(net.fetch(card.thumb), null) : null
+      const avatar = thumb && thumb[0] === 0xff && thumb[1] === 0xd8 ? 'data:image/jpeg;base64,' + thumb.toString('base64') : ''
+      const p = cleanProfile({ ...card, avatar })
       return p.name && p.handle ? p : null
     } catch {
       return null
@@ -590,14 +644,26 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     return r ? readClaims(handle, r.value).map((c) => c.key) : []
   }
 
+  // At most one look per person per 5 s, and looks never overlap (checkRequests reruns once if rung meanwhile).
+  const knocks = new Map<Key, number>()
+  function ring(key: Key, again?: number) {
+    if ((knocks.get(key) ?? 0) > Date.now() - 5000) return
+    knocks.set(key, Date.now())
+    if (knocks.size > 1000) knocks.clear()
+    checkRequests()
+    if (again) setTimeout(() => s.friends[key] === 'outgoing' && checkRequests(), again)
+  }
   let checking = false
+  let again = false
   async function checkRequests() {
-    if (checking || !s.profile.handle) return
+    if (checking) return void (again = true)
+    if (!s.profile.handle) return
     checking = true
     try {
       let change = false
-      for (const k of await net.lookup(requestTopic(me)).catch(() => [] as Key[])) {
-        if (k === me || !isKey(k)) continue
+      for (const oneOff of await net.lookup(requestTopic(me)).catch(() => [] as Key[])) {
+        const k = isKey(oneOff) ? await senderOf(oneOff) : null
+        if (!k || k === me) continue
         const st = s.friends[k]
         if (st === 'outgoing') {
           s.friends[k] = 'friend' // they accepted
@@ -615,13 +681,16 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (change) changed()
     } finally {
       checking = false
+      if (again) (again = false), checkRequests() // a knock arrived during this look
     }
   }
   const announce = async () => {
     if (!s.profile.handle) return
     if (Date.now() / 1000 - published > 6 * 3600) publishCard() // records last 48 hours
-    if (Date.now() - idPublished > 6 * 3600e3) publishId().then(keepFriendsFindable).catch(() => {})
-    await Promise.all([...topicsOf(s.profile.handle), ...requesting().map(requestTopic)].map(net.announce))
+    // Our ID card is now the only way search finds us, so it is written before startup counts as ready.
+    const card = Date.now() - idPublished > 6 * 3600e3 ? publishId().catch(() => {}) : null
+    card?.then(keepFriendsFindable).catch(() => {})
+    await Promise.all([card,...topicsOf(s.profile.handle).map((t) => net.announce(t)), ...requesting().map(announceRequest)])
   }
   const ready = Promise.all([applyRelay(), announce().then(checkRequests)])
   const announcer = setInterval(announce, 5 * 60000)
@@ -641,7 +710,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         // Re-rolled if someone online already uses that exact ID. People who are offline cannot be checked.
         for (let i = 0; i < 5; i++) {
           clean.handle = username + '#' + String(randomInt(10000)).padStart(4, '0')
-          if (!(await net.lookup(topic(clean.handle))).length) break
+          if (!(await idOwners(clean.handle)).length && !(await net.lookup(topic(clean.handle))).length) break
         }
       }
       s.profile = clean
@@ -660,12 +729,11 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (!exact && (user.length < 4 || !isUsername(user))) return []
       const [around, owners] = await Promise.all([net.lookup(exact ? topic(q) : prefixTopic(user)), exact ? idOwners(q) : Promise.resolve([] as Key[])])
       const keys = [...new Set([...around, ...owners])].filter((k) => k !== me).slice(0, 8)
-      // Their card over a link (with their picture) and their published record (without) are asked for together:
-      // the record answers even when no link can be made.
-      // linked: false means only the record answered so far (no picture); asking again may find the link made.
+      // Contacts as we know them; anyone else from their published card, with its thumbnail (strangers cannot link,
+      // and dialing them would only ring their door before any request exists). linked: whether we have a link now.
       const best = async (key: Key) => {
-        const [viaLink, record] = await Promise.all([card(key), fetchCard(key)])
-        return viaLink.handle ? { profile: viaLink, linked: true } : { profile: record ?? viaLink, linked: false }
+        const profile = (known(key) && s.profiles[key]) || (await fetchCard(key)) || cleanProfile(null)
+        return { profile, linked: net.linked(key) }
       }
       const found = await Promise.all(
         // Found by exact ID we know which ID they announced; found by prefix we only have their own word for it.
@@ -683,13 +751,17 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (profile) s.profiles[key] ??= cleanProfile(profile)
       if (s.declined) delete s.declined[key]
       delete s.requestedAt?.[key]
-      if (s.friends[key] === 'incoming') {
+      const accepting = s.friends[key] === 'incoming'
+      if (accepting) {
         s.friends[key] = 'friend'
         s.accepted = { ...s.accepted, [key]: Date.now() }
       } else if (!s.friends[key]) s.friends[key] = 'outgoing'
       changed()
-      reach(key)
-      net.announce(requestTopic(key)) // reaches them even if no direct link can be made
+      // Accepting: they let us in (we are someone they asked), so the link and the friendship are immediate. Asking: the
+      // request is announced first (it also reaches them when no link ever can), then our dial rings their door.
+      const announced = announceRequest(key).catch(() => {})
+      if (accepting) reach(key)
+      else announced.then(() => reach(key))
     },
     // Declines every waiting request at once, as after a flood of made-up ones; they stay ignored for 30 days.
     declineAll() {
@@ -836,6 +908,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       changed()
       if (p.cacheMB !== undefined) files.trim()
       if (was !== !!s.settings.relay) await applyRelay(), push()
+      if (p.suggest) announce().catch(() => {}) // turned off, the announcements lapse within about 20 minutes
     },
     // Queues a problem or crash report for the developers. It is checked and scrubbed here (shared/reports.ts) as
     // well as at the inbox, then sent whenever the inbox is reachable.
@@ -850,11 +923,13 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       return clean.id
     },
     async destroy() {
+      if (saving) clearTimeout(saving), save()
       clearInterval(timer)
       clearInterval(delivery)
       clearInterval(announcer)
       clearInterval(watcher)
       clearInterval(probeReset)
+      clearInterval(receiptTimer)
       relay.closeAll()
       files.destroy()
       await net.destroy()

@@ -49,6 +49,7 @@ export type Settings = {
   noiseSuppression?: boolean // RNNoise on the microphone; on unless turned off
   relay?: boolean // connect through mutual friends when no direct link works, and relay for them; off unless turned on
   cacheMB?: number // how much room downloaded pictures may take before the oldest are deleted (DEFAULT_CACHE_MB)
+  suggest?: boolean // be suggested to people typing the start of our username (announced while online); off unless turned on
 }
 
 export type State = {
@@ -85,7 +86,7 @@ export type Wire =
   | { t: 'who' } // a stranger asking for our profile, to show it in friend search
   | ({ t: 'card' } & Profile)
   | { t: 'group'; g: Group }
-  | { t: 'have'; conv: string; have: Have; re?: boolean }
+  | { t: 'have'; conv: string; have: Have; re?: boolean; held?: Have } // held: what the receiver already confirmed holding, which is not sent again
   | { t: 'msg'; m: Msg }
   | { t: 'call'; conv: string; data: unknown }
   | { t: 'pkt'; d: string } // a relayed call packet too big for a datagram, base64

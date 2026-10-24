@@ -96,6 +96,7 @@ test('friends, chat, offline delivery and groups end to end', async () => {
   let b = start()
   const c = start()
   await a.node.setProfile({ username: 'ann', name: 'Ann', about: 'hi there', avatar: '' })
+  await Promise.all([named(b), named(c)])
 
   // A stranger cannot message before being accepted
   a.node.addFriend(b.key)
@@ -142,7 +143,12 @@ test('friends, chat, offline delivery and groups end to end', async () => {
 }, 120000)
 
 type N = { node: ReturnType<typeof createNode>; dir: string; keyPair: any; key: string }
+// Strangers cannot link, so a request travels through the DHT, which needs a profile, as every real user has.
+const named = async (n: N) => {
+  if (!n.node.state().profile.handle) await n.node.setProfile({ username: 'u' + n.key.slice(0, 6), name: 'U' })
+}
 async function befriend(x: N, y: N) {
+  await Promise.all([named(x), named(y)])
   x.node.addFriend(y.key)
   await until(() => y.node.state().friends[x.key] === 'incoming')
   y.node.addFriend(x.key)
@@ -168,7 +174,7 @@ test('a direct message survives the sender restarting before the recipient retur
   await until(() => texts(a, dm).includes('got them'))
 }, 120000)
 
-test('a member offline since before the group existed gets it, and its messages, from a member who is not their friend', async () => {
+test('a member offline since before the group existed gets it from a friend, then its messages from a member who is not', async () => {
   let a = start()
   let b = start()
   const c = start()
@@ -182,8 +188,14 @@ test('a member offline since before the group existed gets it, and its messages,
   await a.node.destroy()
   c.node.send(gid, 'c here')
 
-  b = restart(b) // only C is online now, and B has never met C
-  await until(() => texts(b, gid).join() === 'welcome,c here')
+  // Only C is online, and B has never met C: C cannot link to B (strangers are turned away) until B knows the group
+  b = restart(b)
+  await new Promise((r) => setTimeout(r, 2000))
+  expect(b.node.state().groups[gid]).toBeUndefined()
+  a = restart(a) // B's friend hands it over, with proof that A added B
+  await until(() => !!b.node.state().groups[gid])
+  await a.node.destroy()
+  await until(() => texts(b, gid).join() === 'welcome,c here') // 'c here' only C has
   expect(b.node.state().friends[c.key]).toBeUndefined()
 
   // And back the other way: B writes while the group's creator is away
@@ -196,7 +208,7 @@ test('a member offline since before the group existed gets it, and its messages,
 
 const PNG = 'data:image/png;base64,AAAA'
 
-test('setup assigns username#1234; search shows a stranger with their picture and adds only the one picked', async () => {
+test('setup assigns username#1234; search shows a stranger from their published card and adds only the one picked', async () => {
   const a = start()
   const b = start()
   await expect(b.node.setProfile({ username: 'no spaces!', name: 'Bob' })).rejects.toThrow(/Usernames/)
@@ -210,7 +222,8 @@ test('setup assigns username#1234; search shows a stranger with their picture an
   expect(b.node.state().profile).toMatchObject({ handle: id, name: 'Bob' })
 
   const found = await a.node.findFriend(' ' + id.toUpperCase() + ' ')
-  expect(found).toEqual([{ key: b.key, linked: true, profile: { handle: id, name: 'Bob', about: 'hello', avatar: PNG } }]) // over a link, so with the picture
+  // Strangers cannot link, so the card comes from the DHT record: no picture until they are friends
+  expect(found).toEqual([{ key: b.key, linked: false, profile: { handle: id, name: 'Bob', about: 'hello', avatar: '' } }])
   // Searching alone asks nothing of the other person
   expect(a.node.state().friends).toEqual({})
   expect(b.node.state().friends).toEqual({})
@@ -251,28 +264,87 @@ test('two people with the same ID are both listed and only the chosen one gets t
   expect(b.node.state().friends).toEqual({})
 }, 120000)
 
-test('a profile card nobody asked for is ignored, while a stranger may ask for ours', async () => {
+test('a request rings at once and accepting is immediate, with the real 30 s checks, while a stranger still cannot link', async () => {
+  const real = () => {
+    const dir = mkdtempSync(join(tmpdir(), 'eleusinia-'))
+    const keyPair = DHT.keyPair()
+    const node = createNode({ dir, keyPair, emit: () => {}, dht: { bootstrap: testnet.bootstrap }, redialMs: 15000 })
+    const n = { node, dir, keyPair, key: keyPair.publicKey.toString('hex') as string }
+    nodes.push(n)
+    return n
+  }
+  const a = real()
+  const b = real()
+  await Promise.all([named(a), named(b)])
+  await new Promise((r) => setTimeout(r, 1000)) // past the startup check, so only the knock can find it in time
+  let t = Date.now()
+  a.node.addFriend(b.key)
+  await expect.poll(() => b.node.state().friends[a.key], { timeout: 8000, interval: 50 }).toBe('incoming')
+  const rang = Date.now() - t
+  expect(b.node.state().online).not.toContain(a.key) // the knock was turned away
+  t = Date.now()
+  b.node.addFriend(a.key)
+  await expect.poll(() => a.node.state().friends[b.key] === 'friend' && a.node.state().online.includes(b.key), { timeout: 8000, interval: 50 }).toBe(true)
+  const accepted = Date.now() - t
+  console.log(`request arrived in ${rang} ms, acceptance in ${accepted} ms`)
+}, 60000)
+
+test('a stranger sees our picture in search and requests, as a small thumbnail, without linking', async () => {
+  const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(200, 7)]) // stands in for nativeImage's JPEG
+  const dir = mkdtempSync(join(tmpdir(), 'eleusinia-'))
+  const keyPair = DHT.keyPair()
+  const node = createNode({ dir, keyPair, emit: () => {}, dht: { bootstrap: testnet.bootstrap }, redialMs: 300, thumbnail: () => jpeg })
+  const b = { node, dir, keyPair, key: keyPair.publicKey.toString('hex') as string }
+  nodes.push(b)
+  const a = start()
+  await named(a)
+  await b.node.setProfile({ username: 'pictured', name: 'Pic', about: 'x'.repeat(200), avatar: PNG })
+  const found = await a.node.findFriend(b.node.state().profile.handle)
+  expect(found).toHaveLength(1)
+  expect(found[0].linked).toBe(false)
+  expect(found[0].profile.avatar).toBe('data:image/jpeg;base64,' + jpeg.toString('base64'))
+  b.node.addFriend(a.key)
+  await until(() => a.node.state().friends[b.key] === 'incoming')
+  expect(a.node.state().profiles[b.key].avatar).toBe('data:image/jpeg;base64,' + jpeg.toString('base64'))
+}, 120000)
+
+test('someone watching the request topic of a person sees one-off keys, never who is asking', async () => {
+  const a = start()
+  const b = start()
+  await Promise.all([named(a), named(b)])
+  a.node.addFriend(b.key)
+  await until(() => b.node.state().friends[a.key] === 'incoming')
+  const watcher = createNet(DHT.keyPair(), { open() {}, close() {}, msg() {} }, { bootstrap: testnet.bootstrap })
+  const { createHash } = await import('node:crypto')
+  const seen = await watcher.lookup(createHash('sha256').update('eleusinia-request:' + b.key).digest())
+  expect(seen.length).toBeGreaterThan(0)
+  expect(seen).not.toContain(a.key)
+  await watcher.destroy()
+}, 120000)
+
+test('a stranger cannot link at all, so cannot learn our address, ask for our card or push one on us', async () => {
   const a = start()
   await a.node.setProfile({ username: 'ann', name: 'Ann' })
-  const got = await new Promise<any>((resolve) => {
-    const raw = createNet(
-      DHT.keyPair(),
-      {
-        open(k) {
-          raw.send(k, { t: 'card', handle: 'evil#0000', name: 'Evil', about: '', avatar: '' })
-          raw.send(k, { t: 'who' })
-        },
-        close() {},
-        msg: (_k, w) => resolve({ w, raw }),
+  let opened = false
+  const raw = createNet(
+    DHT.keyPair(),
+    {
+      open(k) {
+        opened = true
+        raw.send(k, { t: 'card', handle: 'evil#0000', name: 'Evil', about: '', avatar: '' })
+        raw.send(k, { t: 'who' })
       },
-      { bootstrap: testnet.bootstrap },
-    )
-    raw.dial(a.key)
-  })
-  expect(got.w).toMatchObject({ t: 'card', name: 'Ann' })
+      close() {},
+      msg() {},
+    },
+    { bootstrap: testnet.bootstrap },
+  )
+  raw.dial(a.key)
+  await new Promise((r) => setTimeout(r, 5000))
+  expect(opened).toBe(false)
   expect(a.node.state().friends).toEqual({})
   expect(a.node.state().profiles).toEqual({})
-  await got.raw.destroy()
+  await raw.destroy()
 }, 120000)
 
 test('a friend request between people already in a group together arrives as a request, not as a friendship', async () => {
@@ -345,10 +417,13 @@ test('one person in several groups: each group keeps its own members and message
   expect(texts(b, g2)).toEqual([])
 }, 120000)
 
-test('suggestions start at 4 letters of a username and narrow as more is typed', async () => {
+test('suggestions, for those who turn them on, start at 4 letters of a username and narrow as more is typed', async () => {
   const a = start()
   const b = start()
   const c = start()
+  const d = start()
+  for (const n of [b, c]) await n.node.setSettings({ suggest: true })
+  await d.node.setProfile({ username: 'bobbin', name: 'Hidden' }) // suggestions off: found only by exact ID
   await b.node.setProfile({ username: 'bobby', name: 'Bob', about: '', avatar: PNG })
   await c.node.setProfile({ username: 'bobcat', name: 'Cat' })
   await a.node.setProfile({ username: 'ann_x', name: 'Ann' })
@@ -362,7 +437,8 @@ test('suggestions start at 4 letters of a username and narrow as more is typed',
   expect(await keys('bobby#')).toEqual([b.key])
   expect(await keys(b.node.state().profile.handle.slice(0, 8))).toEqual([b.key])
   expect(await keys('zzzz')).toEqual([])
-  expect((await a.node.findFriend('bobb'))[0].profile.avatar).toBe(PNG)
+  expect(await keys('bobbi')).toEqual([])
+  expect(await keys(d.node.state().profile.handle)).toEqual([d.key])
   // Searching sends no friend request
   expect(b.node.state().friends).toEqual({})
 }, 120000)
@@ -470,6 +546,37 @@ test('leaving a group: others learn it, even one who was offline, and the leaver
   expect(b.node.state().groups[gid]).toBeUndefined()
 }, 120000)
 
+test('a stolen key gets no old history: what a peer confirmed is never sent to it again', async () => {
+  const a = start()
+  let b = start()
+  const c = start()
+  await befriend(a, b)
+  await befriend(a, c)
+  await befriend(b, c)
+  const dm = dmId(a.key, b.key)
+  const gid = a.node.createGroup('trio', [b.key, c.key])
+  await until(() => !!b.node.state().groups[gid] && !!c.node.state().groups[gid])
+  a.node.send(dm, 'old secret')
+  a.node.send(gid, 'old group secret')
+  await until(() => texts(b, dm).includes('old secret') && texts(b, gid).includes('old group secret'))
+  await new Promise((r) => setTimeout(r, 6000)) // B's receipts reach A and C
+  // Someone with B's key and B's friends and groups (state.json), but none of B's messages
+  const keyPair = b.keyPair
+  await b.node.destroy()
+  const stolen = mkdtempSync(join(tmpdir(), 'eleusinia-'))
+  writeFileSync(join(stolen, 'state.json'), readFileSync(join(b.dir, 'state.json')))
+  b = start(stolen, keyPair)
+  await until(() => b.node.state().online.includes(a.key) && b.node.state().online.includes(c.key))
+  await new Promise((r) => setTimeout(r, 3000))
+  expect(texts(b, dm)).toEqual([])
+  expect(texts(b, gid)).toEqual([])
+  // Messages sent from now on still arrive: only what was already confirmed is held back
+  a.node.send(dm, 'new')
+  c.node.send(gid, 'new in group')
+  await until(() => texts(b, dm).includes('new') && texts(b, gid).includes('new in group'))
+  expect(texts(b, dm)).toEqual(['new'])
+}, 120000)
+
 test('the owner removes a member: everyone learns it, the removed member loses the group and is heard no more', async () => {
   const a = start()
   const b = start()
@@ -513,10 +620,7 @@ test('deleting an account erases it from this computer, leaves its groups and te
 test('only a few conversations stay in memory; the rest are read back from disk, and history can be limited', async () => {
   const a = start()
   let b = start()
-  a.node.addFriend(b.key)
-  await until(() => b.node.state().friends[a.key] === 'incoming')
-  b.node.addFriend(a.key)
-  await until(() => a.node.state().friends[b.key] === 'friend' && a.node.state().online.includes(b.key))
+  await befriend(a, b)
   const dm = dmId(a.key, b.key)
   for (const t of ['one', 'two', 'three']) a.node.send(dm, t)
   await until(() => texts(b, dm).length === 3)
@@ -549,9 +653,7 @@ test('peers tell each other their version; a hello without one counts as 0.0.1, 
   }
   const a = mk('0.0.2')
   const b = mk('0.0.7')
-  a.node.addFriend(b.key)
-  await until(() => b.node.state().friends[a.key] === 'incoming')
-  b.node.addFriend(a.key)
+  await befriend(a, b)
   await until(() => a.node.state().versions[b.key]?.app === '0.0.7' && b.node.state().versions[a.key]?.app === '0.0.2')
   expect(a.node.state().versions[b.key]).toEqual({ app: '0.0.7', call: CALL_VERSION })
   expect(versionOf({})).toEqual({ app: '0.0.1 or older', call: 1 })
@@ -758,15 +860,17 @@ test('a full request list drops its oldest instead of refusing new ones, and Dec
     x.node.addFriend(b.key)
     await until(() => b.node.state().friends[x.key] === 'incoming')
   }
-  // The first is pushed out by the third: the list never refuses someone new.
-  expect(Object.keys(b.node.state().friends).sort()).toEqual([askers[1].key, askers[2].key].sort())
+  // The list stays at its cap and never refuses someone new (the one pushed out was not declined, so it may come back)
+  expect(Object.keys(b.node.state().friends)).toHaveLength(2)
+  expect(Object.keys(b.node.state().friends)).toContain(askers[2].key)
+  const declined = Object.keys(b.node.state().friends)
   b.node.declineAll()
   expect(b.node.state().friends).toEqual({})
   await new Promise((r) => setTimeout(r, 2000)) // their requests are still announced and they still dial
-  // The two declined stay gone; the one the full list dropped was never declined, so its request may come back.
+  // Whoever was declined stays gone; one the full list had pushed out was never declined, so it may come back.
   const back = Object.keys(b.node.state().friends)
-  expect(back).not.toContain(askers[1].key)
-  expect(back).not.toContain(askers[2].key)
+  for (const k of declined) expect(back).not.toContain(k)
+  expect(back.length).toBeLessThanOrEqual(1)
 }, 60000)
 
 test('a message with files is signed with them, and changing a file in it breaks the signature', () => {

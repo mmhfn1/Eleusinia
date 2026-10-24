@@ -225,6 +225,17 @@ function startApp() {
     noDirect: process.env.ELEUSINIA_NO_DIRECT === '1',
     strict: process.env.ELEUSINIA_STRICT === '1', // testing: behave as behind a strict router (smoke's relayed mode)
     netsim: process.env.ELEUSINIA_TEST_NET, // testing: a simulated bad line for calls (shared/netsim.ts)
+    thumbnail: (avatar) => {
+      const img = nativeImage.createFromDataURL(avatar)
+      if (img.isEmpty()) return null
+      // Must fit one DHT record: a smaller size before a blurrier one (a JPEG's tables alone take about 450 bytes)
+      for (const size of [48, 40, 32])
+        for (const q of [60, 40, 25]) {
+          const jpeg = img.resize({ width: size, height: size, quality: 'best' }).toJPEG(q)
+          if (jpeg.length <= 950) return jpeg
+        }
+      return null
+    },
     dht: testDht(),
     // Only the installed app reports to the real inbox, so development runs (stopped with Ctrl+C) never send any.
     inbox: isKey(process.env.ELEUSINIA_INBOX) ? process.env.ELEUSINIA_INBOX : app.isPackaged ? INBOX_KEY : undefined,
