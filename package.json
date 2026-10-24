@@ -93,7 +93,10 @@
         "provider": "github",
         "owner": "mmhfn1",
         "repo": "Eleusinia",
-        "releaseType": "release"
+        "releaseType": "release",
+        "publisherName": [
+          "Eleusinia"
+        ]
       }
     ]
   }

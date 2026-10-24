@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { basename, join } from 'node:path'
@@ -12,6 +13,7 @@ import { type FileRef, inlineKind, mimeOf, safeName } from '../shared/media'
 import { isKey } from '../shared/protocol'
 import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared/reports'
 import { kindOf, shareable } from '../shared/sources'
+import { verifyUpdate } from '../shared/updatesig'
 import { createInbox } from './inbox'
 import { createNode } from './node'
 
@@ -87,12 +89,34 @@ app.whenReady().then(async () => firstCopy && (inboxMode ? startInbox() : (await
 const updatable = () => app.isPackaged && process.env.ELEUSINIA_NO_UPDATES !== '1'
 const updateFeed = () => process.env.ELEUSINIA_UPDATE_URL && autoUpdater.setFeedURL({ provider: 'generic', url: process.env.ELEUSINIA_UPDATE_URL })
 
+// Every downloaded installer must carry a signature by Eleusinia's update key (shared/updatesig.ts), fetched from the
+// same release; otherwise electron-updater deletes it and installs nothing. This is its code-signing hook, which runs
+// because app-update.yml names a publisher (package.json, publish).
+let offered = '' // the version being downloaded
+let guarded = false
+function guardUpdates() {
+  if (guarded) return
+  guarded = true
+  autoUpdater.on('update-available', (i) => (offered = i.version))
+  ;(autoUpdater as unknown as { verifyUpdateCodeSignature: (names: string[], file: string) => Promise<string | null> }).verifyUpdateCodeSignature = async (_names, file) => {
+    const v = offered
+    const base = process.env.ELEUSINIA_UPDATE_URL?.replace(/\/+$/, '') ?? `https://github.com/mmhfn1/Eleusinia/releases/download/v${v}`
+    const sig = await net
+      .fetch(`${base}/Eleusinia-Setup-${v}.exe.sig`)
+      .then((r) => (r.ok ? r.text() : ''))
+      .catch(() => '')
+    const sha512 = createHash('sha512').update(readFileSync(file)).digest('hex')
+    return verifyUpdate(v, sha512, sig.trim()) ? null : `not signed with the Eleusinia update key (${v})`
+  }
+}
+
 // Every start first asks for a newer release (at most 6 s, so being offline never holds it up). When there is one, a
 // small window shows the download, then it installs quietly and opens the new version; this copy never starts.
 // Resolves true to start this version.
 async function updateFirst() {
   if (!updatable()) return true
   updateFeed()
+  guardUpdates()
   autoUpdater.autoDownload = false
   const found = await Promise.race([autoUpdater.checkForUpdates().catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 6000))])
   if (!found?.isUpdateAvailable) return true
@@ -116,6 +140,7 @@ async function updateFirst() {
 function startUpdates(ready: (version: string) => void, diag: (area: 'app' | 'error', text: string) => void) {
   if (!updatable()) return
   updateFeed()
+  guardUpdates()
   autoUpdater.autoDownload = true
   autoUpdater.autoInstallOnAppQuit = true
   autoUpdater.on('update-available', (i) => diag('app', `update ${i.version} found, downloading`))

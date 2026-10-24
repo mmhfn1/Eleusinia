@@ -470,6 +470,30 @@ test('leaving a group: others learn it, even one who was offline, and the leaver
   expect(b.node.state().groups[gid]).toBeUndefined()
 }, 120000)
 
+test('the owner removes a member: everyone learns it, the removed member loses the group and is heard no more', async () => {
+  const a = start()
+  const b = start()
+  const c = start()
+  await befriend(a, b)
+  await befriend(a, c)
+  const gid = a.node.createGroup('club', [b.key, c.key])
+  await until(() => !!b.node.state().groups[gid] && !!c.node.state().groups[gid])
+  expect(b.node.state().groups[gid].owner).toBe(a.key)
+  b.node.removeFromGroup(gid, c.key) // not the owner: nothing happens
+  await new Promise((r) => setTimeout(r, 500))
+  expect(a.node.state().groups[gid].members).toContain(c.key)
+
+  a.node.removeFromGroup(gid, c.key)
+  await until(() => !b.node.state().groups[gid].members.includes(c.key) && !c.node.state().groups[gid])
+  expect(() => c.node.send(gid, 'still here?')).toThrow()
+  a.node.send(gid, 'without c')
+  await until(() => texts(b, gid).includes('without c'))
+  expect(texts(c, gid)).not.toContain('without c')
+  a.node.addToGroup(gid, c.key) // removal is for good
+  await new Promise((r) => setTimeout(r, 500))
+  expect(a.node.state().groups[gid].members).not.toContain(c.key)
+}, 120000)
+
 test('deleting an account erases it from this computer, leaves its groups and tells online friends', async () => {
   const a = start()
   const b = start()

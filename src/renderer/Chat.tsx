@@ -1,7 +1,7 @@
 // A conversation's messages: history, live updates, delivery marks and the message box.
 import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { type FileRef, MAX_FILES, inlineKind, sizeLabel } from '../shared/media'
-import { type FileState, type Msg, type State, MAX_TEXT, stack } from '../shared/protocol'
+import { type FileState, type Key, type Msg, type State, MAX_TEXT, stack } from '../shared/protocol'
 import * as call from './call'
 import { Avatar, Dialog, Emblem, GroupEmblem, Icon } from './ui'
 import { type People, type Run, api } from './common'
@@ -18,6 +18,7 @@ const PAGE = 200
 
 export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   const [leaving, setLeaving] = useState(false)
+  const [removing, setRemoving] = useState<Key | null>(null)
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [acked, setAcked] = useState(0)
   const [loaded, setLoaded] = useState(false)
@@ -98,7 +99,8 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
 
   const group = st.groups[conv]
   const other = conv.split('_').find((k) => k !== st.me)!
-  const addable = group ? Object.keys(st.friends).filter((k) => st.friends[k] === 'friend' && !group.members.includes(k) && !group.left?.[k]) : []
+  const addable = group ? Object.keys(st.friends).filter((k) => st.friends[k] === 'friend' && !group.members.includes(k) && !group.left?.[k] && !group.removed?.[k]) : []
+  const removable = group?.owner === st.me ? group.members.filter((k) => k !== st.me) : []
   const sorted = [...msgs].sort((a, b) => a.ts - b.ts)
   const lastDelivered = [...sorted].reverse().find((m) => m.author === st.me && m.seq <= acked)
 
@@ -205,12 +207,39 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
             </select>
           </label>
         )}
+        {removable.length > 0 && (
+          <label className="add-member">
+            <Icon name="leave" size={16} />
+            <select aria-label="Remove a member" value="" onChange={(e) => setRemoving(e.target.value || null)}>
+              <option value="">Remove member…</option>
+              {removable.map((k) => (
+                <option key={k} value={k}>
+                  {name(k)}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
         {group && (
           <button className="icon-button" aria-label="Leave group" title="Leave group" onClick={() => setLeaving(true)}>
             <Icon name="leave" size={18} />
           </button>
         )}
       </header>
+      {removing && (
+        <Dialog label="Remove member" close={() => setRemoving(null)}>
+          <h1>Remove {name(removing)}?</h1>
+          <p>They stop receiving this group's messages and cannot be added back. Anyone only they added leaves with them until someone adds them again.</p>
+          <div className="form-actions">
+            <button className="button" onClick={() => setRemoving(null)}>
+              Cancel
+            </button>
+            <button className="button danger" onClick={() => (run(api.call('removeFromGroup', conv, removing)), setRemoving(null))}>
+              <Icon name="leave" size={16} /> Remove
+            </button>
+          </div>
+        </Dialog>
+      )}
       {leaving && (
         <Dialog label="Leave group" close={() => setLeaving(false)}>
           <h1>Leave {title}?</h1>

@@ -4,9 +4,24 @@ import type { FileRef } from './media'
 export type Key = string // 64 hex chars: ed25519 public key, also the friend code
 export type FriendStatus = 'friend' | 'outgoing' | 'incoming'
 export type Add = { by: Key; sig: string } // proof that `by` added a member to a group
-// left: members who left, each with their own signature, so nobody can be removed by someone else.
-// avatar: the group's picture, a small image data URL like a profile's (any member can change it).
-export type Group = { id: string; name: string; members: Key[]; updatedAt: number; adds?: Record<Key, Add>; left?: Record<Key, string>; avatar?: string }
+// adds: for every member but the owner, the signed proof of who added them (shared/sync.ts checks the chain).
+// left: members who left, each with their own signature. removed: members the owner removed, signed by the owner.
+// owner: who created it; nonce: with the owner, what the id is derived from, so no one else can claim it (groups from
+// before owners have neither, and their owner is found once from the copy stored here).
+// edit: the member's signature over the name, picture and updatedAt. avatar: a small image data URL like a profile's.
+export type Group = {
+  id: string
+  name: string
+  members: Key[]
+  updatedAt: number
+  adds?: Record<Key, Add>
+  left?: Record<Key, string>
+  removed?: Record<Key, string>
+  owner?: Key
+  nonce?: string
+  edit?: Add
+  avatar?: string
+}
 // files: shared files, referenced by hash (shared/media.ts); text may then be empty.
 export type Msg = { conv: string; author: Key; seq: number; ts: number; text: string; files?: FileRef[]; sig: string }
 export type Have = Record<Key, number> // highest seq held, per author
