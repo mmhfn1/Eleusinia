@@ -19,7 +19,10 @@ const children = []
 setTimeout(() => (console.error('FAIL overall timeout'), children.forEach((c) => c.kill()), process.exit(2)), 420000)
 
 const publicDht = process.env.ELEUSINIA_SMOKE_PUBLIC === '1'
-const testnet = publicDht ? null : await createTestnet(3)
+// 10 nodes, not 3: for two copies on one machine hyperdht races a LAN shortcut against hole punching, and the side
+// being dialed aborts the punch (and with it the stream the dialer already reports open) unless a fresh socket of its
+// gets 3 address samples, which 3 nodes often cannot give. Such a link dies silently ~13 s later.
+const testnet = publicDht ? null : await createTestnet(10)
 const bootstrap = testnet?.bootstrap.map((n) => `${n.host}:${n.port}`).join(',')
 // The app reads ELEUSINIA_BOOTSTRAP only when set; in public mode it is removed, in case the shell has one.
 const { ELEUSINIA_BOOTSTRAP: _, ...baseEnv } = process.env
@@ -314,11 +317,13 @@ try {
   for (const p of [a, b, c]) await p.ev(`api.call('setSettings', { noiseSuppression: false })`)
 
   console.log('--- Friend search suggestions')
+  await b.ev(`api.call('setSettings', { suggest: true })`) // only those who turn it on are suggested; Cy is found by exact ID
   for (const [p, n] of [[b, 'Bob'], [c, 'Cy']]) {
     const tail = await p.ev(`api.call('state').then(s => s.me.slice(-6).toUpperCase())`)
     // Type the first 4 letters of the username, as a person would, and wait for the suggestion.
     const typed = n === 'Bob' ? ids[n].slice(0, 4).toUpperCase() : ids[n].toUpperCase()
     await a.ev(`(() => { const i = document.querySelector('.search-box input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, '${typed}'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+    // Strangers cannot link: pictures come from the thumbnail published with the card
     const pic = n === 'Cy' ? '.avatar svg' : '.avatar img'
     await until(`typing "${typed}" suggests ${n}: ${n === 'Cy' ? 'generated' : 'uploaded'} picture, ID, Unique Key ${tail}`, () =>
       a.ev(`(() => { const r = document.querySelectorAll('.result'); return r.length === 1 && !!r[0].querySelector('${pic}') && r[0].textContent.includes('${ids[n]}') && r[0].querySelector('.tail').textContent === '${tail}' })()`))

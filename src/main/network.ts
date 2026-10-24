@@ -27,6 +27,10 @@ type Handlers = {
   msg(key: Key, w: Wire): void
   packet?(key: Key, b: Buffer): void
   failed?(key: Key, via?: Key): void // a dial ended without a link
+  // Who may link to us. Decided before the handshake completes, so whoever is turned away never learns our address.
+  admit?(key: Key): boolean
+  // Someone turned away by `admit`: they learn nothing, but their (verified) key says someone is at the door.
+  knock?(key: Key): void
 }
 type KeyPair = { publicKey: Buffer; secretKey: Buffer }
 export type RelayLimits = { pairs: number; perContact: number; bytesPerSec: number }
@@ -89,8 +93,14 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
     on.open(key) // also after a replacement: greeting twice is harmless, a lost greeting is not
   }
 
-  // A peer asking to link through a relay is turned away unless we use relays ourselves.
-  const firewall = (_key: Buffer, payload: any) => !!payload?.relayThrough && !usesRelays
+  // A peer asking to link through a relay is turned away unless we use relays ourselves, and anyone not admitted is.
+  const firewall = (key: Buffer, payload: any) => {
+    if (payload?.relayThrough && !usesRelays) return true
+    const k = key.toString('hex')
+    if (on.admit?.(k) ?? true) return false
+    on.knock?.(k)
+    return true
+  }
   const server = dht.createServer({ firewall, ...(strict && STRICT.server) }, (sock: any) => {
     sock.on('error', () => {})
     adopt(sock, sock.remotePublicKey.toString('hex'))
@@ -153,6 +163,34 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
     await srv.listen(relayKeyPair(keyPair.secretKey))
   }
 
+  // `via`: a contact's relay key, for peers no direct dial reaches.
+  function dial(key: Key, via?: Key, again = true) {
+    const id = via ? key + '@' + via : key
+    if (links.has(key) || dialing.has(id) || !allow(key)) return
+    dialing.add(id)
+    let opened = false
+    const sock = dht.connect(Buffer.from(key, 'hex'), { keyPair, relayThrough: via ? Buffer.from(via, 'hex') : null })
+    sock.on('error', () => {}) // offline peers end up here; the caller redials on a timer
+    sock.on('close', () => {
+      dialing.delete(id)
+      if (!opened) on.failed?.(key, via)
+    })
+    sock.on('open', () => {
+      opened = true
+      dialing.delete(id)
+      adopt(sock, me)
+      // hyperdht reports open before the other side answers, and that side can already have dropped the stream
+      // (it aborts a hole punch raced against a LAN shortcut). Its greeting comes within a round trip, so a stream
+      // that has heard nothing in 3 s is dead: drop it and dial once more at once, instead of waiting ~13 s for
+      // UDX to give up and then for the redial timer.
+      setTimeout(() => {
+        if (links.get(key)?.sock !== sock || sock.rawStream?.bytesReceived !== 0) return
+        if (again) sock.once('close', () => dial(key, via, false)) // after adopt's close handler frees the slot
+        sock.destroy()
+      }, 3000)
+    })
+  }
+
   return {
     listening,
     linked: (key: Key) => links.has(key),
@@ -165,24 +203,7 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
       const sock = links.get(key)?.sock
       return (sock?._writableState?.buffered ?? 0) + (sock?.rawStream?._writableState?.buffered ?? 0)
     },
-    // `via`: a contact's relay key, for peers no direct dial reaches.
-    dial(key: Key, via?: Key) {
-      const id = via ? key + '@' + via : key
-      if (links.has(key) || dialing.has(id) || !allow(key)) return
-      dialing.add(id)
-      let opened = false
-      const sock = dht.connect(Buffer.from(key, 'hex'), { keyPair, relayThrough: via ? Buffer.from(via, 'hex') : null })
-      sock.on('error', () => {}) // offline peers end up here; the caller redials on a timer
-      sock.on('close', () => {
-        dialing.delete(id)
-        if (!opened) on.failed?.(key, via)
-      })
-      sock.on('open', () => {
-        opened = true
-        dialing.delete(id)
-        adopt(sock, me)
-      })
-    },
+    dial,
     // Where the link's packets go now: the relay's address while relayed, the peer's once hyperdht finds a direct path.
     path(key: Key) {
       const raw = links.get(key)?.sock.rawStream
@@ -196,7 +217,8 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
       return on ? relayKeyPair(keyPair.secretKey).publicKey.toString('hex') : null
     },
     // Topics let a peer be found by something shorter than its key; records expire, so callers re-announce.
-    announce: (topic: Buffer) => dht.announce(topic, keyPair).finished().catch(() => {}) as Promise<void>,
+    // With a seed, under a one-off key pair made from it instead of our identity (see shared/sealed.ts).
+    announce: (topic: Buffer, seed?: Buffer) => dht.announce(topic, seed ? DHT.keyPair(seed) : keyPair).finished().catch(() => {}) as Promise<void>,
     async lookup(topic: Buffer) {
       const keys = new Set<Key>()
       for await (const r of dht.lookup(topic)) for (const peer of r.peers) keys.add(peer.publicKey.toString('hex'))

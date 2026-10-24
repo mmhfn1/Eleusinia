@@ -252,6 +252,13 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
             what you say. Voice, text and pictures only
           </span>
         </label>
+        <label className="check-row">
+          <input type="checkbox" role="switch" checked={!!st.settings.suggest} onChange={(e) => api.call('setSettings', { suggest: e.target.checked })} />
+          <span>
+            Suggest me to people typing the start of my username. Anyone can then see when you are online; with this off
+            you are found only by your exact friend ID
+          </span>
+        </label>
       </section>
       <section className="settings-section">
         <h2>Storage</h2>
