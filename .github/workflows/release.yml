@@ -22,13 +22,18 @@ concurrency:
 
 jobs:
   release:
+    # Only main is released, also when run by hand. The signing key lives in the `release` environment, which can be
+    # limited to main and given required reviewers in the repository settings.
+    if: github.ref == 'refs/heads/main'
+    environment: release
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      # Actions are pinned to exact commits: a moved tag cannot change what builds the release.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0 # the release tags, to number this one
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
@@ -63,6 +68,14 @@ jobs:
           npx electron-vite build
           npx electron-builder --win --publish never
 
+      # The update signature installed copies require before installing (src/shared/updatesig.ts). Fails without the
+      # key, so no unsigned release goes out.
+      - name: Sign
+        shell: bash
+        run: node build/sign-update.cjs "dist/Eleusinia-Setup-$VERSION.exe" "$VERSION"
+        env:
+          UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+
       # One step publishes the installer with its update files (latest.yml, which installed copies read, and the
       # blockmap for small updates). electron-builder's own publishing uploads them in parallel, and each upload
       # then tries to create the release, which fails for all but the first.
@@ -72,6 +85,7 @@ jobs:
           gh release create "v$VERSION" \
             "dist/Eleusinia-Setup-$VERSION.exe" \
             "dist/Eleusinia-Setup-$VERSION.exe.blockmap" \
+            "dist/Eleusinia-Setup-$VERSION.exe.sig" \
             dist/latest.yml \
             --title "$VERSION" --target "$GITHUB_SHA" --generate-notes
         env:

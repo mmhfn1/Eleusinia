@@ -27,7 +27,7 @@ import {
 import { idSeed, readClaims, signClaim, withClaim, writeClaims } from '../shared/idcard'
 import { type FileRef, validFiles } from '../shared/media'
 import { type Area, type Report, cleanReport } from '../shared/reports'
-import { mergeGroup, missing, signAdd, signLeft, signMsg, validGroup, verifyAdd, verifyMsg } from '../shared/sync'
+import { groupIdOf, mergeGroup, missing, ownerOf, signAdd, signEdit, signLeft, signMsg, signRemoved, validGroup, verifyAdd, verifyMsg } from '../shared/sync'
 import { createImpairment, parseNetSim } from '../shared/netsim'
 import { createFiles } from './files'
 import { type RelayLimits, RELAY_LIMITS, createNet } from './network'
@@ -83,6 +83,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     writeFileSync(file + '.tmp', JSON.stringify(s))
     renameSync(file + '.tmp', file) // atomic, so a crash mid-write cannot corrupt the state
   }
+  // Groups from before owners: their owner is found once, from the copy on this computer, and kept from then on, so a
+  // member's later made-up copies cannot change who it is.
+  for (const g of Object.values(s.groups)) if (!g.owner) g.owner = ownerOf(g) ?? undefined
 
   // Groups we are in. Groups we left stay stored, so the notice of leaving keeps reaching their members.
   const ours = () => Object.values(s.groups).filter((g) => g.members.includes(me))
@@ -711,10 +714,12 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       changed()
     },
     createGroup(name: string, others: Key[]) {
-      const id = randomBytes(16).toString('hex')
+      const nonce = randomBytes(16).toString('hex')
+      const id = groupIdOf(me, nonce)
       const members = [...new Set(others.filter((k) => s.friends[k] === 'friend'))]
       const adds = Object.fromEntries(members.map((k) => [k, signAdd(id, k, keyPair)]))
-      const g = mergeGroup(undefined, { id, name: String(name).slice(0, 100), members: [me, ...members], updatedAt: Date.now(), adds })
+      const look = { id, name: String(name).slice(0, 100), updatedAt: Date.now() }
+      const g = mergeGroup(undefined, { ...look, members: [me, ...members], adds, owner: me, nonce, edit: signEdit(look, keyPair) })
       s.groups[id] = g
       changed()
       spread(g)
@@ -726,15 +731,16 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (!g || !g.members.includes(me)) throw new Error('You are not in that group')
       if (avatar !== '' && !isPicture(avatar)) throw new Error('That picture cannot be used')
       const { avatar: _old, ...rest } = g
-      s.groups[id] = mergeGroup(undefined, { ...rest, ...(avatar && { avatar }), updatedAt: Math.max(Date.now(), g.updatedAt + 1) })
+      const look = { id, name: g.name, ...(avatar && { avatar }), updatedAt: Math.max(Date.now(), g.updatedAt + 1) }
+      s.groups[id] = mergeGroup(g, { ...rest, ...look, edit: signEdit(look, keyPair) })
       changed()
       spread(s.groups[id])
     },
     addToGroup(id: string, key: Key) {
       const g = Object.hasOwn(s.groups, id) ? s.groups[id] : undefined
-      if (!g || s.friends[key] !== 'friend' || g.members.includes(key)) return
+      if (!g || s.friends[key] !== 'friend' || g.members.includes(key) || g.removed?.[key]) return
       const adds = { ...g.adds, [key]: signAdd(id, key, keyPair) }
-      s.groups[id] = mergeGroup(undefined, { ...g, members: [...g.members, key], updatedAt: Date.now(), adds })
+      s.groups[id] = mergeGroup(g, { ...g, members: [...g.members, key], adds })
       changed()
       spread(s.groups[id])
     },
@@ -758,11 +764,20 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       append(m)
       for (const k of ms) if (k !== me) net.send(k, { t: 'msg', m }), used.set(k, Date.now()), need(k)
     },
+    // Only the owner can remove someone; like leaving, it is signed and permanent. Everyone, the removed member
+    // included, is told, and anyone only they had added drops out with them until a member adds them again.
+    removeFromGroup(id: string, key: Key) {
+      const g = Object.hasOwn(s.groups, id) ? s.groups[id] : undefined
+      if (!g || g.owner !== me || key === me || !g.members.includes(key)) return
+      s.groups[id] = mergeGroup(g, { ...g, removed: { ...g.removed, [key]: signRemoved(id, key, keyPair) } })
+      changed()
+      for (const k of g.members) if (k !== me) net.send(k, { t: 'group', g: s.groups[id] })
+    },
     // Leaving is signed and permanent. The group's messages are deleted from this computer.
     leaveGroup(id: string) {
       const g = Object.hasOwn(s.groups, id) ? s.groups[id] : undefined
       if (!g || !g.members.includes(me)) return
-      s.groups[id] = mergeGroup(undefined, { ...g, left: { ...g.left, [me]: signLeft(id, keyPair) } })
+      s.groups[id] = mergeGroup(g, { ...g, left: { ...g.left, [me]: signLeft(id, keyPair) } })
       forget(id)
       rmSync(logFile(id), { force: true })
       files.forgetConv(id)
