@@ -74,8 +74,8 @@ test('generated pictures are stable, mirrored and differ between keys', () => {
 // Three real nodes on a local DHT: friends, direct chat, offline delivery, groups.
 let testnet: any
 const nodes: { node: ReturnType<typeof createNode> }[] = []
-function start(dir = mkdtempSync(join(tmpdir(), 'eleusinia-')), keyPair = DHT.keyPair()) {
-  const node = createNode({ dir, keyPair, emit: () => {}, dht: { bootstrap: testnet.bootstrap }, redialMs: 300 })
+function start(dir = mkdtempSync(join(tmpdir(), 'eleusinia-')), keyPair = DHT.keyPair(), diag?: (area: string, text: string) => void) {
+  const node = createNode({ dir, keyPair, emit: () => {}, dht: { bootstrap: testnet.bootstrap }, redialMs: 300, diag })
   const n = { node, dir, keyPair, key: keyPair.publicKey.toString('hex') as string }
   nodes.push(n)
   return n
@@ -175,9 +175,13 @@ test('a direct message survives the sender restarting before the recipient retur
 }, 120000)
 
 test('a member offline since before the group existed gets it from a friend, then its messages from a member who is not', async () => {
+  // This passes locally but has failed on the GitHub runner: the network diagnostics of B and C are printed if it does
+  const events: string[] = []
+  const t0 = Date.now()
+  const log = (who: string) => (_area: string, text: string) => events.push(`${((Date.now() - t0) / 1000).toFixed(1)} ${who} ${text}`)
   let a = start()
-  let b = start()
-  const c = start()
+  let b = start(undefined, undefined, log('B'))
+  const c = start(undefined, undefined, log('C'))
   await befriend(a, b)
   await befriend(a, c)
   await b.node.destroy()
@@ -189,13 +193,20 @@ test('a member offline since before the group existed gets it from a friend, the
   c.node.send(gid, 'c here')
 
   // Only C is online, and B has never met C: C cannot link to B (strangers are turned away) until B knows the group
-  b = restart(b)
+  b = start(b.dir, b.keyPair, log('B'))
   await new Promise((r) => setTimeout(r, 2000))
   expect(b.node.state().groups[gid]).toBeUndefined()
   a = restart(a) // B's friend hands it over, with proof that A added B
   await until(() => !!b.node.state().groups[gid])
   await a.node.destroy()
-  await until(() => texts(b, gid).join() === 'welcome,c here') // 'c here' only C has
+  events.push(`${((Date.now() - t0) / 1000).toFixed(1)} -- B has the group; A is gone; B: ${b.key.slice(-6)}, C: ${c.key.slice(-6)}`)
+  try {
+    await until(() => texts(b, gid).join() === 'welcome,c here') // 'c here' only C has
+  } catch (e) {
+    console.log(`B holds ${JSON.stringify(texts(b, gid))}, B online: ${b.node.state().online.map((k: string) => k.slice(-6))}, C online: ${c.node.state().online.map((k: string) => k.slice(-6))}
+${events.slice(-80).join(String.fromCharCode(10))}`)
+    throw e
+  }
   expect(b.node.state().friends[c.key]).toBeUndefined()
 
   // And back the other way: B writes while the group's creator is away
