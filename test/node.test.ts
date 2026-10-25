@@ -84,7 +84,7 @@ const until = (ok: () => boolean) => expect.poll(ok, { timeout: 20000, interval:
 const texts = (n: { node: any }, conv: string) => n.node.history(conv).msgs.map((m: any) => m.text)
 
 beforeAll(async () => {
-  testnet = await createTestnet(3)
+  testnet = await createTestnet(10)
 })
 afterAll(async () => {
   await Promise.all(nodes.map((n) => n.node.destroy()))

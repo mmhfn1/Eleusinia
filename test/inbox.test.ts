@@ -9,7 +9,7 @@ import { createNode } from '../src/main/node'
 
 let testnet: any
 beforeAll(async () => {
-  testnet = await createTestnet(3)
+  testnet = await createTestnet(10)
 })
 afterAll(() => testnet.destroy())
 const until = (ok: () => boolean) => expect.poll(ok, { timeout: 20000, interval: 100 }).toBe(true)
