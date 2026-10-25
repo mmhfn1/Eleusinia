@@ -195,7 +195,7 @@ test('a member offline since before the group existed gets it from a friend, the
   a = restart(a) // B's friend hands it over, with proof that A added B
   await until(() => !!b.node.state().groups[gid])
   await a.node.destroy()
-  await until(() => texts(b, gid).join() === 'welcome,c here') // 'c here' only C has
+  await until(() => texts(b, gid).sort().join() === 'c here,welcome') // 'c here' only C has; arrival order varies
   expect(b.node.state().friends[c.key]).toBeUndefined()
 
   // And back the other way: B writes while the group's creator is away
@@ -203,7 +203,7 @@ test('a member offline since before the group existed gets it from a friend, the
   await until(() => texts(c, gid).includes('thanks'))
   await c.node.destroy()
   a = restart(a)
-  await until(() => texts(a, gid).join() === 'welcome,c here,thanks')
+  await until(() => texts(a, gid).sort().join() === 'c here,thanks,welcome')
 }, 120000)
 
 const PNG = 'data:image/png;base64,AAAA'
