@@ -62,7 +62,7 @@ Key ideas worth keeping intact:
 - The installed app updates itself from GitHub Releases (`startUpdates` in `src/main/index.ts`); `ELEUSINIA_UPDATE_URL` points it at another folder of releases for testing, `ELEUSINIA_NO_UPDATES=1` turns it off (the smoke run does).
 - Tie-breaks use key order: when both sides dial or offer at once, the smaller key wins.
 - Call signals are processed one at a time (`onSignal` queue) so ICE candidates never overtake their offer.
-- The smoke run's local test DHT has 10 nodes on purpose: with 3, hyperdht's NAT check on the dialed copy often lacks samples, it aborts the hole punch it races against a LAN shortcut, and the dialer's link, already reported open, dies silently ~13 s later (see the comment in `test/smoke.mjs`).
+- Every local test DHT (smoke run, `test/node.test.ts`, `test/inbox.test.ts`) has 10 nodes on purpose: with 3, hyperdht's NAT check on the dialed copy often lacks samples, it aborts the hole punch it races against a LAN shortcut, and the dialer's link, already reported open, dies silently ~13 s later (see the comment in `test/smoke.mjs`); on the slower GitHub runner it also failed release checks.
 
 ## Conventions
 
