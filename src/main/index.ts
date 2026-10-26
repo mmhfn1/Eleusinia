@@ -235,9 +235,11 @@ function startApp() {
   }
   const tray = new Tray(nativeImage.createFromPath(join(__dirname, '../../build/icon.png')).resize({ width: 32, height: 32 }))
   tray.setToolTip('Eleusinia')
-  tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Quit Eleusinia', click: () => app.quit() }]))
+  // macOS (and many Linux desktops) open this menu on a click instead of sending one, so it can show the window too.
+  tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Open Eleusinia', click: show }, { label: 'Quit Eleusinia', click: () => app.quit() }]))
   tray.on('click', show)
   app.on('second-instance', show)
+  app.on('activate', show) // macOS: clicking the Dock icon, or opening the app again while it runs
   win.on('close', (e) => {
     if (quitting) return
     e.preventDefault()

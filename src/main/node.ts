@@ -28,7 +28,7 @@ import DHT from 'hyperdht'
 import { idSeed, readClaims, signClaim, withClaim, writeClaims } from '../shared/idcard'
 import { type FileRef, validFiles } from '../shared/media'
 import { type Area, type Report, cleanReport } from '../shared/reports'
-import { groupIdOf, mergeGroup, missing, ownerOf, signAdd, signEdit, signLeft, signMsg, signRemoved, validGroup, verifyAdd, verifyMsg } from '../shared/sync'
+import { groupIdOf, heldFrom, mergeGroup, missing, ownerOf, signAdd, signEdit, signLeft, signMsg, signRemoved, validGroup, verifyAdd, verifyMsg } from '../shared/sync'
 import { openRequest, requestSeed, sealRequest } from '../shared/sealed'
 import { createImpairment, parseNetSim } from '../shared/netsim'
 import { createFiles } from './files'
@@ -44,6 +44,9 @@ type Saved = {
   settings: Settings
   declined?: Record<Key, number> // when we declined or removed someone: their announced requests are ignored for a while
   accepted?: Record<Key, number> // requests we accepted that they have not yet confirmed over a link
+  // When a friend told us over a link that they removed us. Their old acceptance can stay announced on the DHT for a
+  // while; it is not believed in that time (an acceptance over a link always is).
+  unfriended?: Record<Key, number>
   requestedAt?: Record<Key, number> // when each waiting request arrived, so a full list drops the oldest
   // Per conversation and peer: the most of each author's messages that peer has ever confirmed holding. What they
   // confirmed is never sent to them again, so someone who steals a key cannot ask friends for the old history.
@@ -250,11 +253,13 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const asks = said ? w.friend : !inGroupWith(key)
       if (asks && st === 'outgoing') {
         s.friends[key] = 'friend' // they accepted, or asked us at the same time
+        if (s.unfriended) delete s.unfriended[key]
         greet(key)
       } else if (asks && !st && !declinedRecently(key)) {
         takeRequest(key) // a declined request stays declined, however it arrives
       } else if (said && !asks && st === 'friend') {
         s.friends[key] = 'outgoing' // they removed us: still wanted on our side, but no longer mutual
+        s.unfriended = { ...s.unfriended, [key]: Date.now() }
       } else if (said && !asks && st === 'incoming') {
         delete s.friends[key] // they cancelled their request
       }
@@ -303,7 +308,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       }
       // We are told we confirmed holding more than we have (our messages were lost): carry on after them. Logged as a
       // skip line, so the gap stays known after a restart.
-      const held = w.held && typeof w.held === 'object' ? Object.entries(w.held).filter(([a, n]) => isKey(a) && Number.isSafeInteger(n) && n > (have[a] ?? 0)) : []
+      const held = heldFrom(w.held, key, me, w.have, have)
       if (held.length) {
         const skip = Object.fromEntries(held)
         for (const [a, n] of held) have[a] = n
@@ -645,6 +650,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   }
 
   // At most one look per person per 5 s, and looks never overlap (checkRequests reruns once if rung meanwhile).
+  const STALE_ACCEPT = 30 * 60000 // longer than a DHT announcement lives
   const knocks = new Map<Key, number>()
   function ring(key: Key, again?: number) {
     if ((knocks.get(key) ?? 0) > Date.now() - 5000) return
@@ -665,6 +671,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         const k = isKey(oneOff) ? await senderOf(oneOff) : null
         if (!k || k === me) continue
         const st = s.friends[k]
+        if (st === 'outgoing' && (s.unfriended?.[k] ?? 0) > Date.now() - STALE_ACCEPT) continue // an acceptance from before they removed us
         if (st === 'outgoing') {
           s.friends[k] = 'friend' // they accepted
           diag('network', `request to …${k.slice(-6)} accepted`)
