@@ -8,7 +8,7 @@ import { afterAll, beforeAll, expect, onTestFailed, test } from 'vitest'
 import { createNode } from '../src/main/node'
 import { type RelayLimits, createNet, relayKeyPair } from '../src/main/network'
 import { CALL_VERSION, type Group, type Msg, cleanProfile, dmId, identicon, isHandle, keyTail, normHandle, stack, versionOf } from '../src/shared/protocol'
-import { mergeGroup, missing, signAdd, signLeft, signMsg, validGroup, verifyAdd, verifyMsg } from '../src/shared/sync'
+import { MAX_SEQ, heldFrom, mergeGroup, missing, signAdd, signLeft, signMsg, validGroup, verifyAdd, verifyMsg } from '../src/shared/sync'
 
 test('a tampered or re-attributed message fails verification', () => {
   const a = DHT.keyPair()
@@ -23,6 +23,17 @@ test('missing returns only what the peer lacks', () => {
   const log = [1, 2, 3].map((seq) => ({ conv: 'c', author: 'x', seq, ts: 0, text: '', sig: '' }))
   expect(missing(log, { x: 2 }).map((m) => m.seq)).toEqual([3])
   expect(missing(log, {}).length).toBe(3)
+})
+
+test('a peer may only say we already had its own messages or ours, never those of anyone else', () => {
+  const [me, peer, other] = ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)]
+  const ours = { [peer]: 2, [other]: 1 }
+  const theirs = { [peer]: 9 }
+  expect(heldFrom({ [peer]: 5, [me]: 4, [other]: 900 }, peer, me, theirs, ours)).toEqual([[peer, 5], [me, 4]])
+  expect(heldFrom({ [peer]: 10 }, peer, me, theirs, ours)).toEqual([]) // more than they say they hold
+  expect(heldFrom({ [peer]: 1 }, peer, me, theirs, ours)).toEqual([]) // we already have that much
+  expect(heldFrom({ [me]: MAX_SEQ + 1 }, peer, me, theirs, ours)).toEqual([]) // would push our numbering past use
+  expect(heldFrom('nonsense', peer, me, theirs, ours)).toEqual([])
 })
 
 test('group merge converges whichever side merges first', () => {
@@ -403,6 +414,9 @@ test('removing a friend who shares a group puts them back to a request, so neith
   b.node.removeFriend(a.key)
   await until(() => a.node.state().friends[b.key] === 'outgoing')
   expect(b.node.state().friends[a.key]).toBeUndefined()
+  // B's acceptance from earlier is still announced on the DHT; it must not make B a friend again on A's side
+  await new Promise((r) => setTimeout(r, 5000))
+  expect(a.node.state().friends[b.key]).toBe('outgoing')
 }, 120000)
 
 test('one person in several groups: each group keeps its own members and messages', async () => {

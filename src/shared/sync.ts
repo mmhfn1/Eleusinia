@@ -41,6 +41,18 @@ export function verifyMsg(m: Msg): boolean {
   )
 }
 
+// Which "you already had these" claims (`held`) a peer may make, as [author, seq] to carry on after: only about its
+// own messages (up to what it says it holds) and ours (lost with our log). About anyone else's it could make us
+// discard that person's messages for good.
+export const MAX_SEQ = 1e9
+export function heldFrom(held: unknown, from: string, me: string, theirs: Have, ours: Have): [string, number][] {
+  if (!held || typeof held !== 'object') return []
+  return Object.entries(held as Record<string, unknown>).filter(
+    (e): e is [string, number] =>
+      (e[0] === from || e[0] === me) && Number.isSafeInteger(e[1]) && (e[1] as number) > (ours[e[0]] ?? 0) && (e[1] as number) <= (e[0] === from ? Number(theirs?.[from]) || 0 : MAX_SEQ),
+  )
+}
+
 // Logs hold each author's messages in seq order with no gaps, so this is everything the peer lacks.
 export const missing = (log: Msg[], have: Have) => log.filter((m) => m.seq > (Number(have[m.author]) || 0))
 
