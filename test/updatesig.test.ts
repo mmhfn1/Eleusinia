@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import crypto from 'hypercore-crypto'
 import { expect, test } from 'vitest'
-import { verifyUpdate } from '../src/shared/updatesig'
+import { updateFileFor, verifyUpdate } from '../src/shared/updatesig'
 
 test('an installer signed by the release script verifies, and nothing else does', () => {
   const kp = crypto.keyPair()
@@ -20,4 +20,13 @@ test('an installer signed by the release script verifies, and nothing else does'
   expect(verifyUpdate('1.2.3', createHash('sha512').update('tampered').digest('hex'), sig, key)).toBe(false)
   expect(verifyUpdate('1.2.3', sha, sig)).toBe(false) // signed with some other key than Eleusinia's
   expect(verifyUpdate('1.2.3', sha, '')).toBe(false)
+})
+
+test('a Mac takes the zip for its own processor, Linux the AppImage, Windows none of these', () => {
+  const files = [{ url: 'Eleusinia-1.2.3-x64-mac.zip' }, { url: 'Eleusinia-1.2.3-arm64-mac.zip' }, { url: 'Eleusinia-1.2.3.AppImage' }, { url: 'Eleusinia-1.2.3-arm64.dmg' }]
+  expect(updateFileFor(files, 'darwin', 'arm64')).toBe('Eleusinia-1.2.3-arm64-mac.zip')
+  expect(updateFileFor(files, 'darwin', 'x64')).toBe('Eleusinia-1.2.3-x64-mac.zip')
+  expect(updateFileFor(files, 'linux', 'x64')).toBe('Eleusinia-1.2.3.AppImage')
+  expect(updateFileFor(files, 'win32', 'x64')).toBe(null)
+  expect(updateFileFor([{ url: 'Eleusinia-1.2.3-x64-mac.zip' }], 'darwin', 'arm64')).toBe(null)
 })

@@ -43,6 +43,7 @@ declare global {
       restartAsAdmin(): Promise<boolean>
       diag(area: import('../shared/reports').Area, text: string): void
       installUpdate(): Promise<void>
+      platform: string
       checkUpdates(): Promise<{ state: 'found' | 'latest' | 'unavailable'; version: string; current: string }>
       quit(): Promise<void>
       win(action: 'minimize' | 'maximize' | 'close' | 'state'): Promise<boolean>

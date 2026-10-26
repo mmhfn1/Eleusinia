@@ -15,6 +15,7 @@ import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared
 import { kindOf, shareable } from '../shared/sources'
 import { verifyUpdate } from '../shared/updatesig'
 import { createInbox } from './inbox'
+import { type Staged, canInstall, fetchUpdate, install, tidy } from './selfupdate'
 import { createNode } from './node'
 
 // `npm run inbox` runs the developers' inbox (inbox.ts) instead of the app, in a data folder of its own.
@@ -87,6 +88,10 @@ app.whenReady().then(async () => firstCopy && (inboxMode ? startInbox() : (await
 // window, which offers a restart; otherwise it installs the next time Eleusinia is closed. Copies run from source never
 // update. ELEUSINIA_UPDATE_URL points it at another folder of releases (testing), ELEUSINIA_NO_UPDATES=1 turns it off.
 const updatable = () => app.isPackaged && process.env.ELEUSINIA_NO_UPDATES !== '1'
+// macOS and Linux install updates themselves (main/selfupdate.ts); electron-updater only finds them there.
+const own = process.platform !== 'win32'
+const releaseBase = (version: string) => process.env.ELEUSINIA_UPDATE_URL?.replace(/\/+$/, '') ?? `https://github.com/mmhfn1/Eleusinia/releases/download/v${version}`
+let staged: Staged | null = null
 const updateFeed = () => process.env.ELEUSINIA_UPDATE_URL && autoUpdater.setFeedURL({ provider: 'generic', url: process.env.ELEUSINIA_UPDATE_URL })
 
 // Every downloaded installer must carry a signature by Eleusinia's update key (shared/updatesig.ts), fetched from the
@@ -100,7 +105,7 @@ function guardUpdates() {
   autoUpdater.on('update-available', (i) => (offered = i.version))
   ;(autoUpdater as unknown as { verifyUpdateCodeSignature: (names: string[], file: string) => Promise<string | null> }).verifyUpdateCodeSignature = async (_names, file) => {
     const v = offered
-    const base = process.env.ELEUSINIA_UPDATE_URL?.replace(/\/+$/, '') ?? `https://github.com/mmhfn1/Eleusinia/releases/download/v${v}`
+    const base = releaseBase(v)
     const sig = await net
       .fetch(`${base}/Eleusinia-Setup-${v}.exe.sig`)
       .then((r) => (r.ok ? r.text() : ''))
@@ -116,17 +121,33 @@ function guardUpdates() {
 async function updateFirst() {
   if (!updatable()) return true
   updateFeed()
-  guardUpdates()
+  if (own) tidy()
+  else guardUpdates()
   autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = !own
   const found = await Promise.race([autoUpdater.checkForUpdates().catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 6000))])
-  if (!found?.isUpdateAvailable) return true
+  if (!found?.isUpdateAvailable || (own && !canInstall())) return true
   const version = found.updateInfo.version
   const splash = new BrowserWindow({ width: 380, height: 120, frame: false, resizable: false, backgroundColor: '#0b1119', show: false })
   const page = (text: string) =>
     `data:text/html;charset=utf-8,${encodeURIComponent(`<body style="margin:0;height:100vh;display:grid;place-items:center;background:#0b1119;color:#d9e0ec;font:14px 'Segoe UI',sans-serif">${text}</body>`)}`
   await splash.loadURL(page(`Updating Eleusinia to ${version}…`))
   splash.show()
-  autoUpdater.on('download-progress', (p) => !splash.isDestroyed() && splash.setProgressBar(p.percent / 100))
+  const progress = (share: number) => !splash.isDestroyed() && splash.setProgressBar(share)
+  if (own) {
+    const s = await fetchUpdate(version, found.updateInfo.files, releaseBase(version), (u) => net.fetch(u), progress).catch(() => null)
+    try {
+      if (!s) throw new Error('no update')
+      install(s)
+    } catch {
+      splash.destroy()
+      return true // start this version; the background check tries again later
+    }
+    app.relaunch()
+    app.exit(0)
+    return false
+  }
+  autoUpdater.on('download-progress', (p) => progress(p.percent / 100))
   try {
     await autoUpdater.downloadUpdate()
   } catch {
@@ -140,10 +161,19 @@ async function updateFirst() {
 function startUpdates(ready: (version: string) => void, diag: (area: 'app' | 'error', text: string) => void) {
   if (!updatable()) return
   updateFeed()
-  guardUpdates()
-  autoUpdater.autoDownload = true
-  autoUpdater.autoInstallOnAppQuit = true
+  if (!own) guardUpdates()
+  autoUpdater.autoDownload = !own
+  autoUpdater.autoInstallOnAppQuit = !own
   autoUpdater.on('update-available', (i) => diag('app', `update ${i.version} found, downloading`))
+  if (own)
+    autoUpdater.on('update-available', async (i) => {
+      if (staged?.version === i.version) return
+      const s = await fetchUpdate(i.version, i.files, releaseBase(i.version), (u) => net.fetch(u)).catch(() => null)
+      if (!s) return diag('error', `update ${i.version} could not be downloaded or is not signed with the update key`)
+      staged = s
+      diag('app', `update ${i.version} ready`)
+      ready(i.version)
+    })
   autoUpdater.on('update-downloaded', (i) => {
     diag('app', `update ${i.version} ready`)
     ready(i.version)
@@ -155,6 +185,15 @@ function startUpdates(ready: (version: string) => void, diag: (area: 'app' | 'er
 }
 
 function startApp() {
+  // macOS: an app run from Downloads or a disk image cannot replace itself when updating, so offer to move it first.
+  if (process.platform === 'darwin' && app.isPackaged && !app.isInApplicationsFolder()) {
+    const move = dialog.showMessageBoxSync({ message: 'Move Eleusinia to your Applications folder?', detail: 'It can only update itself from there.', buttons: ['Move to Applications', 'Not now'], defaultId: 0, cancelId: 1 })
+    if (move === 0) {
+      try {
+        if (app.moveToApplicationsFolder()) return // it relaunches from there
+      } catch {}
+    }
+  }
   const dir = app.getPath('userData')
   mkdirSync(dir, { recursive: true })
   const win = new BrowserWindow({
@@ -168,6 +207,7 @@ function startApp() {
     autoHideMenuBar: true,
     // The page draws its own title bar and window buttons (TitleBar in App.tsx); Windows keeps the resize edges and snap.
     titleBarStyle: 'hidden',
+    trafficLightPosition: { x: 14, y: 9 }, // macOS: its own buttons, centred in our 32 px bar
     webPreferences: { preload: join(__dirname, '../preload/index.js') },
   })
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
@@ -243,7 +283,15 @@ function startApp() {
     version: app.getVersion(),
   })
   startUpdates((version) => !win.isDestroyed() && win.webContents.send('event', { type: 'update', version }), diagnostics.add)
-  ipcMain.handle('installUpdate', () => autoUpdater.quitAndInstall(true, true)) // quietly, then opens the new version
+  ipcMain.handle('installUpdate', async () => {
+    if (!own) return autoUpdater.quitAndInstall(true, true) // quietly, then opens the new version
+    if (!staged) return
+    const s = staged
+    staged = null
+    install(s) // throws if it cannot be put in place, and the running copy stays
+    app.relaunch()
+    app.exit(0)
+  })
   // From the emblem's menu. A copy run from source (or with updates off) never updates, and says so.
   ipcMain.handle('checkUpdates', async () => {
     const current = app.getVersion()
@@ -480,6 +528,12 @@ function startApp() {
     await node.destroy().catch(() => {})
     rmSync(running, { force: true })
     tray.destroy()
+    // macOS and Linux: an update downloaded earlier is put in place as Eleusinia closes, like the installer on Windows
+    if (staged)
+      try {
+        install(staged)
+      } catch {}
+    staged = null
     closed = true
     app.quit()
   })

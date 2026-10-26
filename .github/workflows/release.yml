@@ -1,7 +1,8 @@
-# Every push to main that changes the app is checked, built and published as a GitHub Release, which installed copies
-# pick up as an update (electron-updater, see startUpdates in src/main/index.ts). Pushes that only touch docs or tests
-# publish nothing. The version counts up by itself: one past the newest release tag in the series package.json names
-# (0.0.2, 0.0.3, ...), so a failed run never skips a number. Raise the first two parts in package.json for a bigger step.
+# Every push to main that changes the app is checked, built for Windows, macOS and Linux and published as one GitHub
+# Release, which installed copies pick up as an update (src/main/index.ts; macOS and Linux through
+# src/main/selfupdate.ts). Pushes that only touch docs or tests publish nothing. The version counts up by itself: one
+# past the newest release tag in the series package.json names (0.0.2, 0.0.3, ...), so a failed run never skips a
+# number. Raise the first two parts in package.json for a bigger step.
 name: Release
 
 on:
@@ -21,72 +22,138 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  release:
-    # Only main is released, also when run by hand. The signing key lives in the `release` environment, which can be
-    # limited to main and given required reviewers in the repository settings.
+  version:
+    # Only main is released, also when run by hand.
     if: github.ref == 'refs/heads/main'
-    environment: release
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
     steps:
       # Actions are pinned to exact commits: a moved tag cannot change what builds the release.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0 # the release tags, to number this one
+      - id: v
+        run: |
+          VERSION=$(node -e "
+            const p = require('./package.json')
+            const [a, b, c] = p.version.split('.').map(Number)
+            const released = require('child_process').execSync('git tag --list v' + a + '.' + b + '.*').toString().split('\n').map((t) => Number(t.trim().split('.')[2])).filter(Number.isInteger)
+            console.log([a, b, Math.max(c, ...released.map((n) => n + 1))].join('.'))
+          ")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Releasing $VERSION"
 
+  build:
+    needs: version
+    # The update key and the macOS certificate live in the `release` environment, which can be limited to main and
+    # given required reviewers in the repository settings.
+    environment: release
+    strategy:
+      matrix:
+        include:
+          - os: windows-latest
+            target: --win
+            updates: dist/Eleusinia-Setup-*.exe
+          - os: macos-latest
+            target: --mac
+            updates: dist/*-mac.zip
+          - os: ubuntu-latest
+            target: --linux
+            updates: dist/*.AppImage
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
           cache: npm
 
-      # Install scripts stay off, as on the developers' machines: the native modules ship prebuilt, and
-      # electron-builder fetches Electron itself.
+      # Install scripts stay off, as on the developers' machines: the native modules ship prebuilt for every system,
+      # and electron-builder fetches Electron itself.
       - run: npm ci --ignore-scripts
 
       - name: Check
+        if: runner.os == 'Windows'
         run: |
           npm run typecheck
           npm test
 
       - name: Version
         shell: bash
+        run: npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      # macOS: Eleusinia's own self-signed certificate, the same for every release (build/mac-sign.cjs). Required:
+      # without it the release stops, rather than ship a build installed copies could not update to.
+      - name: macOS certificate
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          MAC_CERT_P12: ${{ secrets.MAC_CERT_P12 }}
+          MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
         run: |
-          VERSION=$(node -e "
-            const fs = require('fs')
-            const { execSync } = require('child_process')
-            const p = JSON.parse(fs.readFileSync('package.json', 'utf8'))
-            const [a, b, c] = p.version.split('.').map(Number)
-            const released = execSync('git tag --list v' + a + '.' + b + '.*').toString().split('\n').map((t) => Number(t.trim().split('.')[2])).filter(Number.isInteger)
-            p.version = [a, b, Math.max(c, ...released.map((n) => n + 1))].join('.')
-            fs.writeFileSync('package.json', JSON.stringify(p, null, 2) + '\n')
-            console.log(p.version)
-          ")
-          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
-          echo "Releasing $VERSION"
+          test -n "$MAC_CERT_P12" || { echo "The MAC_CERT_P12 secret is missing"; exit 1; }
+          KC="$RUNNER_TEMP/sign.keychain-db"
+          PW=$(openssl rand -hex 16)
+          security create-keychain -p "$PW" "$KC"
+          security set-keychain-settings -lut 21600 "$KC"
+          security unlock-keychain -p "$PW" "$KC"
+          echo "$MAC_CERT_P12" | base64 --decode > "$RUNNER_TEMP/cert.p12"
+          security import "$RUNNER_TEMP/cert.p12" -k "$KC" -P "$MAC_CERT_PASSWORD" -T /usr/bin/codesign
+          rm "$RUNNER_TEMP/cert.p12"
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$PW" "$KC"
+          security list-keychains -d user -s "$KC" $(security list-keychains -d user | tr -d '"')
+          # By fingerprint: a self-signed certificate is not trusted, so it is not found by name
+          ID=$(security find-certificate -c 'Eleusinia' -Z "$KC" | awk '/SHA-1/ { print $NF }')
+          test -n "$ID" || { echo "The certificate was not found in the keychain"; exit 1; }
+          echo "MAC_SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
+          echo "MAC_SIGN_KEYCHAIN=$KC" >> "$GITHUB_ENV"
 
       - name: Build
+        shell: bash
         run: |
           npx electron-vite build
-          npx electron-builder --win --publish never
+          npx electron-builder ${{ matrix.target }} --publish never
 
       # The update signature installed copies require before installing (src/shared/updatesig.ts). Fails without the
       # key, so no unsigned release goes out.
       - name: Sign
         shell: bash
-        run: node build/sign-update.cjs "dist/Eleusinia-Setup-$VERSION.exe" "$VERSION"
         env:
           UPDATE_SIGNING_KEY: ${{ secrets.UPDATE_SIGNING_KEY }}
+        run: for f in ${{ matrix.updates }}; do node build/sign-update.cjs "$f" "$VERSION"; done
 
-      # One step publishes the installer with its update files (latest.yml, which installed copies read, and the
-      # blockmap for small updates). electron-builder's own publishing uploads them in parallel, and each upload
-      # then tries to create the release, which fails for all but the first.
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ runner.os }}
+          if-no-files-found: error
+          path: |
+            dist/*.exe
+            dist/*.exe.blockmap
+            dist/*.dmg
+            dist/*.zip
+            dist/*.zip.blockmap
+            dist/*.AppImage
+            dist/*.sig
+            dist/latest*.yml
+
+  # One step publishes everything with the update files (latest.yml, latest-mac.yml and latest-linux.yml, which
+  # installed copies read). electron-builder's own publishing uploads in parallel, and each upload then tries to
+  # create the release, which fails for all but the first.
+  publish:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          path: release
+          merge-multiple: true
       - name: Publish
-        shell: bash
-        run: |
-          gh release create "v$VERSION" \
-            "dist/Eleusinia-Setup-$VERSION.exe" \
-            "dist/Eleusinia-Setup-$VERSION.exe.blockmap" \
-            "dist/Eleusinia-Setup-$VERSION.exe.sig" \
-            dist/latest.yml \
-            --title "$VERSION" --target "$GITHUB_SHA" --generate-notes
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.version.outputs.version }}
+        run: |
+          ls -l release
+          gh release create "v$VERSION" release/* --repo "$GITHUB_REPOSITORY" --title "$VERSION" --target "$GITHUB_SHA" --generate-notes

@@ -2654,6 +2654,10 @@ dialog.menu-dialog .dialog-close {
   height: auto;
   min-height: 0;
 }
+/* macOS draws its own window buttons at the left (index.ts places them in this bar), so ours are left out there. */
+[data-platform='darwin'] .window-buttons {
+  display: none;
+}
 .titlebar {
   flex: none;
   display: flex;
