@@ -9,4 +9,6 @@ import './style.css'
 window.addEventListener('error', (e) => window.api.diag('error', `${e.message} (${e.filename?.split('/').pop()}:${e.lineno})`))
 window.addEventListener('unhandledrejection', (e) => window.api.diag('error', `unhandled: ${e.reason?.message ?? String(e.reason)}`))
 
+document.documentElement.dataset.platform = window.api.platform
+
 createRoot(document.getElementById('root')!).render(<App />)
