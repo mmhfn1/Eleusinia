@@ -2530,6 +2530,21 @@ kbd {
   background: radial-gradient(300px 120px at 10% 0%, rgb(220 226 230 / 0.14), transparent 70%), rgb(10 12 15 / 0.85);
   animation: settle var(--t) var(--ease);
 }
+/* The same bar, for calls ringing while we are elsewhere (in another call, or another conversation). */
+.incoming-calls {
+  position: fixed;
+  top: 44px;
+  left: 50%;
+  z-index: 30;
+  display: grid;
+  gap: 8px;
+  width: min(520px, calc(100vw - 32px));
+  translate: -50% 0;
+}
+.incoming-calls .ring-bar {
+  margin: 0;
+  box-shadow: var(--shadow-3);
+}
 .ring-bar.ringing > .avatar {
   border-radius: 50%;
   /* 25 x 1.6 s = the 40 s the ringing sound lasts (loopNow); endless, it repainted for as long as a call went on without us */

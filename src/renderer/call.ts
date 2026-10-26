@@ -3,7 +3,7 @@ import rnnoiseWasm from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?inli
 import rnnoiseWorklet from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?raw'
 import { createCandidates, createWatchdog, lightOpus, offers, quickVideo, relayCandidate, restartAfterFor } from '../shared/callstate'
 import { fellBack, nextDevice, usable } from '../shared/devices'
-import { type Jingle, LOOP_EVERY, loopNow } from '../shared/jingles'
+import { type Jingle, LOOP_EVERY, RING_MS, loopNow } from '../shared/jingles'
 import { CALL_VERSION, type Event, type Key, type State } from '../shared/protocol'
 import { type PingReading, SAMPLE_EVERY, type Sample, grade, jitterTarget, pingSummary, remember, rememberPing, videoHold, worst } from '../shared/quality'
 import type { SourceKind } from '../shared/sources'
@@ -139,12 +139,15 @@ const isDm = (c: string) => !state.groups[c]
 // call. Both repeat for 40 s at most (loopNow); after that the call carries on silently, it is never ended for it.
 const ringing = new Map<string, number>()
 let callingSince: number | null = null
-let looping: { name: 'ring' | 'calling'; at: number } | null = null
+let looping: { name: 'ring' | 'calling' | 'waiting'; at: number } | null = null
+// Direct calls ringing right now (not silenced, under 40 s): the bar shown wherever you are (App.tsx).
+export const ringingCalls = () => [...ringing].filter(([, at]) => Date.now() - at < RING_MS).map(([c]) => c)
 let loopTimer: ReturnType<typeof setInterval> | null = null
 function loops() {
   const now = Date.now()
-  const name = loopNow(now, callingSince, [...ringing.values()])
+  const name = loopNow(now, callingSince, [...ringing.values()], !!conv)
   if (!name) {
+    if (looping) notify() // ringing ended: the bar goes
     looping = null
     if (loopTimer) clearInterval(loopTimer)
     loopTimer = null
@@ -1003,7 +1006,7 @@ async function handle(from: Key, c: string, d: any) {
     callingSince = null // they answered
     if (!deafened) sound('join')
   }
-  if (fresh && c !== conv && isDm(c) && !ringing.has(c)) ringing.set(c, Date.now())
+  if (fresh && c !== conv && isDm(c) && !ringing.has(c)) ringing.set(c, Date.now()), notify()
   loops()
   if (c !== conv) return
   if (!compatible(from)) return log(`not connecting ${who(from)}: call version ${callVersionOf(from)}, ours ${CALL_VERSION}`), notify()
@@ -1057,6 +1060,7 @@ async function handle(from: Key, c: string, d: any) {
 export function silence(c: string) {
   ringing.delete(c)
   loops()
+  notify()
 }
 
 // Someone left a call, by saying so or by going offline.

@@ -3,7 +3,7 @@
 // someone joining rises and someone leaving falls. Ringing and the caller tune repeat for RING_MS at most; the call
 // itself never ends because nobody answered.
 
-export type Jingle = 'mute' | 'unmute' | 'deafen' | 'undeafen' | 'join' | 'leave' | 'ring' | 'calling' | 'talk' | 'untalk'
+export type Jingle = 'mute' | 'unmute' | 'deafen' | 'undeafen' | 'join' | 'leave' | 'ring' | 'calling' | 'waiting' | 'talk' | 'untalk'
 export type Note = { f: number; t: number; d: number; wave: 'sine' | 'triangle' | 'square'; gain?: number } // Hz, start s, length s
 
 export const JINGLES: Record<Jingle, Note[]> = {
@@ -41,6 +41,11 @@ export const JINGLES: Record<Jingle, Note[]> = {
   untalk: [{ f: 880, t: 0, d: 0.04, wave: 'sine', gain: 0.45 }],
   // An incoming direct call: two quick trills, like a phone.
   ring: [0, 0.7].flatMap((at) => Array.from({ length: 8 }, (_, i) => ({ f: i % 2 ? 1568 : 1319, t: at + i * 0.055, d: 0.05, wave: 'square' as const, gain: 0.35 }))),
+  // A direct call while you are already in one: two soft beeps, heard over the conversation without drowning it.
+  waiting: [
+    { f: 880, t: 0, d: 0.12, wave: 'sine', gain: 0.4 },
+    { f: 880, t: 0.22, d: 0.12, wave: 'sine', gain: 0.4 },
+  ],
   // Calling someone: a soft rising tune while you wait for them to answer.
   calling: [
     { f: 392, t: 0, d: 0.28, wave: 'triangle' },
@@ -51,11 +56,12 @@ export const JINGLES: Record<Jingle, Note[]> = {
 }
 
 export const RING_MS = 40000
-export const LOOP_EVERY: Record<'ring' | 'calling', number> = { ring: 3000, calling: 3500 }
+export const LOOP_EVERY: Record<'ring' | 'calling' | 'waiting', number> = { ring: 3000, calling: 3500, waiting: 4000 }
 
 // What should be repeating now. calling: since when we have waited alone in a direct call we started or joined
 // first; ringing: since when each direct call we are not in has been going. Calling takes priority.
-export function loopNow(now: number, calling: number | null, ringing: number[]): 'ring' | 'calling' | null {
+// inCall: we are in another call, so a ringing one only gets the soft call-waiting beeps.
+export function loopNow(now: number, calling: number | null, ringing: number[], inCall = false): 'ring' | 'calling' | 'waiting' | null {
   if (calling !== null && now - calling < RING_MS) return 'calling'
-  return ringing.some((at) => now - at < RING_MS) ? 'ring' : null
+  return ringing.some((at) => now - at < RING_MS) ? (inCall ? 'waiting' : 'ring') : null
 }
