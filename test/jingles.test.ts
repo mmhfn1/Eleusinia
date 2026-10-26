@@ -14,4 +14,7 @@ test('ringing and the caller tune stop after 40 s, calling first, and nothing en
   expect(loopNow(1000, null, [500])).toBe('ring')
   expect(loopNow(RING_MS + 600, null, [500])).toBe(null)
   expect(loopNow(RING_MS + 600, null, [500, RING_MS])).toBe('ring')
+  // Already in another call: only the soft call-waiting beeps, and still for 40 s at most
+  expect(loopNow(1000, null, [500], true)).toBe('waiting')
+  expect(loopNow(RING_MS + 600, null, [500], true)).toBe(null)
 })

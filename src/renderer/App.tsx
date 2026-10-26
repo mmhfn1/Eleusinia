@@ -101,6 +101,9 @@ export default function App() {
 
   const place = open ? (st.groups[open] ? groupName(st.groups[open]) : people.name(open.split('_').find((k) => k !== st.me)!)) : 'Friends'
   const callAway = call.conv && call.conv !== open ? call.conv : null
+  // Direct calls ringing for us, shown wherever we are (the open conversation shows its own); joining one opens it.
+  const other = (c: string) => c.split('_').find((k) => k !== st.me)!
+  const incoming = call.ringingCalls().filter((c) => c !== open && st.friends[other(c)] === 'friend')
   const callName = callAway && (st.groups[callAway] ? groupName(st.groups[callAway]) : people.name(callAway.split('_').find((k) => k !== st.me)!))
   return (
     <>
@@ -111,6 +114,13 @@ export default function App() {
         <Conversation key={open} st={st} conv={open} people={people} run={run} home={() => go(null)} />
       ) : (
         <Home st={st} people={people} run={run} open={go} ring={(c) => (go(c), run(call.join(c)))} newGroup={() => setModal({ kind: 'group' })} />
+      )}
+      {incoming.length > 0 && (
+        <div className="incoming-calls">
+          {incoming.map((c) => (
+            <RingBar key={c} conv={c} who={other(c)} st={st} name={people.name} join={(muted) => (go(c), run(call.join(c).then(() => muted && !call.muted && call.toggleMute())))} />
+          ))}
+        </div>
       )}
       {update && (
         <div role="status" className="toast update-toast">
