@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import DHT from 'hyperdht'
 import createTestnet from 'hyperdht/testnet'
-import { afterAll, beforeAll, expect, test } from 'vitest'
+import { afterAll, beforeAll, expect, onTestFailed, test } from 'vitest'
 import { createNode } from '../src/main/node'
 import { type RelayLimits, createNet, relayKeyPair } from '../src/main/network'
 import { CALL_VERSION, type Group, type Msg, cleanProfile, dmId, identicon, isHandle, keyTail, normHandle, stack, versionOf } from '../src/shared/protocol'
@@ -74,9 +74,16 @@ test('generated pictures are stable, mirrored and differ between keys', () => {
 // Three real nodes on a local DHT: friends, direct chat, offline delivery, groups.
 let testnet: any
 const nodes: { node: ReturnType<typeof createNode> }[] = []
+// Each node's diagnostics, printed when its test fails: some failures only happen on the slower GitHub runner, and this
+// is the only way to see why there.
 function start(dir = mkdtempSync(join(tmpdir(), 'eleusinia-')), keyPair = DHT.keyPair()) {
-  const node = createNode({ dir, keyPair, emit: () => {}, dht: { bootstrap: testnet.bootstrap }, redialMs: 300 })
-  const n = { node, dir, keyPair, key: keyPair.publicKey.toString('hex') as string }
+  const key = keyPair.publicKey.toString('hex') as string
+  const t0 = Date.now()
+  const events: string[] = []
+  const diag = (_area: string, text: string) => events.push(`${((Date.now() - t0) / 1000).toFixed(1)} ${text}`)
+  onTestFailed(() => console.log([`--- …${key.slice(-6)}`, ...events.slice(-40)].join(String.fromCharCode(10))))
+  const node = createNode({ dir, keyPair, emit: () => {}, dht: { bootstrap: testnet.bootstrap }, redialMs: 300, diag })
+  const n = { node, dir, keyPair, key }
   nodes.push(n)
   return n
 }
