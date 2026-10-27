@@ -579,7 +579,8 @@ test('a stolen key gets no old history: what a peer confirmed is never sent to i
   await until(() => !!b.node.state().groups[gid] && !!c.node.state().groups[gid])
   a.node.send(dm, 'old secret')
   a.node.send(gid, 'old group secret')
-  await until(() => texts(b, dm).includes('old secret') && texts(b, gid).includes('old group secret'))
+  b.node.send(dm, 'from b before')
+  await until(() => texts(b, dm).includes('old secret') && texts(b, gid).includes('old group secret') && texts(a, dm).includes('from b before'))
   await new Promise((r) => setTimeout(r, 6000)) // B's receipts reach A and C
   // Someone with B's key and B's friends and groups (state.json), but none of B's messages
   const keyPair = b.keyPair
@@ -596,6 +597,9 @@ test('a stolen key gets no old history: what a peer confirmed is never sent to i
   c.node.send(gid, 'new in group')
   await until(() => texts(b, dm).includes('new') && texts(b, gid).includes('new in group'))
   expect(texts(b, dm)).toEqual(['new'])
+  // Its own numbering carries on where A has it, so what it sends now is not taken for the message A already holds
+  b.node.send(dm, 'from b after')
+  await until(() => texts(a, dm).includes('from b after'))
 }, 120000)
 
 test('the owner removes a member: everyone learns it, the removed member loses the group and is heard no more', async () => {
