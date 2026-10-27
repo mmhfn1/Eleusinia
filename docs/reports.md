@@ -11,7 +11,7 @@ themselves, unless a tester turns that off in the same place. Nobody needs a Git
 2. It waits in the tester's `outbox` folder until the developers' inbox is reachable, through restarts too.
 3. It goes peer to peer and encrypted, over the same network as chat, to the inbox key built into the app
    (`INBOX_KEY` in `src/shared/reports.ts`). No server or third party carries it.
-4. The inbox checks and scrubs it again, accepts at most 20 an hour from one sender, saves it, and confirms
+4. The inbox checks and scrubs it again, accepts at most 20 an hour from one sender and 100 an hour from everyone together, saves it, and confirms
    receipt. The tester's copy is then deleted.
 5. The inbox files it as an issue in a private GitHub repo, labelled `bug`, `feedback`, `idea` or `crash`. The
    GitHub token only exists on the inbox machine.

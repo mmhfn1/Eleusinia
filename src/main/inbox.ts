@@ -17,12 +17,26 @@ type Opts = {
 }
 type Saved = { report: Report; from: string; received: number; issue: number | null }
 
-const PER_HOUR = 20 // reports accepted from one sender per hour, so nobody can flood the inbox or the issues
+// Reports accepted per hour from one sender, and from everyone together (new keys cost nothing), so nobody can
+// flood the inbox or the issues. Only accepted senders are kept, and only for the hour.
+export function reportLimit(perSender = 20, total = 100) {
+  const recent = new Map<Key, number[]>()
+  return (key: Key, now = Date.now()) => {
+    for (const [k, times] of recent) {
+      const kept = times.filter((t) => t > now - 3600e3)
+      if (kept.length) recent.set(k, kept)
+      else recent.delete(k)
+    }
+    if ((recent.get(key)?.length ?? 0) >= perSender || [...recent.values()].reduce((n, t) => n + t.length, 0) >= total) return false
+    recent.set(key, [...(recent.get(key) ?? []), now])
+    return true
+  }
+}
 
 export function createInbox({ dir, keyPair, dht, github, log = () => {}, fileEvery = 60000 }: Opts) {
   const saved = join(dir, 'reports')
   mkdirSync(saved, { recursive: true })
-  const recent = new Map<Key, number[]>()
+  const allowed = reportLimit()
   const fileOf = (id: string) => join(saved, id + '.json')
 
   const net = createNet(
@@ -35,9 +49,7 @@ export function createInbox({ dir, keyPair, dht, github, log = () => {}, fileEve
         const r = cleanReport(w.r)
         if (!r) return
         if (!existsSync(fileOf(r.id))) {
-          const times = (recent.get(key) ?? []).filter((t) => t > Date.now() - 3600e3)
-          if (times.length >= PER_HOUR) return // no receipt: their copy waits and is offered again later
-          recent.set(key, [...times, Date.now()])
+          if (!allowed(key)) return // no receipt: their copy waits and is offered again later
           const s: Saved = { report: r, from: keyTail(key), received: Date.now(), issue: null }
           writeFileSync(fileOf(r.id), JSON.stringify(s, null, 2))
           writeFileSync(join(saved, r.id + '.txt'), describe(r))

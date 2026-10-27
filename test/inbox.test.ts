@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import DHT from 'hyperdht'
 import createTestnet from 'hyperdht/testnet'
 import { afterAll, beforeAll, expect, test, vi } from 'vitest'
-import { createInbox, issueOf } from '../src/main/inbox'
+import { createInbox, issueOf, reportLimit } from '../src/main/inbox'
 import { createNode } from '../src/main/node'
 
 let testnet: any
@@ -74,4 +74,11 @@ test('the issue text names the kind, time, tester and report, and lists app deta
   expect(issue.body).toContain('Contact: `ann#1234`')
   expect(issue.body).toContain('- version: `0.0.1`')
   expect(issue.body).toContain('00:00:00 error   oom')
+})
+
+test('reports are limited per sender and for everyone together, each for an hour', () => {
+  const allowed = reportLimit(2, 3)
+  expect([allowed('a', 0), allowed('a', 1), allowed('a', 2)]).toEqual([true, true, false])
+  expect([allowed('b', 3), allowed('c', 4)]).toEqual([true, false]) // fresh keys do not get around the total
+  expect(allowed('a', 3600e3 + 1)).toBe(true) // an hour on, the old ones no longer count
 })

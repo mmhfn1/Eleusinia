@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -41,11 +41,17 @@ function testDht() {
   return bootstrap.length ? { bootstrap } : undefined
 }
 
+// Messages and the identity live in here; on Linux and Mac only we may read it (folders made by older copies too).
+function privateDir(dir: string) {
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  chmodSync(dir, 0o700)
+  return dir
+}
+
 // The inbox's identity is kept in plain text on purpose: it only exists on the developers' machine, and whoever
 // holds it can receive every report. The GitHub token comes from the environment or github.json beside it.
 function startInbox() {
-  const dir = app.getPath('userData')
-  mkdirSync(dir, { recursive: true })
+  const dir = privateDir(app.getPath('userData'))
   const idFile = join(dir, 'inbox-identity.json')
   if (!existsSync(idFile)) writeFileSync(idFile, JSON.stringify({ sk: DHT.keyPair().secretKey.toString('hex') }))
   const secretKey = Buffer.from(JSON.parse(readFileSync(idFile, 'utf8')).sk, 'hex')
@@ -194,8 +200,7 @@ function startApp() {
       } catch {}
     }
   }
-  const dir = app.getPath('userData')
-  mkdirSync(dir, { recursive: true })
+  const dir = privateDir(app.getPath('userData'))
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
