@@ -584,6 +584,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     const got = senders.get(k)
     if (got && (got.from || got.at > Date.now() - 600000)) return got.from
     const from = openRequest(keyPair, Buffer.from(k, 'hex'), await withTimeout(net.fetch(k), null)) ?? ((await fetchCard(k)) ? k : null)
+    if (senders.size >= 1000) senders.clear()
     senders.set(k, { from, at: Date.now() })
     return from
   }
@@ -651,6 +652,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
 
   // At most one look per person per 5 s, and looks never overlap (checkRequests reruns once if rung meanwhile).
   const STALE_ACCEPT = 30 * 60000 // longer than a DHT announcement lives
+  const NEW_PER_LOOK = 20
   const knocks = new Map<Key, number>()
   function ring(key: Key, again?: number) {
     if ((knocks.get(key) ?? 0) > Date.now() - 5000) return
@@ -667,8 +669,12 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     checking = true
     try {
       let change = false
-      for (const oneOff of await net.lookup(requestTopic(me)).catch(() => [] as Key[])) {
-        const k = isKey(oneOff) ? await senderOf(oneOff) : null
+      // Keys not yet known each cost DHT reads, so a look takes a random few of them, all at once: junk keys
+      // flooding our topic slow real requests down a little but cannot hold them back.
+      const oneOffs = (await net.lookup(requestTopic(me)).catch(() => [] as Key[])).filter(isKey)
+      const known = (k: Key) => !!senders.get(k)?.from || (senders.get(k)?.at ?? 0) > Date.now() - 600000
+      const unknown = oneOffs.filter((k) => !known(k)).sort(() => Math.random() - 0.5).slice(0, NEW_PER_LOOK)
+      for (const k of await Promise.all([...oneOffs.filter(known), ...unknown].map(senderOf))) {
         if (!k || k === me) continue
         const st = s.friends[k]
         if (st === 'outgoing' && (s.unfriended?.[k] ?? 0) > Date.now() - STALE_ACCEPT) continue // an acceptance from before they removed us
