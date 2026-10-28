@@ -87,13 +87,13 @@ let testnet: any
 const nodes: { node: ReturnType<typeof createNode> }[] = []
 // Each node's diagnostics, printed when its test fails: some failures only happen on the slower GitHub runner, and this
 // is the only way to see why there.
-function start(dir = mkdtempSync(join(tmpdir(), 'eleusinia-')), keyPair = DHT.keyPair()) {
+function start(dir = mkdtempSync(join(tmpdir(), 'eleusinia-')), keyPair = DHT.keyPair(), opts: Partial<Parameters<typeof createNode>[0]> = {}) {
   const key = keyPair.publicKey.toString('hex') as string
   const t0 = Date.now()
   const events: string[] = []
   const diag = (_area: string, text: string) => events.push(`${((Date.now() - t0) / 1000).toFixed(1)} ${text}`)
   onTestFailed(() => console.log([`--- …${key.slice(-6)}`, ...events.slice(-40)].join(String.fromCharCode(10))))
-  const node = createNode({ dir, keyPair, emit: () => {}, dht: { bootstrap: testnet.bootstrap }, redialMs: 300, diag })
+  const node = createNode({ dir, keyPair, emit: () => {}, dht: { bootstrap: testnet.bootstrap }, redialMs: 300, diag, ...opts })
   const n = { node, dir, keyPair, key }
   nodes.push(n)
   return n
@@ -222,6 +222,24 @@ test('a member offline since before the group existed gets it from a friend, the
   await c.node.destroy()
   a = restart(a)
   await until(() => texts(a, gid).sort().join() === 'c here,thanks,welcome')
+}, 120000)
+
+// Nothing is passed on (forwardTo 0) and A and C never link, so C gets A's message only by seeing B's receipt and asking.
+test('a group member that passing on missed asks for the message once a receipt shows it exists', async () => {
+  const [ka, kc] = [DHT.keyPair(), DHT.keyPair()]
+  const hex = (k: typeof ka) => k.publicKey.toString('hex')
+  const a = start(undefined, ka, { forwardTo: 0, links: (k) => k !== hex(kc) })
+  const b = start(undefined, undefined, { forwardTo: 0 })
+  const c = start(undefined, kc, { forwardTo: 0, links: (k) => k !== hex(ka) })
+  await befriend(a, b)
+  await befriend(b, c)
+  const gid = a.node.createGroup('relay', [b.key])
+  await until(() => !!b.node.state().groups[gid])
+  b.node.addToGroup(gid, c.key)
+  await until(() => !!c.node.state().groups[gid] && a.node.state().groups[gid]?.members.includes(c.key))
+  a.node.send(gid, 'from a')
+  await until(() => texts(c, gid).includes('from a'))
+  expect(c.node.state().online).not.toContain(a.key)
 }, 120000)
 
 const PNG = 'data:image/png;base64,AAAA'

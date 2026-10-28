@@ -69,13 +69,14 @@ type Opts = {
   inbox?: Key // the developers' inbox, where problem and crash reports go
   version?: string // this app's version, told to everyone we greet
   diag?: (area: Area, text: string) => void // diagnostic events, kept in memory by the caller
+  forwardTo?: number // how many members a group message is passed on to; testing: 0, so only asking delivers
 }
 
 // Conversations whose messages stay in memory; the open one and a couple being synced.
 const KEEP_LOGS = 3
 
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
-export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', links, strict, relayLimits, maxRequests = 200, netsim, thumbnail }: Opts) {
+export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', links, strict, relayLimits, maxRequests = 200, netsim, thumbnail, forwardTo = 3 }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
   const file = join(dir, 'state.json')
   mkdirSync(join(dir, 'msgs'), { recursive: true })
@@ -199,13 +200,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     })
   const sendHave = (key: Key, conv: string, re?: boolean) =>
     net.send(key, { t: 'have', conv, have: haveOf(conv), re })
-  // Group receipts also go to every linked member, at most every 5 s per group, so each of them knows what we hold
-  // and never sends it to our key again (see `confirmed`), not only whoever passed a message on.
+  // Group receipts also go, at most every 5 s per group, to a few random linked members (whoever passed a message on
+  // got one already), so over a few rounds each of them knows what we hold and never sends it to our key again (see
+  // `confirmed`), and one that missed a message asks for it. To every member, a big group would send members² a round.
   const receipts = new Set<string>()
-  const FORWARD_TO = 3
   const askedFor = new Map<string, number>()
+  const few = (ks: Key[], n = forwardTo) => ks.sort(() => Math.random() - 0.5).slice(0, n)
   const sendReceipts = () => {
-    for (const conv of receipts) for (const k of members(conv)) if (k !== me && net.linked(k)) sendHave(k, conv, true)
+    for (const conv of receipts) for (const k of few(members(conv).filter((k) => k !== me && net.linked(k)), 3)) sendHave(k, conv, true)
     receipts.clear()
   }
   const receiptTimer = setInterval(sendReceipts, 5000)
@@ -352,7 +354,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       // Passed on to a few linked members, not all: in a big group that would be members² sends per message. Anyone
       // it misses learns of it from the receipts within 5 s and asks (see `have`).
       const on = ms.filter((k) => k !== me && k !== key && k !== m.author && net.linked(k))
-      for (const k of on.sort(() => Math.random() - 0.5).slice(0, FORWARD_TO)) net.send(k, { t: 'msg', m })
+      for (const k of few(on)) net.send(k, { t: 'msg', m })
     } else if (w.t === 'call') {
       used.set(key, Date.now())
       if (members(w.conv).includes(key)) emit({ type: 'call', from: key, conv: w.conv, data: w.data })

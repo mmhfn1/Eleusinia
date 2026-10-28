@@ -314,11 +314,9 @@ function startApp() {
   ipcMain.handle('installUpdate', async () => {
     if (!own) return autoUpdater.quitAndInstall(true, true) // quietly, then opens the new version
     if (!staged) return
-    const s = staged
-    staged = null
-    install(s) // throws if it cannot be put in place, and the running copy stays
+    // Quitting puts it in place (will-quit) after the node has shut down and saved
     app.relaunch()
-    app.exit(0)
+    app.quit()
   })
   // From the emblem's menu. A copy run from source (or with updates off) never updates, and says so.
   ipcMain.handle('checkUpdates', async () => {
