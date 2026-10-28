@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -70,11 +70,32 @@ function startInbox() {
 
 function loadIdentity(dir: string) {
   const file = join(dir, 'identity.json')
-  let hex: string
+  let hex = ''
   if (existsSync(file)) {
-    const { sk, enc } = JSON.parse(readFileSync(file, 'utf8'))
-    hex = enc ? safeStorage.decryptString(Buffer.from(sk, 'base64')) : sk
-  } else {
+    try {
+      const { sk, enc } = JSON.parse(readFileSync(file, 'utf8'))
+      hex = enc ? safeStorage.decryptString(Buffer.from(sk, 'base64')) : sk
+      if (!/^[0-9a-f]{128}$/.test(hex)) throw new Error('not a key')
+    } catch {
+      // Locked to another computer or user account (a copied or restored data folder), or damaged. Kept, not deleted.
+      const kept = `identity-unreadable-${Date.now()}.json`
+      const choice = dialog.showMessageBoxSync({
+        type: 'error',
+        message: 'Eleusinia cannot open your identity',
+        detail: `It was probably saved on another computer or user account, which only that one can unlock. You can start with a new identity: friends will need to add you again. The old file is kept as ${kept} in ${dir}.`,
+        buttons: ['Start with a new identity', 'Quit'],
+        defaultId: 1,
+        cancelId: 1,
+      })
+      if (choice !== 0) {
+        app.exit(1)
+        throw new Error('identity unreadable')
+      }
+      renameSync(file, join(dir, kept))
+      hex = ''
+    }
+  }
+  if (!hex) {
     hex = DHT.keyPair().secretKey.toString('hex')
     // Without an OS keychain (some Linux setups) the key is stored in plain text.
     const enc = safeStorage.isEncryptionAvailable()
@@ -293,11 +314,9 @@ function startApp() {
   ipcMain.handle('installUpdate', async () => {
     if (!own) return autoUpdater.quitAndInstall(true, true) // quietly, then opens the new version
     if (!staged) return
-    const s = staged
-    staged = null
-    install(s) // throws if it cannot be put in place, and the running copy stays
+    // Quitting puts it in place (will-quit) after the node has shut down and saved
     app.relaunch()
-    app.exit(0)
+    app.quit()
   })
   // From the emblem's menu. A copy run from source (or with updates off) never updates, and says so.
   ipcMain.handle('checkUpdates', async () => {
