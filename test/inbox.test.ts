@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import DHT from 'hyperdht'
@@ -81,4 +81,20 @@ test('reports are limited per sender and for everyone together, each for an hour
   expect([allowed('a', 0), allowed('a', 1), allowed('a', 2)]).toEqual([true, true, false])
   expect([allowed('b', 3), allowed('c', 4)]).toEqual([true, false]) // fresh keys do not get around the total
   expect(allowed('a', 3600e3 + 1)).toBe(true) // an hour on, the old ones no longer count
+})
+
+test('reports saved before a restart and not yet filed are filed by the next start; filed ones are left alone', async () => {
+  const dir = tmp()
+  mkdirSync(join(dir, 'reports'))
+  const saved = (id: string, issue: number | null) => ({ report: { id, at: 0, kind: 'bug', title: 'Saved ' + id, body: '', meta: {}, events: [] }, from: 'A3F9C2', received: 0, issue })
+  writeFileSync(join(dir, 'reports', '1111111111111111.json'), JSON.stringify(saved('1111111111111111', null)))
+  writeFileSync(join(dir, 'reports', '2222222222222222.json'), JSON.stringify(saved('2222222222222222', 3)))
+  const posted: string[] = []
+  vi.stubGlobal('fetch', async (_url: string, init: any) => (posted.push(JSON.parse(init.body).title), new Response(JSON.stringify({ number: 8 }), { status: 201 })))
+  const inbox = createInbox({ dir, keyPair: DHT.keyPair(), dht: { bootstrap: testnet.bootstrap }, github: { token: 't', repo: 'team/r' }, fileEvery: 200 })
+  await until(() => JSON.parse(readFileSync(join(dir, 'reports', '1111111111111111.json'), 'utf8')).issue === 8)
+  await new Promise((r) => setTimeout(r, 500)) // a few more rounds: nothing is filed twice
+  expect(posted).toEqual(['[bug] Saved 1111111111111111'])
+  vi.unstubAllGlobals()
+  await inbox.destroy()
 })

@@ -38,6 +38,15 @@ export function createInbox({ dir, keyPair, dht, github, log = () => {}, fileEve
   mkdirSync(saved, { recursive: true })
   const allowed = reportLimit()
   const fileOf = (id: string) => join(saved, id + '.json')
+  // Reports without an issue yet, read from the folder once: it only grows, so it is not read again every minute.
+  const read = (f: string): Saved | null => {
+    try {
+      return JSON.parse(readFileSync(join(saved, f), 'utf8'))
+    } catch {
+      return null
+    }
+  }
+  const unfiled = new Set(readdirSync(saved).filter((f) => f.endsWith('.json') && read(f)?.issue === null))
 
   const net = createNet(
     keyPair,
@@ -52,6 +61,7 @@ export function createInbox({ dir, keyPair, dht, github, log = () => {}, fileEve
           if (!allowed(key)) return // no receipt: their copy waits and is offered again later
           const s: Saved = { report: r, from: keyTail(key), received: Date.now(), issue: null }
           writeFileSync(fileOf(r.id), JSON.stringify(s, null, 2))
+          unfiled.add(r.id + '.json')
           writeFileSync(join(saved, r.id + '.txt'), describe(r))
           log(`received ${r.kind} from …${s.from}: ${r.title}`)
           fileIssues()
@@ -67,13 +77,17 @@ export function createInbox({ dir, keyPair, dht, github, log = () => {}, fileEve
   function fileIssues() {
     if (!github || filing) return
     filing = (async () => {
-      for (const f of readdirSync(saved).filter((n) => n.endsWith('.json'))) {
-        const s: Saved = JSON.parse(readFileSync(join(saved, f), 'utf8'))
-        if (s.issue) continue
+      for (const f of unfiled) {
+        const s = read(f)
+        if (!s || s.issue) {
+          unfiled.delete(f)
+          continue
+        }
         const issue = await createIssue(github, s).catch((e) => (log(`could not file ${s.report.id} yet: ${e.message}`), null))
         if (!issue) break
         s.issue = issue
         writeFileSync(join(saved, f), JSON.stringify(s, null, 2))
+        unfiled.delete(f)
         log(`filed ${s.report.id} as issue #${issue}`)
       }
     })().finally(() => (filing = null))
