@@ -212,16 +212,18 @@ function startUpdates(ready: (version: string) => void, diag: (area: 'app' | 'er
 }
 
 function startApp() {
+  const dir = privateDir(app.getPath('userData'))
   // macOS: an app run from Downloads or a disk image cannot replace itself when updating, so offer to move it first.
-  if (process.platform === 'darwin' && app.isPackaged && !app.isInApplicationsFolder()) {
-    const move = dialog.showMessageBoxSync({ message: 'Move Eleusinia to your Applications folder?', detail: 'It can only update itself from there.', buttons: ['Move to Applications', 'Not now'], defaultId: 0, cancelId: 1 })
+  // Asked once: "Not now" is remembered.
+  const stayPut = join(dir, 'not-in-applications')
+  if (process.platform === 'darwin' && app.isPackaged && !app.isInApplicationsFolder() && !existsSync(stayPut)) {
+    const move = dialog.showMessageBoxSync({ message: 'Move Eleusinia to your Applications folder?', detail: 'It can only update itself from there. You will not be asked again.', buttons: ['Move to Applications', 'Not now'], defaultId: 0, cancelId: 1 })
     if (move === 0) {
       try {
         if (app.moveToApplicationsFolder()) return // it relaunches from there
       } catch {}
-    }
+    } else writeFileSync(stayPut, '')
   }
-  const dir = privateDir(app.getPath('userData'))
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
