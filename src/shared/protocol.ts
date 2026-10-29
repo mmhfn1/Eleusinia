@@ -83,8 +83,6 @@ export type Wire =
   | ({ t: 'hello'; friend?: boolean; app?: string; call?: number; relay?: Key } & Profile)
   | { t: 'reach'; key: Key; ok?: boolean } // asking a contact whether it can relay us to `key`, and its answer
   | { t: 'relayed'; by: Key } // sent by whoever dialed: this link goes through `by`'s relay
-  | { t: 'who' } // a stranger asking for our profile, to show it in friend search
-  | ({ t: 'card' } & Profile)
   | { t: 'group'; g: Group }
   | { t: 'have'; conv: string; have: Have; re?: boolean; held?: Have } // held: what the receiver already confirmed holding, which is not sent again
   | { t: 'msg'; m: Msg }

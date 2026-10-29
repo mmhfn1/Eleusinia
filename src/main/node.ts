@@ -249,7 +249,6 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (!outgoing().length && !wants(key)) net.drop(key)
       return push()
     }
-    if (w.t === 'who') return net.send(key, { t: 'card', ...s.profile })
     if (w.t === 'hello') {
       if (typeof w.name !== 'string') return
       const st = s.friends[key]
@@ -569,11 +568,10 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const delivery = setInterval(deliver, redialMs) // only dials while reports are waiting, like redialing an offline friend
   deliver()
 
-  const topic = (id: string) => createHash('sha256').update('eleusinia:' + id).digest()
   const prefixTopic = (prefix: string) => createHash('sha256').update('eleusinia-prefix:' + prefix).digest()
   // Only with Settings → suggest: every username prefix from 4 letters up, so people can be suggested while typing.
   // The exact ID is no longer announced (it said whether that ID was online to anyone asking); search finds people
-  // by exact ID through their ID card instead. topic() is still looked up, for copies older than this.
+  // by exact ID through their ID card instead.
   function topicsOf(handle: string) {
     const user = handle.split('#')[0]
     const topics: Buffer[] = []
@@ -591,14 +589,13 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     await net.putShared(seed, sealRequest(keyPair, to, DHT.keyPair(seed).publicKey), Math.floor(Date.now() / 1000))
     await net.announce(requestTopic(to), seed)
   }
-  // Who is behind each one-off key on our request topic. Copies older than sealed requests announce their own key:
-  // those are recognised by the profile card published under it.
+  // Who is behind each one-off key on our request topic, from the sealed record under it.
   // Not found is retried after 10 minutes: the record may not have spread yet.
   const senders = new Map<Key, { from: Key | null; at: number }>()
   async function senderOf(k: Key): Promise<Key | null> {
     const got = senders.get(k)
     if (got && (got.from || got.at > Date.now() - 600000)) return got.from
-    const from = openRequest(keyPair, Buffer.from(k, 'hex'), await withTimeout(net.fetch(k), null)) ?? ((await fetchCard(k)) ? k : null)
+    const from = openRequest(keyPair, Buffer.from(k, 'hex'), await withTimeout(net.fetch(k), null))
     if (senders.size >= 1000) senders.clear()
     senders.set(k, { from, at: Date.now() })
     return from
@@ -738,7 +735,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         // Re-rolled if someone online already uses that exact ID. People who are offline cannot be checked.
         for (let i = 0; i < 5; i++) {
           clean.handle = username + '#' + String(randomInt(10000)).padStart(4, '0')
-          if (!(await idOwners(clean.handle)).length && !(await net.lookup(topic(clean.handle))).length) break
+          if (!(await idOwners(clean.handle)).length) break
         }
       }
       s.profile = clean
@@ -755,7 +752,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const user = q.split('#')[0]
       const exact = isHandle(q)
       if (!exact && (user.length < 4 || !isUsername(user))) return []
-      const [around, owners] = await Promise.all([net.lookup(exact ? topic(q) : prefixTopic(user)), exact ? idOwners(q) : Promise.resolve([] as Key[])])
+      const [around, owners] = await Promise.all([exact ? [] : net.lookup(prefixTopic(user)), exact ? idOwners(q) : Promise.resolve([] as Key[])])
       const keys = [...new Set([...around, ...owners])].filter((k) => k !== me).slice(0, 8)
       // Contacts as we know them; anyone else from their published card, with its thumbnail (strangers cannot link,
       // and dialing them would only ring their door before any request exists). linked: whether we have a link now.
@@ -859,7 +856,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const withFiles = refs !== undefined && refs.length > 0
       if (withFiles && (!validFiles(refs) || refs.some((f) => files.status(f.h).state !== 'done'))) throw new Error('Cannot send those files')
       if (!ms.length || typeof text !== 'string' || (!text && !withFiles) || text.length > MAX_TEXT) throw new Error('Cannot send that')
-      const base = { conv, author: me, seq: (haveOf(conv)[me] ?? 0) + 1, ts: Date.now(), text }
+      // A friend confirmed more of ours than the log holds: it was lost. Carry on after those, or the next message
+      // would take a number they already have and be dropped.
+      const have = haveOf(conv)
+      if ((have[me] ?? 0) < (s.acked[conv] ?? 0)) {
+        have[me] = s.acked[conv]
+        appendFileSync(logFile(conv), JSON.stringify({ skip: { [me]: have[me] } }) + '\n')
+      }
+      const base = { conv, author: me, seq: (have[me] ?? 0) + 1, ts: Date.now(), text }
       const m = signMsg(withFiles ? { ...base, files: refs.map(({ h, n, s, t, th }) => ({ h, n, s, t, ...(th && { th }) })) } : base, keyPair.secretKey)
       append(m)
       for (const k of ms) if (k !== me) net.send(k, { t: 'msg', m }), used.set(k, Date.now()), need(k)

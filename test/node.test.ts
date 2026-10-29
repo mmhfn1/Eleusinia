@@ -257,9 +257,11 @@ test('setup assigns username#1234; search shows a stranger from their published 
   await b.node.setProfile({ username: 'other', handle: 'evil#0000', name: 'Bob', about: 'hello', avatar: PNG })
   expect(b.node.state().profile).toMatchObject({ handle: id, name: 'Bob' })
 
-  const found = await a.node.findFriend(' ' + id.toUpperCase() + ' ')
-  // Strangers cannot link, so the card comes from the DHT record: no picture until they are friends
-  expect(found).toEqual([{ key: b.key, linked: false, profile: { handle: id, name: 'Bob', about: 'hello', avatar: '' } }])
+  // Strangers cannot link, so the card comes from the DHT record: no picture until they are friends. Polled, since the
+  // edited card may not have spread yet.
+  const search = () => a.node.findFriend(' ' + id.toUpperCase() + ' ')
+  await expect.poll(search, { timeout: 20000, interval: 200 }).toEqual([{ key: b.key, linked: false, profile: { handle: id, name: 'Bob', about: 'hello', avatar: '' } }])
+  const found = await search()
   // Searching alone asks nothing of the other person
   expect(a.node.state().friends).toEqual({})
   expect(b.node.state().friends).toEqual({})
@@ -367,8 +369,9 @@ test('a stranger cannot link at all, so cannot learn our address, ask for our ca
     {
       open(k) {
         opened = true
-        raw.send(k, { t: 'card', handle: 'evil#0000', name: 'Evil', about: '', avatar: '' })
-        raw.send(k, { t: 'who' })
+        // What older copies used to answer and take; nothing at all reaches us now.
+        raw.send(k, { t: 'card', handle: 'evil#0000', name: 'Evil', about: '', avatar: '' } as any)
+        raw.send(k, { t: 'who' } as any)
       },
       close() {},
       msg() {},
@@ -606,15 +609,18 @@ test('a stolen key gets no old history: what a peer confirmed is never sent to i
   const stolen = mkdtempSync(join(tmpdir(), 'eleusinia-'))
   writeFileSync(join(stolen, 'state.json'), readFileSync(join(b.dir, 'state.json')))
   b = start(stolen, keyPair)
+  b.node.send(dm, 'written before anyone answered') // would be numbered 1 again, which A already holds from B
   await until(() => b.node.state().online.includes(a.key) && b.node.state().online.includes(c.key))
   await new Promise((r) => setTimeout(r, 3000))
-  expect(texts(b, dm)).toEqual([])
+  expect(texts(b, dm)).toEqual(['written before anyone answered'])
+  expect(b.node.history(dm).msgs[0].seq).toBe(2) // after the 1 A confirmed (state.json still says so)
+  await until(() => texts(a, dm).includes('written before anyone answered'))
   expect(texts(b, gid)).toEqual([])
   // Messages sent from now on still arrive: only what was already confirmed is held back
   a.node.send(dm, 'new')
   c.node.send(gid, 'new in group')
   await until(() => texts(b, dm).includes('new') && texts(b, gid).includes('new in group'))
-  expect(texts(b, dm)).toEqual(['new'])
+  expect(texts(b, dm)).toEqual(['written before anyone answered', 'new'])
   // Its own numbering carries on where A has it, so what it sends now is not taken for the message A already holds
   b.node.send(dm, 'from b after')
   await until(() => texts(a, dm).includes('from b after'))
