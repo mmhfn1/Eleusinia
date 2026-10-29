@@ -195,6 +195,7 @@ function startUpdates(ready: (version: string) => void, diag: (area: 'app' | 'er
   if (own)
     autoUpdater.on('update-available', async (i) => {
       if (staged?.version === i.version) return
+      if (!canInstall()) return diag('error', `update ${i.version} found, but this copy cannot replace itself where it is (a folder it cannot write to, or a Mac app opened straight from Downloads)`)
       const s = await fetchUpdate(i.version, i.files, releaseBase(i.version), (u) => net.fetch(u)).catch(() => null)
       if (!s) return diag('error', `update ${i.version} could not be downloaded or is not signed with the update key`)
       staged = s

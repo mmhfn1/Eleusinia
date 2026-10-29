@@ -76,6 +76,7 @@ type Peer = {
 }
 
 export const active = new Map<string, Set<Key>>() // conversation -> peers we know are in its call
+const announced = new Map<string, number>() // conversation -> when we last showed "started a call"
 export const peers = new Map<Key, Peer>()
 // Outlives a rebuilt connection, so reconnect attempts keep backing off until one holds.
 const watchdogs = new Map<Key, ReturnType<typeof createWatchdog>>()
@@ -1000,7 +1001,11 @@ async function handle(from: Key, c: string, d: any) {
     if (c === conv) drop(from)
     return
   }
-  if (!set.size && !conv) new Notification('Eleusinia', { body: `${state.profiles[from]?.name || 'Someone'} started a call` })
+  // At most one a minute per conversation, so leaving and joining over and over cannot flood the notifications
+  if (!set.size && !conv && (announced.get(c) ?? 0) < Date.now() - 60000) {
+    announced.set(c, Date.now())
+    new Notification('Eleusinia', { body: `${state.profiles[from]?.name || 'Someone'} started a call` })
+  }
   const fresh = !set.has(from)
   set.add(from)
   if (fresh && c === conv) {
