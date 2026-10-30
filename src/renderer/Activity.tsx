@@ -266,8 +266,8 @@ function DestinyMatch({ d }: { d: Destiny }) {
       {f && (
         <div className="destiny-fireteam">
           <p className="row-sub">
-            Fireteam of {f.members.length}
-            {f.max ? ` of ${f.max}` : ''}
+            Fireteam {f.members.length}
+            {f.max ? `/${f.max}` : ''}
             {f.open ? ` · ${f.open} open` : ''}
           </p>
           <ul aria-label="Fireteam">
@@ -401,7 +401,7 @@ function AchievementRow({ app, x }: { app?: number; x: Achievement }) {
         {x.desc && <span className="achievement-desc">{x.desc}</span>}
         <span className="row-sub">
           {x.at ? `Unlocked ${ago(x.at)}` : 'Unlocked'}
-          {x.rarity !== undefined && ` · ${x.rarity < 10 ? x.rarity.toFixed(1) : Math.round(x.rarity)}% of players have it`}
+          {x.rarity !== undefined && ` · ${x.rarity < 10 ? x.rarity.toFixed(1) : Math.round(x.rarity)}% of players`}
         </span>
       </span>
     </li>
@@ -503,26 +503,23 @@ export function ActivitySettingsSection({ st, name }: { st: State; name: (k: Key
     <>
       <label className="check-row">
         <input type="checkbox" role="switch" checked={on} onChange={(e) => save({ games: e.target.checked })} />
-        <span>
-          Share the game I'm playing with friends and group members. Found from Steam, or by the game's program. Never
-          shown to anyone else
-        </span>
+        <span>Share what I'm playing</span>
       </label>
       <div className="activity-details">
-        {detail('playtime', 'How long I have played it in total')}
-        {detail('achievements', 'My achievements in it, with the newest ones')}
-        {detail('details', 'Its genre, developer, release date and description')}
+        {detail('playtime', 'Total playtime')}
+        {detail('achievements', 'Achievements')}
+        {detail('details', 'Genre, developer and release date')}
       </div>
       {on && <Connections set={set} save={save} />}
       {on && (
         <div className="activity-preview">
-          <p className="row-sub">What friends see now</p>
-          {mine ? <GameCard g={mine} /> : <p className="quiet">No game running.</p>}
+          <p className="row-sub">Preview</p>
+          {mine ? <GameCard g={mine} /> : <p className="quiet">No game running</p>}
         </div>
       )}
       {(set.hidden?.length ?? 0) > 0 && (
         <div className="activity-hidden">
-          <p className="row-sub">Never shown to</p>
+          <p className="row-sub">Hidden from</p>
           {set.hidden!.map((k) => (
             <div className="settings-row" key={k}>
               <span className="row-text">
@@ -536,7 +533,7 @@ export function ActivitySettingsSection({ st, name }: { st: State; name: (k: Key
         </div>
       )}
       <div className="activity-extra">
-        <p className="row-sub">Games found by their program, besides Steam and the built-in list</p>
+        <p className="row-sub">Other games</p>
         {extra.map(([exe, game]) => (
           <div className="settings-row" key={exe}>
             <span className="row-text">
@@ -555,7 +552,7 @@ export function ActivitySettingsSection({ st, name }: { st: State; name: (k: Key
         ) : (
           <div className="activity-add">
             <select aria-label="Running program" value={pick} onChange={(e) => setPick(e.target.value)}>
-              <option value="">Pick the game's program (start the game first)</option>
+              <option value="">Running program</option>
               {programs.sort().map((p) => (
                 <option key={p} value={p}>
                   {p}
