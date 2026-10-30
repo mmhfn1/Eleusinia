@@ -6,6 +6,7 @@ import { Avatar, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Splitter, Wordma
 import { Chat } from './Chat'
 import { CameraDialog, Oculus, PersonVolume, RingBar, STATE_WORDS, ShareDialog, Stage, VoiceMark, VoiceSignal } from './Media'
 import { DeleteAccount, ReportDialog, SettingsDialog } from './Settings'
+import { ActivityLine, ProfileActivity } from './Activity'
 import { type Modal, NOBODY, type People, type Run, api, card, groupName, labelOf } from './common'
 
 export default function App() {
@@ -265,7 +266,7 @@ function Home({ st, people, run, open, ring, newGroup }: { st: State; people: Pe
         <Avatar k={k} p={prof(k)} size={40} online={isOnline(k)} />
         <span className="row-text">
           <span className="row-title">{name(k)}</span>
-          <span className="row-sub">{prof(k).handle}</span>
+          <span className="row-sub">{st.activity[k]?.game ? <ActivityLine a={st.activity[k]} /> : prof(k).handle}</span>
         </span>
         {inCallIn(k) && <span className="row-where">In a call in {groupName(inCallIn(k)!)}</span>}
         {call.active.get(dmId(st.me, k))?.size ? (
@@ -770,6 +771,7 @@ function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
           </p>
         )}
         {p.about && <p className="about">{p.about}</p>}
+        <ProfileActivity st={st} k={k} />
         <dl className="identity">
           <dt>Friend ID</dt>
           <dd>

@@ -1,3 +1,4 @@
+import type { Activity, ActivitySettings } from './activity'
 import type { Action, Bindings } from './hotkeys'
 import type { FileRef } from './media'
 
@@ -50,6 +51,7 @@ export type Settings = {
   relay?: boolean // connect through mutual friends when no direct link works, and relay for them; off unless turned on
   cacheMB?: number // how much room downloaded pictures may take before the oldest are deleted (DEFAULT_CACHE_MB)
   suggest?: boolean // be suggested to people typing the start of our username (announced while online); off unless turned on
+  activity?: ActivitySettings // what we are playing, shared with friends and group members (shared/activity.ts); off unless turned on
 }
 
 export type State = {
@@ -63,6 +65,7 @@ export type State = {
   reports: number // problem and crash reports waiting to reach the developers' inbox
   versions: Record<Key, Version> // what each person we have greeted runs; memory only
   relayed: Key[] // online people whose link goes through a mutual friend's relay: voice and text only
+  activity: Record<Key, Activity> // what contacts are doing now, memory only; ours as they see it, under our own key
 }
 
 // How calls are set up (slot order and signals). Raised only by a change older copies cannot follow: copies on
@@ -96,6 +99,7 @@ export type Wire =
   | { t: 'get'; h: string; off: number } // a piece of a shared file, from offset `off` (see main/files.ts)
   | { t: 'part'; h: string; off: number; d: string } // that piece, base64
   | { t: 'nope'; h: string } // the sender does not have that file, or not for us
+  | { t: 'activity'; a: unknown } // what the sender is doing (shared/activity.ts), checked by cleanActivity
 
 export type Event =
   | { type: 'state'; state: State }

@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import os from 'node:os'
 import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -14,6 +14,8 @@ import { isKey } from '../shared/protocol'
 import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared/reports'
 import { kindOf, shareable } from '../shared/sources'
 import { verifyUpdate } from '../shared/updatesig'
+import { artUrl } from '../shared/activity'
+import { programs, watchActivity } from './activity'
 import { createInbox } from './inbox'
 import { type Staged, canInstall, fetchUpdate, install, tidy } from './selfupdate'
 import { createNode } from './node'
@@ -32,7 +34,11 @@ if (!firstCopy) {
 }
 
 // Shared pictures, videos and sounds reach the page as eleusinia-file://<hash> (see startApp), never as file:// paths.
-protocol.registerSchemesAsPrivileged([{ scheme: 'eleusinia-file', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } }])
+// Activity pictures (game art, achievement icons) as eleusinia-art://…, built from ids by shared/activity.ts artUrl.
+protocol.registerSchemesAsPrivileged([
+  { scheme: 'eleusinia-file', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
+  { scheme: 'eleusinia-art', privileges: { standard: true, secure: true } },
+])
 
 // Testing only: join this DHT instead of the public one, as "host:port,host:port" (test/smoke.mjs runs a local
 // one). Unset in normal use, which keeps the public DHT.
@@ -105,6 +111,57 @@ function loadIdentity(dir: string) {
   const secretKey = Buffer.from(hex, 'hex')
   return { publicKey: secretKey.subarray(32), secretKey } // an ed25519 secret key ends with its public key
 }
+
+// Activity (docs/roadmap-activity.md): the watcher runs only while sharing games is on. ELEUSINIA_TEST_ACTIVITY (a
+// game as JSON) stands in for it in the smoke run.
+function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (text: string) => void) {
+  const fake = process.env.ELEUSINIA_TEST_ACTIVITY
+  let watcher: ReturnType<typeof watchActivity> | null = null
+  const apply = () => {
+    const on = !!node.state().settings.activity?.games
+    if (fake) return node.setActivity(on ? { ...JSON.parse(fake), since: Date.now() - 60000 } : null)
+    if (on && !watcher)
+      watcher = watchActivity({
+        settings: () => node.state().settings.activity,
+        onGame: (g) => node.setActivity(g),
+        fetch: (url) => net.fetch(url),
+        diag,
+      })
+    else if (!on && watcher) watcher.stop(), (watcher = null), node.setActivity(null)
+  }
+  apply()
+  activityChanged = apply
+  ipcMain.handle('programs', () => programs())
+  ipcMain.handle('openSteam', (_e, id: unknown, kind: unknown) => {
+    if (Number.isSafeInteger(id) && (id as number) > 0 && (kind === 'store' || kind === 'run')) return shell.openExternal(`steam://${kind}/${id}`)
+  })
+
+  // Pictures fetched once from the allowed hosts and kept on disk; the oldest go past 1500 files.
+  const cache = join(dir, 'art')
+  mkdirSync(cache, { recursive: true })
+  protocol.handle('eleusinia-art', async (req) => {
+    const url = artUrl(req.url)
+    if (!url) return new Response(null, { status: 404 })
+    const file = join(cache, createHash('sha256').update(url).digest('hex').slice(0, 32))
+    const type = url.endsWith('.png') ? 'image/png' : 'image/jpeg'
+    if (existsSync(file)) return new Response(readFileSync(file), { headers: { 'content-type': type } })
+    const res = await net.fetch(url).catch(() => null)
+    const ct = res?.headers.get('content-type') ?? ''
+    if (!res?.ok || !/^image\/(jpeg|png|webp)/.test(ct)) return new Response(null, { status: 404 })
+    const body = Buffer.from(await res.arrayBuffer())
+    if (body.length > 4e6) return new Response(null, { status: 404 })
+    writeFileSync(file, body)
+    const files = readdirSync(cache)
+    if (files.length > 1500)
+      files
+        .map((f) => ({ f, at: statSync(join(cache, f)).mtimeMs }))
+        .sort((a, b) => a.at - b.at)
+        .slice(0, 300)
+        .forEach(({ f }) => rmSync(join(cache, f), { force: true }))
+    return new Response(body, { headers: { 'content-type': ct } })
+  })
+}
+let activityChanged = () => {}
 
 // Closing windows never quits by itself: the tray menu, the close-to-tray setting or an update does, explicitly.
 app.on('window-all-closed', () => {})
@@ -313,6 +370,7 @@ function startApp() {
     diag: diagnostics.add,
     version: app.getVersion(),
   })
+  startActivity(node, dir, (text) => diagnostics.add('app', text))
   startUpdates((version) => !win.isDestroyed() && win.webContents.send('event', { type: 'update', version }), diagnostics.add)
   ipcMain.handle('installUpdate', async () => {
     if (!own) return autoUpdater.quitAndInstall(true, true) // quietly, then opens the new version
@@ -363,7 +421,7 @@ function startApp() {
   ipcMain.handle('call', async (_e, method: string, ...args: unknown[]) => {
     if (!Object.hasOwn(node, method)) throw new Error('Unknown method')
     const result = await (node as any)[method](...args)
-    if (method === 'setSettings') hook()
+    if (method === 'setSettings') hook(), activityChanged()
     if (method === 'deleteAccount') {
       rmSync(running, { force: true })
       app.relaunch()

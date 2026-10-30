@@ -252,7 +252,17 @@ async function relayedRun(ownTitles) {
   console.log(`ok   no screen video crossed the relay (${screenIn} packets)`)
 }
 
-const a = await launch(9231, undefined, strictEnv)
+// Ann's game stands in for what main/activity.ts would find (ELEUSINIA_TEST_ACTIVITY), shared once she turns it on.
+const annGame = {
+  name: 'Counter-Strike 2',
+  source: 'steam',
+  app: 730,
+  played: 6000,
+  genres: ['Action', 'Free To Play'],
+  developer: 'Valve',
+  achievements: { got: 1, total: 50, recent: [{ name: 'A New Beginning', desc: 'Played a match', icon: 'f75dd04fa12445a8ec43be65fa16ff1b8d2bf82e.jpg', at: Date.now() - 3600e3, rarity: 61.2 }] },
+}
+const a = await launch(9231, undefined, { ...strictEnv, ELEUSINIA_TEST_ACTIVITY: JSON.stringify(annGame) })
 let b = await launch(9232, undefined, strictEnv)
 const c = await launch(9233)
 let failed = false
@@ -334,6 +344,25 @@ try {
 
   console.log('--- Home: online and offline friends')
   await until('A lists Bob and Cy under Online, nobody under Offline', () => a.ev(`document.querySelectorAll('.online .row-button').length === 2 && document.querySelectorAll('.offline .row-button').length === 0`))
+
+  console.log('--- Activity: what Ann is playing')
+  const annRow = `[...document.querySelectorAll('.online .row-button')].find((x) => x.textContent.includes('Ann'))`
+  const annMe = await a.ev(`api.call('state').then((s) => s.me)`)
+  const bobSees = (test) => `api.call('state').then((s) => { const g = s.activity['${annMe}']?.game; return ${test} })`
+  await new Promise((r) => setTimeout(r, 3000))
+  if (await b.ev(bobSees('!!g'))) throw new Error('activity was shared before Ann turned it on')
+  await a.ev(`api.call('setSettings', { activity: { games: true } })`)
+  await until('B lists Ann as playing Counter-Strike 2', () => b.ev(`${annRow}?.querySelector('.activity-line')?.textContent.includes('Counter-Strike 2')`))
+  await b.ev(`${annRow}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+  await until("Ann's card shows the game: art, playtime, genres, achievements with rarity, Steam buttons", () =>
+    b.ev(`(() => { const c = document.querySelector('dialog[open] .activity-card'); return !!c && c.querySelector('.activity-art')?.getAttribute('src') === 'eleusinia-art://steam/730/header' && c.textContent.includes('100 h in total') && c.textContent.includes('Action, Free To Play') && c.textContent.includes('1 of 50') && c.textContent.includes('A New Beginning') && c.textContent.includes('61% of players') && c.textContent.includes('Play on Steam') })()`), 10)
+  // Fetched from Steam by B's own app through eleusinia-art:, built from the app id and icon name alone
+  await until('the game art and achievement icon load', () => b.ev(`[...document.querySelectorAll('dialog[open] .activity-card img')].every((i) => i.complete && i.naturalWidth > 0)`), 30)
+  await b.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
+  await a.ev(`api.call('setSettings', { activity: { games: true, achievements: false, playtime: false } })`)
+  await until('turning details off removes them from what B gets', () => b.ev(bobSees('!!g && !g.achievements && g.played === undefined && g.developer === "Valve"')))
+  await a.ev(`api.call('setSettings', { activity: { games: false } })`)
+  await until('turning sharing off removes the game from B', () => b.ev(`${bobSees('!g')}.then((gone) => gone && !${annRow}.querySelector('.activity-line'))`))
 
   console.log('--- DM, recipient online')
   await a.ev(open('Bob'))

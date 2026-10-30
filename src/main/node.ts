@@ -32,6 +32,7 @@ import { groupIdOf, heldFrom, mergeGroup, missing, ownerOf, signAdd, signEdit, s
 import { openRequest, requestSeed, sealRequest } from '../shared/sealed'
 import { createImpairment, parseNetSim } from '../shared/netsim'
 import { createFiles } from './files'
+import { type Activity, type Game, cleanActivity, shareable } from '../shared/activity'
 import { type RelayLimits, RELAY_LIMITS, createNet } from './network'
 import { createRelay } from './relay'
 
@@ -112,6 +113,26 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     return isKey(other) && conv === dmId(me, other) && s.friends[other] === 'friend' ? [me, other] : []
   }
 
+  // Activity (shared/activity.ts): ours as found by main/activity.ts, and each linked contact's as they last sent it.
+  // Memory only. Ours goes to friends and group members, minus anyone hidden, at most every 2 s, only when it changed.
+  let mine: Game | null = null
+  const theirs = new Map<Key, Activity>()
+  const sentActivity = new Map<Key, string>()
+  const ourActivity = () => shareable({ now: Date.now(), ...(mine && { game: mine }) }, s.settings.activity)
+  function sendActivity(key: Key) {
+    if (!known(key) || !net.linked(key)) return
+    const a = s.settings.activity?.hidden?.includes(key) ? { now: Date.now() } : ourActivity()
+    const body = JSON.stringify(a.game ?? null)
+    if (sentActivity.get(key) === body) return
+    sentActivity.set(key, body)
+    net.send(key, { t: 'activity', a })
+  }
+  let sharing: ReturnType<typeof setTimeout> | null = null
+  const shareActivity = () => (sharing ??= setTimeout(() => ((sharing = null), net.keys().forEach(sendActivity)), 2000))
+  // A burst of updates (several friends starting games) is one state push to the window.
+  let pushing: ReturnType<typeof setTimeout> | null = null
+  const pushSoon = () => (pushing ??= setTimeout(() => ((pushing = null), push()), 300))
+
   const state = (): State => ({
     me,
     profile: s.profile,
@@ -123,6 +144,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     reports: outgoing().length,
     versions: Object.fromEntries([...versions].filter(([k]) => known(k))),
     relayed: net.keys().filter((k) => known(k) && relayedVia.has(k)),
+    activity: { ...Object.fromEntries([...theirs].filter(([k]) => known(k) && net.linked(k))), [me]: ourActivity() },
   })
   const push = () => emit({ type: 'state', state: state() })
   // For frequent small changes (receipts in a busy group): written within 2 s rather than once per message.
@@ -219,6 +241,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     hi(key)
     if (s.friends[key] === 'friend') sendHave(key, dmId(me, key))
     for (const g of shared) sendHave(key, g.id)
+    sendActivity(key)
   }
   function reach(key: Key) {
     if (!net.linked(key)) return need(key), net.dial(key)
@@ -293,6 +316,12 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       return spread(merged)
     }
     if (!known(key)) return
+    if (w.t === 'activity') {
+      const a = cleanActivity(w.a)
+      if (a?.game) theirs.set(key, a)
+      else theirs.delete(key)
+      return pushSoon()
+    }
 
     if (w.t === 'get') return files.onGet(key, w.h, w.off)
     if (w.t === 'part') return files.onPart(key, w.h, w.off, w.d)
@@ -504,6 +533,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       },
       close(key) {
         diag('network', `link closed with …${key.slice(-6)}`)
+        theirs.delete(key)
+        sentActivity.delete(key)
         relay.close(key)
         relayedVia.delete(key)
         files.closed(key)
@@ -934,10 +965,17 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     filePath: (h: string) => files.pathOf(String(h)),
     cacheSize: () => files.cacheBytes(),
     clearCache: () => files.clearCache(),
+    // What we are playing now, from main/activity.ts (null: nothing).
+    setActivity(game: Game | null) {
+      mine = game
+      shareActivity()
+      pushSoon()
+    },
     async setSettings(p: Partial<Settings>) {
       const was = !!s.settings.relay
       Object.assign(s.settings, p)
       changed()
+      if (p.activity) shareActivity()
       if (p.cacheMB !== undefined) files.trim()
       if (was !== !!s.settings.relay) await applyRelay(), push()
       if (p.suggest) announce().catch(() => {}) // turned off, the announcements lapse within about 20 minutes
@@ -956,6 +994,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     },
     async destroy() {
       if (saving) clearTimeout(saving), save()
+      if (sharing) clearTimeout(sharing)
+      if (pushing) clearTimeout(pushing)
       clearInterval(timer)
       clearInterval(delivery)
       clearInterval(announcer)

@@ -2808,3 +2808,133 @@ img.crest {
 .crest-pick:focus-within {
   box-shadow: var(--focus-ring);
 }
+
+/* ---------- Activity (Activity.tsx) ---------- */
+.activity-line {
+  color: var(--silver-2);
+}
+.activity-line b {
+  font-weight: 500;
+  color: var(--silver);
+}
+.activity-card {
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--obsidian-2);
+  text-align: left;
+}
+.activity-art {
+  display: block;
+  width: 100%;
+  aspect-ratio: 460 / 215; /* Steam's header art */
+  object-fit: cover;
+  border-bottom: 1px solid var(--line);
+}
+.activity-body {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px 14px;
+}
+.activity-kicker {
+  margin: 0;
+  color: var(--mist);
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.activity-body h3 {
+  margin: 0;
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+.activity-facts,
+.activity-about {
+  margin: 0;
+  color: var(--silver-2);
+  font-size: 12.5px;
+}
+.activity-about {
+  color: var(--mist);
+}
+.activity-achievements {
+  display: grid;
+  gap: 8px;
+  margin-top: 4px;
+}
+.achievement-head {
+  display: flex;
+  justify-content: space-between;
+  color: var(--mist);
+  font-size: 12px;
+}
+.achievement-bar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--obsidian-4);
+}
+.achievement-bar span {
+  display: block;
+  height: 100%;
+  background: var(--gold);
+}
+.achievement-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.achievement {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.achievement img,
+.achievement-blank {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-sm);
+  background: var(--obsidian-4);
+}
+.achievement .row-text {
+  display: grid;
+  min-width: 0;
+}
+.achievement-desc {
+  color: var(--silver-2);
+  font-size: 12px;
+}
+.activity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.activity-hide {
+  align-self: stretch;
+}
+.activity-details {
+  display: grid;
+  padding-left: 22px;
+}
+.activity-preview,
+.activity-hidden,
+.activity-extra {
+  display: grid;
+  gap: 8px;
+}
+.activity-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.activity-add select {
+  flex: 1 1 220px;
+}
+.activity-add input {
+  flex: 1 1 160px;
+}
