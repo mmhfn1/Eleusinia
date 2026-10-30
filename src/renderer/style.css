@@ -3321,3 +3321,17 @@ img.crest {
   width: 100%;
   height: 100%;
 }
+/* A set-up game's state beside its switch: live, waiting, or turned away */
+.gsi-state {
+  color: var(--mist-2);
+  font-size: 12px;
+}
+.gsi-state.live {
+  color: var(--good);
+}
+.gsi-state.live::before {
+  content: '● ';
+}
+.gsi-state.problem {
+  color: var(--fair);
+}

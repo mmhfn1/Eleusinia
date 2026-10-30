@@ -391,7 +391,7 @@ try {
   const cs2Switch = `document.querySelector('input[aria-label="Counter-Strike 2 live match details"]')`
   await until('the Steam panel offers CS2', () => a.ev(`!!${cs2Switch} && !${cs2Switch}.disabled && !${cs2Switch}.checked`), 10)
   await a.ev(`${cs2Switch}.click()`)
-  await until("turning CS2 on writes the game's file and shows its switches", () => a.ev(`(() => { const g = document.querySelector('.connection-game[data-game="cs2"]'); return ${cs2Switch}.checked && g.textContent.includes('Restart CS2 once') && g.querySelectorAll('.activity-details input[role="switch"]').length === 3 })()`), 10)
+  await until("turning CS2 on writes the game's file and shows its switches", () => a.ev(`(() => { const g = document.querySelector('.connection-game[data-game="cs2"]'); return ${cs2Switch}.checked && g.querySelector('.gsi-state')?.textContent === 'Start or restart CS2' && g.querySelectorAll('.activity-details input[role="switch"]').length === 3 })()`), 10)
   await a.ev(`document.querySelector('.connections').scrollIntoView()`)
   await a.shot('settings-activity')
   await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
@@ -431,6 +431,14 @@ try {
     await b.shot('card-cs2-state')
     await b.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
     await b.shot('home-cs2')
+    // Settings shows CS2 as live while the game sends
+    await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
+    await until('Settings has the Steam tile', () => a.ev(`!!document.querySelector('.connection[data-k="steam"]')`), 10)
+    await a.ev(`document.querySelector('.connection[data-k="steam"]').click()`)
+    await until('the Steam panel shows CS2 as live', () => a.ev(`document.querySelector('.connection-game[data-game="cs2"] .gsi-state.live')?.textContent === 'Live'`), 10)
+    await a.ev(`document.querySelector('.connections').scrollIntoView()`)
+    await a.shot('settings-cs2-live')
+    await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
   } finally {
     clearInterval(posting)
   }

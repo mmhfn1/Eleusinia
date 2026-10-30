@@ -102,8 +102,14 @@ test("the local server: set up writes the game's file, only posts with our token
   await post('not json')
   await post('x'.repeat(600 * 1024)) // past the size cap
   expect(got).toEqual([])
+  // Turned away, and Settings can say why
+  expect(await cs2.status('cs2')).toMatchObject({ installed: true, problem: 'wrong token' })
+  expect((await cs2.status('cs2')).heard).toBeUndefined()
   await post({ ...live(), auth: { token } })
   expect(got).toHaveLength(1)
+  const heard = await cs2.status('cs2')
+  expect(heard.problem).toBeUndefined()
+  expect(Date.now() - heard.heard!).toBeLessThan(5000)
   expect(got[0]!.map).toBe('de_mirage')
   expect((await fetch(`http://127.0.0.1:${cs2.port}/`)).status).toBe(405)
   await cs2.remove('cs2')
