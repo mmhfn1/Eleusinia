@@ -1,5 +1,5 @@
 import { once } from 'node:events'
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -121,9 +121,11 @@ test("the local server: set up writes the game's file, only posts with our token
 test('a taken port is swapped for another, in the saved settings and the game file', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'eleusinia-cs2-'))
   const cfg = mkdtempSync(join(tmpdir(), 'eleusinia-cs2cfg-'))
-  const taken = createGsi({ dir, cfgFolder: async () => cfg, onData: () => {}, diag: () => {} }).port
-  const squatter = createServer().listen(taken, '127.0.0.1')
+  // A port the system gave someone else, saved as ours (a random one may be reserved, as Windows does for ranges)
+  const squatter = createServer().listen(0, '127.0.0.1')
   await once(squatter, 'listening')
+  const taken = (squatter.address() as { port: number }).port
+  writeFileSync(join(dir, 'gsi.json'), JSON.stringify({ port: taken, token: 'a'.repeat(48) }))
   const got: (Cs2 | null)[] = []
   const cs2 = createGsi({ dir, cfgFolder: async () => cfg, onData: (_g, c) => got.push(c as Cs2 | null), diag: () => {} })
   await cs2.install('cs2')
