@@ -8,7 +8,8 @@ import { DEFAULT_CACHE_MB, sizeLabel } from '../shared/media'
 import { type Profile, type State } from '../shared/protocol'
 import * as call from './call'
 import { Avatar, Dialog, Icon, Info } from './ui'
-import { api } from './common'
+import { NOBODY, api, labelOf } from './common'
+import { ActivitySettingsSection } from './Activity'
 
 // Microphone, speakers and voice quality, in Settings.
 function AudioSettings({ st }: { st: State }) {
@@ -259,6 +260,10 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
             you are found only by your exact friend ID
           </span>
         </label>
+      </section>
+      <section className="settings-section">
+        <h2>Activity</h2>
+        <ActivitySettingsSection st={st} name={(k) => labelOf(st.profiles[k] ?? NOBODY, k)} />
       </section>
       <section className="settings-section">
         <h2>Storage</h2>

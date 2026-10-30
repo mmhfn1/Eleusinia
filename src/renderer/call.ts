@@ -46,6 +46,8 @@ declare global {
       platform: string
       checkUpdates(): Promise<{ state: 'found' | 'latest' | 'unavailable'; version: string; current: string }>
       quit(): Promise<void>
+      programs(): Promise<string[]>
+      openSteam(app: number, kind: 'store' | 'run'): Promise<void>
       win(action: 'minimize' | 'maximize' | 'close' | 'state'): Promise<boolean>
       attach(items: ({ path: string } | { name: string; type: string; data: Uint8Array })[]): Promise<import('../shared/media').FileRef[]>
       pickFiles(): Promise<import('../shared/media').FileRef[]>

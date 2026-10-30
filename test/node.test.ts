@@ -242,6 +242,30 @@ test('a group member that passing on missed asks for the message once a receipt 
   expect(c.node.state().online).not.toContain(a.key)
 }, 120000)
 
+test('activity reaches friends only while shared, with only the details chosen, and never someone hidden', async () => {
+  const a = start()
+  const b = start()
+  await befriend(a, b)
+  const game = { name: 'Deadlock', since: Date.now() - 60000, source: 'steam' as const, app: 1422450, played: 41 }
+  const seen = () => b.node.state().activity[a.key]?.game
+  a.node.setActivity(game)
+  await new Promise((r) => setTimeout(r, 3000))
+  expect(seen()).toBeUndefined() // found, but sharing is off
+  await a.node.setSettings({ activity: { games: true } })
+  await until(() => seen()?.name === 'Deadlock')
+  expect(seen()!.played).toBe(41)
+  expect(Math.abs(seen()!.since - game.since)).toBeLessThan(2000)
+  expect(a.node.state().activity[a.key].game!.name).toBe('Deadlock') // the preview: ours as friends see it
+  await a.node.setSettings({ activity: { games: true, playtime: false } })
+  await until(() => !!seen() && seen()!.played === undefined)
+  await a.node.setSettings({ activity: { games: true, hidden: [b.key] } })
+  await until(() => !seen())
+  await a.node.setSettings({ activity: { games: true } })
+  await until(() => !!seen())
+  a.node.setActivity(null)
+  await until(() => !seen())
+}, 120000)
+
 const PNG = 'data:image/png;base64,AAAA'
 
 test('setup assigns username#1234; search shows a stranger from their published card and adds only the one picked', async () => {

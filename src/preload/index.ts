@@ -13,6 +13,8 @@ contextBridge.exposeInMainWorld('api', {
   installUpdate: () => ipcRenderer.invoke('installUpdate'),
   checkUpdates: () => ipcRenderer.invoke('checkUpdates'),
   quit: () => ipcRenderer.invoke('quit'),
+  programs: () => ipcRenderer.invoke('programs'), // running programs, for Settings → Activity → Add a game
+  openSteam: (app: number, kind: 'store' | 'run') => ipcRenderer.invoke('openSteam', app, kind),
   platform: process.platform, // macOS keeps its own window buttons (style.css)
   win: (action: 'minimize' | 'maximize' | 'close' | 'state') => ipcRenderer.invoke('window', action),
   // Shared files (see main/index.ts): attach takes { path } or { name, type, data } for pasted pictures.
