@@ -15,7 +15,7 @@ contextBridge.exposeInMainWorld('api', {
   quit: () => ipcRenderer.invoke('quit'),
   programs: () => ipcRenderer.invoke('programs'), // running programs, for Settings → Activity → Add a game
   openSteam: (app: number, kind: 'store' | 'run') => ipcRenderer.invoke('openSteam', app, kind),
-  cs2: (action: 'status' | 'install' | 'remove') => ipcRenderer.invoke('cs2', action), // CS2 live details (main/cs2.ts)
+  gsi: (game: 'cs2' | 'dota', action: 'status' | 'install' | 'remove') => ipcRenderer.invoke('gsi', game, action), // live game details (main/gsi.ts)
   platform: process.platform, // macOS keeps its own window buttons (style.css)
   win: (action: 'minimize' | 'maximize' | 'close' | 'state') => ipcRenderer.invoke('window', action),
   // Shared files (see main/index.ts): attach takes { path } or { name, type, data } for pasted pictures.

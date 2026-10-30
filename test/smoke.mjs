@@ -270,8 +270,8 @@ const annGame = {
   achievements: { got: 1, total: 50, recent: [{ name: 'A New Beginning', desc: 'Played a match', icon: 'f75dd04fa12445a8ec43be65fa16ff1b8d2bf82e.jpg', at: Date.now() - 3600e3, rarity: 61.2 }] },
 }
 // And a folder standing in for CS2's cfg folder, where Settings → Set up writes the game's file.
-const annCs2Cfg = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-cs2-'))
-const a = await launch(9231, undefined, { ...strictEnv, ELEUSINIA_TEST_ACTIVITY: JSON.stringify(annGame), ELEUSINIA_TEST_CS2_CFG: annCs2Cfg })
+const annGsiCfg = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-gsi-')) // one subfolder per game
+const a = await launch(9231, undefined, { ...strictEnv, ELEUSINIA_TEST_ACTIVITY: JSON.stringify(annGame), ELEUSINIA_TEST_GSI_CFG: annGsiCfg })
 let b = await launch(9232, undefined, strictEnv)
 const c = await launch(9233)
 let failed = false
@@ -358,9 +358,11 @@ try {
   const annRow = `[...document.querySelectorAll('.online .row-button')].find((x) => x.textContent.includes('Ann'))`
   const annMe = await a.ev(`api.call('state').then((s) => s.me)`)
   const bobSees = (test) => `api.call('state').then((s) => { const g = s.activity['${annMe}']?.game; return ${test} })`
-  await new Promise((r) => setTimeout(r, 3000))
-  if (await b.ev(bobSees('!!g'))) throw new Error('activity was shared before Ann turned it on')
-  await a.ev(`api.call('setSettings', { activity: { games: true } })`)
+  // On by default: Ann's game reaches Bob without her touching Settings, but not the store details
+  await until('B gets what Ann plays by default, without store details', () => b.ev(bobSees('!!g && g.played > 0 && g.developer === undefined')))
+  await a.ev(`api.call('setSettings', { activity: { games: false } })`)
+  await until('turning it off reaches B', () => b.ev(bobSees('!g')))
+  await a.ev(`api.call('setSettings', { activity: { games: true, details: true } })`)
   await until('B lists Ann as playing Counter-Strike 2', () => b.ev(`${annRow}?.querySelector('.activity-line')?.textContent.includes('Counter-Strike 2')`))
   await b.ev(`${annRow}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
   await until("Ann's card shows the game: art, playtime, genres, achievements with rarity, Steam buttons", () =>
@@ -368,6 +370,14 @@ try {
   // Fetched from Steam by B's own app through eleusinia-art:, built from the app id and icon name alone
   await until('the game art and achievement icon load', () => b.ev(`[...document.querySelectorAll('dialog[open] .activity-card img')].every((i) => i.complete && i.naturalWidth > 0)`), 30)
   await b.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
+  // A direct chat has a members sidebar like a group's, where the game replaces the friend ID, ours included
+  const dmSide = (who, game) => `(() => { const r = [...document.querySelectorAll('aside.members .member')].find((x) => x.textContent.includes('${who}')); return !!r && r.textContent.includes(${game ? "'Playing Counter-Strike 2'" : "'#'"}) })()`
+  await b.ev(`${annRow}.click()`)
+  await until("B's chat with Ann lists both, Ann playing Counter-Strike 2", () => b.ev(`document.querySelectorAll('aside.members .member').length === 2 && ${dmSide('Ann', true)}`))
+  const bobRow = `[...document.querySelectorAll('.online .row-button')].find((x) => x.textContent.includes('Bob'))`
+  await a.ev(`${bobRow}.click()`)
+  await until("A's chat with Bob shows Ann (you) playing Counter-Strike 2", () => a.ev(`${dmSide('(you)', true)} && ${dmSide('Bob', false)}`))
+  for (const p of [a, b]) await p.ev(`document.querySelector('.home.back').click()`)
 
   console.log('--- Activity: a CS2 match, through Game State Integration')
   await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
@@ -377,7 +387,7 @@ try {
   await a.ev(`document.querySelector('.activity-cs2').scrollIntoView()`)
   await a.shot('settings-activity')
   await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
-  const gsi = readFileSync(join(annCs2Cfg, 'gamestate_integration_eleusinia.cfg'), 'utf8')
+  const gsi = readFileSync(join(annGsiCfg, 'cs2', 'gamestate_integration_eleusinia.cfg'), 'utf8')
   const gsiUrl = /"uri" "([^"]+)"/.exec(gsi)[1]
   const match = {
     provider: { name: 'Counter-Strike: Global Offensive', appid: 730, steamid: '76561198000000001', timestamp: 1 },
@@ -416,7 +426,52 @@ try {
   } finally {
     clearInterval(posting)
   }
-  await a.ev(`api.call('setSettings', { activity: { games: true, achievements: false, playtime: false } })`)
+
+  console.log('--- Activity: a Dota 2 match, through the same Game State Integration server')
+  await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
+  await until('Settings offers to set up Dota 2 live details', () => a.ev(`[...document.querySelectorAll('.activity-dota button')].some((x) => x.textContent === 'Set up')`), 10)
+  await a.ev(`[...document.querySelectorAll('.activity-dota button')].find((x) => x.textContent === 'Set up').click()`)
+  // Steam here has no Dota launch option for it (or no Steam at all), so Settings says how to add it
+  await until('Set up writes the file and says to add the launch option', () => a.ev(`(() => { const d = document.querySelector('.activity-dota'); return d.textContent.includes('Set up. If Dota 2 is running') && d.querySelector('.activity-launch code')?.textContent === '-gamestateintegration' })()`), 10)
+  await a.ev(`document.querySelector('.activity-dota').scrollIntoView()`)
+  await a.shot('settings-dota')
+  await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
+  const dotaCfg = readFileSync(join(annGsiCfg, 'dota', 'gamestate_integration_eleusinia.cfg'), 'utf8')
+  if (/"uri" "([^"]+)"/.exec(dotaCfg)[1] !== gsiUrl) throw new Error('Dota 2 and CS2 were given different servers')
+  const dota = {
+    provider: { name: 'Dota 2', appid: 570, version: 47, timestamp: 1 },
+    map: { name: 'start', clock_time: 1234, daytime: false, radiant_score: 21, dire_score: 14, game_state: 'DOTA_GAMERULES_STATE_GAME_IN_PROGRESS', paused: false, win_team: 'none' },
+    player: { steamid: '76561198000000001', activity: 'playing', kills: 9, deaths: 2, assists: 11, last_hits: 212, denies: 14, kill_streak: 4, team_name: 'dire', gold: 2310, gpm: 612, xpm: 701 },
+    hero: { name: 'npc_dota_hero_antimage', level: 19, alive: true, buyback_cost: 1520, buyback_cooldown: 0, health: 1650, max_health: 2100, mana: 410, max_mana: 780, aghanims_shard: true },
+    items: { slot0: { name: 'item_bfury' }, slot1: { name: 'item_manta' }, slot2: { name: 'empty' }, slot3: { name: 'item_power_treads' }, slot4: { name: 'item_blink' }, slot5: { name: 'empty' }, slot6: { name: 'item_magic_wand' }, neutral0: { name: 'item_mysterious_hat' } },
+    auth: { token: /"token" "([0-9a-f]+)"/.exec(dotaCfg)[1] },
+  }
+  const postDota = () => fetch(gsiUrl, { method: 'POST', body: JSON.stringify(dota) }).catch(() => {})
+  await postDota()
+  const postingDota = setInterval(postDota, 2000)
+  try {
+    // The game sending its details is running, so it replaces the one the watcher saw
+    await until('B lists Ann as Anti-Mage, her side (Dire) first: 14–21', () => b.ev(`${annRow}?.querySelector('.activity-line')?.textContent.includes('Dota 2 · Anti-Mage 14–21')`), 20)
+    await b.ev(`${annRow}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+    const dotaCard = `document.querySelector('dialog[open] .dota')`
+    await until("Ann's card shows the match: hero, level, night, the kills per side, the clock, her numbers", () =>
+      b.ev(`(() => { const c = ${dotaCard}; return !!c && c.querySelector('.cs2-map').textContent === 'Anti-Mage' && c.textContent.includes('Level 19 · Playing · Night') && c.querySelector('.cs2-team.radiant b').textContent === '21' && c.querySelector('.cs2-team.dire.ours') && /^20:[34]\\d/.test(c.querySelector('.cs2-clock').textContent) && c.textContent.includes('9 / 2 / 11') && c.textContent.includes('212 / 14') && c.textContent.includes('612 / 701') })()`), 10)
+    if (await b.ev(`${dotaCard}.textContent.includes('Gold')`)) throw new Error('gold and items were shared without being turned on')
+    console.log('ok   her gold, items and health stay hidden until she turns them on')
+    await a.ev(`api.call('state').then((s) => api.call('setSettings', { activity: { ...s.settings.activity, dota: { live: true } } }))`)
+    await until('turned on, B sees her items, health, mana, gold and buyback', () =>
+      b.ev(`(() => { const c = ${dotaCard}; return !!c && c.querySelectorAll('.dota-items ul[aria-label="Items"] img').length === 4 && c.querySelector('.dota-items .neutral img') && c.querySelector('.dota-bar.health').textContent.includes('1,650 / 2,100') && c.textContent.includes('2,310') && c.textContent.includes('Ready, 1,520 gold') && c.textContent.includes('Shard') })()`), 10)
+    // The hero and item pictures come from Steam's Dota 2 folders, through eleusinia-art:
+    await until('the hero and item pictures load', () => b.ev(`[...document.querySelectorAll('dialog[open] .dota img')].every((i) => i.complete && i.naturalWidth > 0)`), 30)
+    await b.shot('card-dota')
+    await b.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
+  } finally {
+    clearInterval(postingDota)
+  }
+  // Remove drops the live details at once, and Ann is back to the game the watcher found
+  await a.ev(`window.api.gsi('dota', 'remove')`)
+  await until('after Remove, B lists Ann on CS2 again', () => b.ev(`${annRow}?.querySelector('.activity-line')?.textContent.includes('Counter-Strike 2')`), 10)
+  await a.ev(`api.call('setSettings', { activity: { games: true, details: true, achievements: false, playtime: false } })`)
   await until('turning details off removes them from what B gets', () => b.ev(bobSees('!!g && !g.achievements && g.played === undefined && g.developer === "Valve"')))
   await a.ev(`api.call('setSettings', { activity: { games: false } })`)
   await until('turning sharing off removes the game from B', () => b.ev(`${bobSees('!g')}.then((gone) => gone && !${annRow}.querySelector('.activity-line'))`))

@@ -967,7 +967,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
           {user(k)}
           {k === st.me && <span className="row-sub"> (you)</span>}
         </span>
-        <span className="row-sub">{prof(k).handle}</span>
+        <span className="row-sub">{st.activity[k]?.game ? <ActivityLine a={st.activity[k]} /> : prof(k).handle}</span>
       </span>
     </div>
   )
@@ -979,8 +979,10 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
     </button>
   )
   const ringing = !group && !inCall && others > 0
-  const onlineMembers = group ? group.members.filter(isOnline) : []
-  const offlineMembers = group ? group.members.filter((k) => !isOnline(k)) : []
+  // A direct chat lists its two people the way a group lists its members.
+  const members = group ? group.members : [st.me, other]
+  const onlineMembers = members.filter(isOnline)
+  const offlineMembers = members.filter((k) => !isOnline(k))
 
   return (
     <>
@@ -1124,18 +1126,14 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
         }
       />
 
-      {group && (
-        <>
-          <Splitter label="Resize members sidebar" width={right} set={setRight} dir={-1} />
-          <aside className="members" style={{ width: right }} aria-label="Group members">
-            <h2>Online ({onlineMembers.length})</h2>
-            {onlineMembers.map(member)}
-            <hr />
-            <h2>Offline ({offlineMembers.length})</h2>
-            {offlineMembers.map(member)}
-          </aside>
-        </>
-      )}
+      <Splitter label="Resize members sidebar" width={right} set={setRight} dir={-1} />
+      <aside className="members" style={{ width: right }} aria-label={group ? 'Group members' : 'People in this chat'}>
+        <h2>Online ({onlineMembers.length})</h2>
+        {onlineMembers.map(member)}
+        <hr />
+        <h2>Offline ({offlineMembers.length})</h2>
+        {offlineMembers.map(member)}
+      </aside>
     </>
   )
 }

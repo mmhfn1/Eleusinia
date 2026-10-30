@@ -248,6 +248,7 @@ test('activity reaches friends only while shared, with only the details chosen, 
   await befriend(a, b)
   const game = { name: 'Deadlock', since: Date.now() - 60000, source: 'steam' as const, app: 1422450, played: 41 }
   const seen = () => b.node.state().activity[a.key]?.game
+  await a.node.setSettings({ activity: { games: false } })
   a.node.setActivity(game)
   await new Promise((r) => setTimeout(r, 3000))
   expect(seen()).toBeUndefined() // found, but sharing is off
