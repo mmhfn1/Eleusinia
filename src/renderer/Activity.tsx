@@ -2,6 +2,7 @@
 // the Settings section that says what is shared, with a preview of exactly what friends see.
 import { useEffect, useReducer, useState } from 'react'
 import { type Achievement, type Activity, type ActivitySettings, type Game } from '../shared/activity'
+import { type Cs2, mapName, modeName, roundWin, weaponName } from '../shared/cs2'
 import { type Key, type State } from '../shared/protocol'
 import { api } from './common'
 
@@ -31,14 +32,125 @@ const ago = (at: number) => {
 }
 const hours = (min: number) => (min < 60 ? `${min} min` : `${Math.round(min / 60).toLocaleString()} h`)
 
-// "Playing Deadlock · 1 h 12 min", for friend rows.
+// Our side's score first: "Mirage 9–7".
+const cs2Score = (c: Cs2) => {
+  if (c.ct === undefined || c.t === undefined) return ''
+  const [us, them] = c.team === 'T' ? [c.t, c.ct] : [c.ct, c.t]
+  return `${us}–${them}`
+}
+// "Playing Deadlock · 1 h 12 min", or with live details "Playing Counter-Strike 2 · Mirage 9–7", for friend rows.
 export function ActivityLine({ a }: { a?: Activity }) {
   useTick(30000)
   if (!a?.game) return null
+  const c = a.game.cs2
+  const live = c && (c.menu ? 'in the menu' : [c.map && mapName(c.map), cs2Score(c)].filter(Boolean).join(' '))
   return (
     <span className="activity-line" title={a.game.name}>
-      Playing <b>{a.game.name}</b> · {duration(Date.now() - a.game.since)}
+      Playing <b>{a.game.name}</b> · {live || duration(Date.now() - a.game.since)}
     </span>
+  )
+}
+
+// m:ss until the phase ends, ticking here.
+function Countdown({ at }: { at: number }) {
+  useTick(1000)
+  const s = Math.max(0, Math.round((at - Date.now()) / 1000))
+  return <span className="cs2-clock">{`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`}</span>
+}
+const PHASES: Record<string, string> = {
+  warmup: 'Warmup',
+  live: 'Live',
+  intermission: 'Halftime',
+  gameover: 'Match over',
+  freezetime: 'Buy time',
+  over: 'Round over',
+  bomb: 'Bomb planted',
+  defuse: 'Defusing',
+  timeout_ct: 'CT timeout',
+  timeout_t: 'T timeout',
+  paused: 'Paused',
+}
+const phase = (p?: string) => (p ? (PHASES[p] ?? p) : '')
+
+// A CS2 match as the game describes it: map, mode, score with each round's result, the clock, and our numbers.
+function Cs2Match({ c }: { c: Cs2 }) {
+  if (c.menu) return <p className="cs2-menu">In the main menu</p>
+  const score = c.ct !== undefined && c.t !== undefined
+  const st = c.state
+  const where = [c.mode && modeName(c.mode), c.round !== undefined && c.phase !== 'warmup' && `Round ${Math.min(c.round + 1, 99)}`, phase(c.phase === 'live' ? c.roundPhase : c.phase)]
+  return (
+    <div className="cs2">
+      <div className="cs2-head">
+        <span className="cs2-map">{c.map ? mapName(c.map) : 'In a match'}</span>
+        <span className="row-sub">{where.filter(Boolean).join(' · ')}</span>
+      </div>
+      {score && (
+        <div className="cs2-score" aria-label={`Counter-Terrorists ${c.ct}, Terrorists ${c.t}`}>
+          <span className={`cs2-team ct${c.team === 'CT' ? ' ours' : ''}`}>
+            <span>CT</span>
+            <b>{c.ct}</b>
+          </span>
+          <span className="cs2-mid">{c.bomb === 'planted' ? <span className="cs2-bomb">Bomb planted</span> : c.endsAt ? <Countdown at={c.endsAt} /> : '–'}</span>
+          <span className={`cs2-team t${c.team === 'T' ? ' ours' : ''}`}>
+            <b>{c.t}</b>
+            <span>T</span>
+          </span>
+        </div>
+      )}
+      {c.rounds && c.rounds.length > 0 && (
+        <ol className="cs2-rounds" aria-label="Rounds">
+          {c.rounds.map((r, i) => {
+            const w = roundWin(r)
+            return <li key={i} className={w ? w.side.toLowerCase() : ''} title={w ? `Round ${i + 1}: ${w.side} · ${w.how}` : `Round ${i + 1}`} />
+          })}
+        </ol>
+      )}
+      {c.stats && (
+        <dl className="cs2-stats">
+          <div>
+            <dt>K / A / D</dt>
+            <dd>
+              {c.stats.kills} / {c.stats.assists} / {c.stats.deaths}
+            </dd>
+          </div>
+          <div>
+            <dt>MVPs</dt>
+            <dd>{c.stats.mvps}</dd>
+          </div>
+          <div>
+            <dt>Score</dt>
+            <dd>{c.stats.score}</dd>
+          </div>
+        </dl>
+      )}
+      {st && (
+        <dl className="cs2-stats">
+          <div>
+            <dt>{st.health ? 'Health' : 'Status'}</dt>
+            <dd>{st.health ? `${st.health} · ${st.armor}${st.helmet ? ' + helmet' : ''}` : 'Dead'}</dd>
+          </div>
+          <div>
+            <dt>Money</dt>
+            <dd>${st.money.toLocaleString()}</dd>
+          </div>
+          {st.weapon && (
+            <div>
+              <dt>Holding</dt>
+              <dd>{weaponName(st.weapon)}</dd>
+            </div>
+          )}
+          {st.roundKills > 0 && (
+            <div>
+              <dt>This round</dt>
+              <dd>
+                {st.roundKills} kill{st.roundKills > 1 ? 's' : ''}
+                {st.roundHeadshots ? `, ${st.roundHeadshots} HS` : ''}
+              </dd>
+            </div>
+          )}
+        </dl>
+      )}
+    </div>
   )
 }
 
@@ -76,6 +188,7 @@ export function GameCard({ g, full = true }: { g: Game; full?: boolean }) {
           For {duration(session)}
           {g.played !== undefined && ` · ${hours(g.played + Math.floor(session / 60000))} in total`}
         </p>
+        {g.cs2 && <Cs2Match c={g.cs2} />}
         {facts.length > 0 && <p className="activity-facts">{facts.join(' · ')}</p>}
         {full && g.about && <p className="activity-about">{g.about}</p>}
         {a && (
@@ -161,6 +274,7 @@ export function ActivitySettingsSection({ st, name }: { st: State; name: (k: Key
         {detail('achievements', 'My achievements in it, with the newest ones')}
         {detail('details', 'Its genre, developer, release date and description')}
       </div>
+      {set.games && <Cs2Setup set={set} save={save} />}
       {set.games && (
         <div className="activity-preview">
           <p className="row-sub">What friends see now</p>
@@ -220,5 +334,61 @@ export function ActivitySettingsSection({ st, name }: { st: State; name: (k: Key
         )}
       </div>
     </>
+  )
+}
+
+// Settings → Activity → Counter-Strike 2: the config file the game needs, and what of a match is shared.
+function Cs2Setup({ set, save }: { set: ActivitySettings; save: (p: Partial<ActivitySettings>) => void }) {
+  const [st, setSt] = useState<{ found: boolean; installed: boolean; folder: string | null } | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    window.api.cs2('status').then(setSt, () => setSt(null))
+  }, [])
+  const act = (a: 'install' | 'remove') =>
+    window.api.cs2(a).then(
+      (s) => (setSt(s), setError('')),
+      (e) => setError(String(e?.message ?? e).replace(/^Error invoking remote method 'cs2': (Error: )?/, '')),
+    )
+  const c = set.cs2 ?? {}
+  const sw = (field: 'match' | 'stats' | 'state', label: string, def: boolean) => (
+    <label className="check-row">
+      <input type="checkbox" role="switch" checked={c[field] ?? def} onChange={(e) => save({ cs2: { ...c, [field]: e.target.checked } })} />
+      <span>{label}</span>
+    </label>
+  )
+  const note = !st
+    ? 'Looking for the game…'
+    : st.installed
+      ? 'Set up. If CS2 is running, restart it once.'
+      : st.found
+        ? "Adds a file to the game's cfg folder, the way Valve made for apps like this one."
+        : 'Counter-Strike 2 is not in your Steam library.'
+  return (
+    <div className="activity-cs2">
+      <div className="settings-row">
+        <span className="row-text">
+          <span className="row-title">Counter-Strike 2 live match details</span>
+          <span className="row-sub">{note}</span>
+        </span>
+        {st?.found &&
+          (st.installed ? (
+            <button className="button subtle" onClick={() => act('remove')}>
+              Remove
+            </button>
+          ) : (
+            <button className="button" onClick={() => act('install')}>
+              Set up
+            </button>
+          ))}
+      </div>
+      {error && <p className="form-error">{error}</p>}
+      {st?.installed && (
+        <div className="activity-details">
+          {sw('match', 'Map, mode, score, how each round was won and the round clock', true)}
+          {sw('stats', 'My kills, assists, deaths, MVPs and score', true)}
+          {sw('state', 'My health, armor, money and weapon as they change. Off by default: it would help anyone playing against me', false)}
+        </div>
+      )}
+    </div>
   )
 }

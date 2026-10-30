@@ -1,4 +1,5 @@
 import type { Key } from './protocol'
+import { type Cs2, type Cs2Settings, cleanCs2, shareableCs2 } from './cs2'
 
 // What someone is doing, shared with friends and group members only (docs/roadmap-activity.md). Pictures are never
 // sent as links: a card names a Steam app id or an achievement's icon file, and the receiving app builds the address
@@ -22,6 +23,7 @@ export type Game = {
   released?: string
   about?: string
   achievements?: { got: number; total: number; recent: Achievement[] } // recent: newest first
+  cs2?: Cs2 // live match details from Counter-Strike 2 (shared/cs2.ts)
 }
 // now: the sender's clock when sent, so `since` can be moved onto the receiver's clock.
 export type Activity = { now: number; game?: Game }
@@ -34,6 +36,7 @@ export type ActivitySettings = {
   details?: boolean // genre, developer, release date, description
   hidden?: Key[] // people who never see it
   extra?: Record<string, string> // program file name (lower case) → game name, added by the user
+  cs2?: Cs2Settings
 }
 
 export const RECENT_ACHIEVEMENTS = 5
@@ -45,6 +48,7 @@ export function shareable(a: Activity, set: ActivitySettings | undefined): Activ
   if (set.playtime === false) delete g.played
   if (set.achievements === false) delete g.achievements
   if (set.details === false) delete g.genres, delete g.developer, delete g.released, delete g.about
+  if (g.cs2) g.cs2 = shareableCs2(g.cs2, set.cs2)
   return { now: a.now, game: g }
 }
 
@@ -85,6 +89,8 @@ export function cleanActivity(x: unknown, now = Date.now()): Activity | null {
     })
     game.achievements = { got, total, recent }
   }
+  const cs2 = game.app === 730 ? cleanCs2(g.cs2, shift, now) : undefined
+  if (cs2) game.cs2 = cs2
   return { now, game }
 }
 const ICON = /^[0-9a-f]{40}\.(jpg|png)$/

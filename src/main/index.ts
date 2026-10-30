@@ -14,8 +14,10 @@ import { isKey } from '../shared/protocol'
 import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared/reports'
 import { kindOf, shareable } from '../shared/sources'
 import { verifyUpdate } from '../shared/updatesig'
-import { artUrl } from '../shared/activity'
+import { type Game, artUrl } from '../shared/activity'
+import type { Cs2 } from '../shared/cs2'
 import { programs, watchActivity } from './activity'
+import { createCs2 } from './cs2'
 import { createInbox } from './inbox'
 import { type Staged, canInstall, fetchUpdate, install, tidy } from './selfupdate'
 import { createNode } from './node'
@@ -117,20 +119,37 @@ function loadIdentity(dir: string) {
 function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (text: string) => void) {
   const fake = process.env.ELEUSINIA_TEST_ACTIVITY
   let watcher: ReturnType<typeof watchActivity> | null = null
+  // The game from the watcher, with CS2's live details on it while CS2 is the game and is sending them.
+  let game: Game | null = null
+  let live: Cs2 | null = null
+  const send = () => node.setActivity(game ? { ...game, ...(game.app === 730 && live && { cs2: live }) } : null)
+  // ELEUSINIA_TEST_CS2_CFG: testing only, a folder standing in for the game's cfg folder.
+  const testCfg = process.env.ELEUSINIA_TEST_CS2_CFG
+  const cs2 = createCs2({ dir, diag, onData: (c) => ((live = c), send()), ...(testCfg && { cfgFolder: async () => testCfg }) })
+  const on = () => !!node.state().settings.activity?.games
+  let running = false
   const apply = () => {
-    const on = !!node.state().settings.activity?.games
-    if (fake) return node.setActivity(on ? { ...JSON.parse(fake), since: Date.now() - 60000 } : null)
-    if (on && !watcher)
-      watcher = watchActivity({
-        settings: () => node.state().settings.activity,
-        onGame: (g) => node.setActivity(g),
-        fetch: (url) => net.fetch(url),
-        diag,
-      })
-    else if (!on && watcher) watcher.stop(), (watcher = null), node.setActivity(null)
+    if (on() && !running) {
+      running = true
+      if (fake) (game = { ...JSON.parse(fake), since: Date.now() - 60000 }), send()
+      else watcher = watchActivity({ settings: () => node.state().settings.activity, onGame: (g) => ((game = g), send()), fetch: (url) => net.fetch(url), diag })
+      cs2.status().catch(() => {})
+    } else if (!on() && running) {
+      running = false
+      watcher?.stop()
+      watcher = null
+      cs2.stop()
+      game = live = null
+      send()
+    }
   }
   apply()
   activityChanged = apply
+  ipcMain.handle('cs2', async (_e, action: unknown) => {
+    const r = await (action === 'install' ? cs2.install() : action === 'remove' ? cs2.remove() : cs2.status())
+    if (!on()) cs2.stop() // set up ahead of time: listens once sharing is on
+    return r
+  })
   ipcMain.handle('programs', () => programs())
   ipcMain.handle('openSteam', (_e, id: unknown, kind: unknown) => {
     if (Number.isSafeInteger(id) && (id as number) > 0 && (kind === 'store' || kind === 'run')) return shell.openExternal(`steam://${kind}/${id}`)

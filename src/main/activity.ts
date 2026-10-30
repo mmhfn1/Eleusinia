@@ -53,6 +53,18 @@ async function steamNow(): Promise<SteamNow | null> {
   return { root, app: vnum(vget(steam, 'RunningAppID')) ?? 0, user: vnum(vget(steam, 'ActiveProcess', 'ActiveUser')) ?? 0 }
 }
 
+// Where a Steam game is installed: its library folder (the one whose app list has it) and the manifest's installdir.
+export async function steamAppDir(app: number): Promise<string | null> {
+  const s = await steamNow()
+  if (!s) return null
+  const libs = libraryPaths(readVdf(join(s.root, 'steamapps/libraryfolders.vdf')) ?? {})
+  for (const lib of [s.root, ...libs]) {
+    const dir = vget(readVdf(join(lib, 'steamapps', `appmanifest_${app}.acf`)) ?? {}, 'AppState', 'installdir')
+    if (typeof dir === 'string' && dir && existsSync(join(lib, 'steamapps/common', dir))) return join(lib, 'steamapps/common', dir)
+  }
+  return null
+}
+
 type StoreInfo = { name?: string; genres?: string[]; developer?: string; released?: string; about?: string }
 const entities = (s: string) =>
   s.replace(/&(quot|amp|lt|gt|#39|apos|nbsp);/g, (_, e) => ({ quot: '"', amp: '&', lt: '<', gt: '>', '#39': "'", apos: "'", nbsp: ' ' })[e as 'quot'] ?? '')
