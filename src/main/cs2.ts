@@ -43,12 +43,13 @@ type Opts = { dir: string; onData: (c: Cs2 | null) => void; diag: (text: string)
 
 export function createCs2({ dir, onData, diag, cfgFolder }: Opts) {
   const keep = join(dir, 'gsi.json')
+  const pick = () => 30000 + Math.floor(Math.random() * 20000)
   let conf: { port: number; token: string }
   try {
     conf = JSON.parse(readFileSync(keep, 'utf8'))
     if (!Number.isInteger(conf.port) || !/^[0-9a-f]{48}$/.test(conf.token)) throw new Error('bad')
   } catch {
-    conf = { port: 30000 + Math.floor(Math.random() * 20000), token: randomBytes(24).toString('hex') }
+    conf = { port: pick(), token: randomBytes(24).toString('hex') }
     writeFileSync(keep, JSON.stringify(conf))
   }
   const expected = Buffer.from(conf.token)
@@ -61,9 +62,11 @@ export function createCs2({ dir, onData, diag, cfgFolder }: Opts) {
   let server: Server | null = null
   let lastAt = 0
   let expiry: ReturnType<typeof setInterval> | null = null
-  function listen() {
-    if (server) return
-    server = createServer((req, res) => {
+  // Resolves once listening. A port that is taken (or reserved, as Windows does for whole ranges) is swapped for
+  // another, and the game's file rewritten to match; the game picks that up when it next starts.
+  function listen(cfg: string): Promise<void> {
+    if (server) return Promise.resolve()
+    const s = (server = createServer((req, res) => {
       if (req.method !== 'POST') return void res.writeHead(405).end()
       const parts: Buffer[] = []
       let size = 0
@@ -84,14 +87,28 @@ export function createCs2({ dir, onData, diag, cfgFolder }: Opts) {
           onData(c)
         } catch {} // not JSON: ignored
       })
-    })
-    server.on('error', (e: NodeJS.ErrnoException) => {
-      diag(`CS2 live details: cannot listen on port ${conf.port} (${e.code ?? e.message})`)
-      server = null
-    })
-    server.listen(conf.port, '127.0.0.1')
+    }))
     // The game sends at least every 10 s while running; quiet for 30 s means it closed.
     expiry = setInterval(() => lastAt && Date.now() - lastAt > 30000 && ((lastAt = 0), onData(null)), 5000)
+    return new Promise((done) => {
+      const attempt = (left: number) => {
+        const failed = (e: NodeJS.ErrnoException) => {
+          diag(`CS2 live details: cannot listen on port ${conf.port} (${e.code ?? e.message})`)
+          if (left === 0 || server !== s) return (server === s && close()), done()
+          conf = { ...conf, port: pick() }
+          writeFileSync(keep, JSON.stringify(conf))
+          if (existsSync(join(cfg, FILE))) writeFileSync(join(cfg, FILE), cs2Config(conf.port, conf.token))
+          attempt(left - 1)
+        }
+        s.once('error', failed)
+        s.listen(conf.port, '127.0.0.1', () => {
+          s.off('error', failed)
+          s.on('error', (e: Error) => diag(`CS2 live details: ${e.message}`))
+          done()
+        })
+      }
+      attempt(5)
+    })
   }
   function close() {
     server?.close()
@@ -102,12 +119,14 @@ export function createCs2({ dir, onData, diag, cfgFolder }: Opts) {
   }
 
   return {
-    port: conf.port,
+    get port() {
+      return conf.port
+    },
     // Whether the game is found and the file is in place; the server runs only while it is.
     async status() {
       const cfg = await cfgDir()
       const installed = !!cfg && existsSync(join(cfg, FILE))
-      if (installed) listen()
+      if (installed) await listen(cfg)
       else close()
       return { found: !!cfg, installed, folder: cfg }
     },

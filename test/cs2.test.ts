@@ -1,4 +1,6 @@
+import { once } from 'node:events'
 import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { createServer } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, test } from 'vitest'
@@ -107,4 +109,23 @@ test("the local server: set up writes the game's file, only posts with our token
   expect(existsSync(join(cfg, 'gamestate_integration_eleusinia.cfg'))).toBe(false)
   expect(got.at(-1)).toBeNull()
   cs2.stop()
+})
+
+test('a taken port is swapped for another, in the saved settings and the game file', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eleusinia-cs2-'))
+  const cfg = mkdtempSync(join(tmpdir(), 'eleusinia-cs2cfg-'))
+  const taken = createCs2({ dir, cfgFolder: async () => cfg, onData: () => {}, diag: () => {} }).port
+  const squatter = createServer().listen(taken, '127.0.0.1')
+  await once(squatter, 'listening')
+  const got: (Cs2 | null)[] = []
+  const cs2 = createCs2({ dir, cfgFolder: async () => cfg, onData: (c) => got.push(c), diag: () => {} })
+  await cs2.install()
+  expect(cs2.port).not.toBe(taken)
+  const file = readFileSync(join(cfg, 'gamestate_integration_eleusinia.cfg'), 'utf8')
+  expect(file).toContain(`"uri" "http://127.0.0.1:${cs2.port}/"`)
+  const token = /"token" "([0-9a-f]{48})"/.exec(file)![1]
+  await fetch(`http://127.0.0.1:${cs2.port}/`, { method: 'POST', body: JSON.stringify({ ...live(), auth: { token } }) })
+  expect(got).toHaveLength(1)
+  cs2.stop()
+  squatter.close()
 })
