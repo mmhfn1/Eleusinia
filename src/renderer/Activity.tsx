@@ -3,10 +3,11 @@
 import { useEffect, useReducer, useState } from 'react'
 import { type Achievement, type Activity, type ActivitySettings, type Game, sharing } from '../shared/activity'
 import { type Cs2, mapName, modeName, roundWin, weaponName } from '../shared/cs2'
+import type { Destiny } from '../shared/destiny'
 import { type Dota, heroName, itemName, stateName } from '../shared/dota'
 import { type Key, type State } from '../shared/protocol'
 import { api } from './common'
-import { CopyButton } from './ui'
+import { Brand, CopyButton } from './ui'
 
 // Re-renders every `ms`, so times since a start move on the viewer's side; nothing is resent for it.
 function useTick(ms: number) {
@@ -52,7 +53,12 @@ export function ActivityLine({ a }: { a?: Activity }) {
   if (!a?.game) return null
   const c = a.game.cs2
   const d = a.game.dota
-  const live = c
+  const n = a.game.destiny
+  const live = n
+    ? n.orbit
+      ? 'in orbit'
+      : n.activity && [n.activity.mode, n.activity.name].filter(Boolean).join(' · ') + (n.score ? ` ${n.score.us}–${n.score.them}` : '')
+    : c
     ? c.menu
       ? 'in the menu'
       : [c.map && mapName(c.map), cs2Score(c)].filter(Boolean).join(' ')
@@ -206,6 +212,87 @@ function DotaMatch({ d }: { d: Dota }) {
   )
 }
 
+// Destiny 2 from Bungie.net: the activity with its picture, the guardian, the fireteam and the loadout.
+const bungieArt = (path: string) => `eleusinia-art://bungie${path}`
+function DestinyMatch({ d }: { d: Destiny }) {
+  useTick(30000)
+  const a = d.activity
+  const ch = d.character
+  const f = d.fireteam
+  return (
+    <div className="cs2 destiny">
+      {a?.image && <img className="destiny-art" src={bungieArt(a.image)} alt="" onError={hide} />}
+      {d.orbit ? (
+        <p className="cs2-map">In orbit</p>
+      ) : (
+        a && (
+          <div className="cs2-head">
+            <span className="cs2-map">{a.name}</span>
+            <span className="row-sub">
+              {[a.mode, a.playlist, a.place, a.since && `for ${duration(Date.now() - a.since)}`, a.light && `Recommended ${a.light}`].filter(Boolean).join(' · ')}
+            </span>
+          </div>
+        )
+      )}
+      {d.score && (
+        <div className="cs2-score" aria-label={`Our team ${d.score.us}, the other team ${d.score.them}`}>
+          <span className="cs2-team ct ours">
+            <span>Us</span>
+            <b>{d.score.us}</b>
+          </span>
+          <span className="cs2-mid">–</span>
+          <span className="cs2-team t">
+            <b>{d.score.them}</b>
+            <span>Them</span>
+          </span>
+        </div>
+      )}
+      {ch && (
+        <div className="destiny-guardian" style={ch.emblem ? { backgroundImage: `url("${bungieArt(ch.emblem)}")` } : undefined}>
+          <span className="row-text">
+            <span className="row-title">
+              {ch.class}
+              {ch.title && <span className="destiny-title"> {ch.title}</span>}
+            </span>
+            <span className="row-sub">
+              {[ch.rank && `Guardian Rank ${ch.rank}`, ch.session !== undefined && ch.session > 0 && `${duration(ch.session * 60000)} this session`].filter(Boolean).join(' · ')}
+            </span>
+          </span>
+          <b className="destiny-light" aria-label={`Power ${ch.light}`}>
+            {ch.light}
+          </b>
+        </div>
+      )}
+      {f && (
+        <div className="destiny-fireteam">
+          <p className="row-sub">
+            Fireteam {f.members.length}
+            {f.max ? `/${f.max}` : ''}
+            {f.open ? ` · ${f.open} open` : ''}
+          </p>
+          <ul aria-label="Fireteam">
+            {f.members.map((m, i) => (
+              <li key={i}>
+                {m.emblem ? <img src={bungieArt(m.emblem)} alt="" onError={hide} /> : <span className="destiny-blank" />}
+                <span>{m.name}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {d.loadout && (
+        <ul className="destiny-loadout" aria-label="Loadout">
+          {d.loadout.map((i, k) => (
+            <li key={k} className={i.exotic ? 'exotic' : ''} title={[i.name, i.kind].filter(Boolean).join(' · ')}>
+              <img src={bungieArt(i.icon)} alt={i.name} onError={hide} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 const PHASES: Record<string, string> = {
   warmup: 'Warmup',
   live: 'Live',
@@ -314,7 +401,7 @@ function AchievementRow({ app, x }: { app?: number; x: Achievement }) {
         {x.desc && <span className="achievement-desc">{x.desc}</span>}
         <span className="row-sub">
           {x.at ? `Unlocked ${ago(x.at)}` : 'Unlocked'}
-          {x.rarity !== undefined && ` · ${x.rarity < 10 ? x.rarity.toFixed(1) : Math.round(x.rarity)}% of players have it`}
+          {x.rarity !== undefined && ` · ${x.rarity < 10 ? x.rarity.toFixed(1) : Math.round(x.rarity)}% of players`}
         </span>
       </span>
     </li>
@@ -339,6 +426,7 @@ export function GameCard({ g, full = true }: { g: Game; full?: boolean }) {
         </p>
         {g.cs2 && <Cs2Match c={g.cs2} />}
         {g.dota && <DotaMatch d={g.dota} />}
+        {g.destiny && <DestinyMatch d={g.destiny} />}
         {facts.length > 0 && <p className="activity-facts">{facts.join(' · ')}</p>}
         {full && g.about && <p className="activity-about">{g.about}</p>}
         {a && (
@@ -415,27 +503,23 @@ export function ActivitySettingsSection({ st, name }: { st: State; name: (k: Key
     <>
       <label className="check-row">
         <input type="checkbox" role="switch" checked={on} onChange={(e) => save({ games: e.target.checked })} />
-        <span>
-          Share the game I'm playing with friends and group members. Found from Steam, or by the game's program. Never
-          shown to anyone else
-        </span>
+        <span>Share what I'm playing</span>
       </label>
       <div className="activity-details">
-        {detail('playtime', 'How long I have played it in total')}
-        {detail('achievements', 'My achievements in it, with the newest ones')}
-        {detail('details', 'Its genre, developer, release date and description')}
+        {detail('playtime', 'Total playtime')}
+        {detail('achievements', 'Achievements')}
+        {detail('details', 'Genre, developer and release date')}
       </div>
-      {on && <GsiSetup game="cs2" set={set} save={save} />}
-      {on && <GsiSetup game="dota" set={set} save={save} />}
+      {on && <Connections set={set} save={save} />}
       {on && (
         <div className="activity-preview">
-          <p className="row-sub">What friends see now</p>
-          {mine ? <GameCard g={mine} /> : <p className="quiet">No game running.</p>}
+          <p className="row-sub">Preview</p>
+          {mine ? <GameCard g={mine} /> : <p className="quiet">No game running</p>}
         </div>
       )}
       {(set.hidden?.length ?? 0) > 0 && (
         <div className="activity-hidden">
-          <p className="row-sub">Never shown to</p>
+          <p className="row-sub">Hidden from</p>
           {set.hidden!.map((k) => (
             <div className="settings-row" key={k}>
               <span className="row-text">
@@ -449,7 +533,7 @@ export function ActivitySettingsSection({ st, name }: { st: State; name: (k: Key
         </div>
       )}
       <div className="activity-extra">
-        <p className="row-sub">Games found by their program, besides Steam and the built-in list</p>
+        <p className="row-sub">Other games</p>
         {extra.map(([exe, game]) => (
           <div className="settings-row" key={exe}>
             <span className="row-text">
@@ -468,7 +552,7 @@ export function ActivitySettingsSection({ st, name }: { st: State; name: (k: Key
         ) : (
           <div className="activity-add">
             <select aria-label="Running program" value={pick} onChange={(e) => setPick(e.target.value)}>
-              <option value="">Pick the game's program (start the game first)</option>
+              <option value="">Running program</option>
               {programs.sort().map((p) => (
                 <option key={p} value={p}>
                   {p}
@@ -489,83 +573,150 @@ export function ActivitySettingsSection({ st, name }: { st: State; name: (k: Key
   )
 }
 
-// Settings → Activity → a game with Valve's Game State Integration (main/gsi.ts): the config file the game needs, and
-// what of a match is shared.
+// Settings → Activity → connections: Steam (CS2 and Dota 2 through Valve's Game State Integration, main/gsi.ts) and
+// Bungie.net (Destiny 2, main/bungie.ts). A tile each; its panel has one switch per game and what of it is shared.
 const GSI = {
   cs2: {
+    app: 730,
     name: 'Counter-Strike 2',
     short: 'CS2',
     switches: [
-      ['match', 'Map, mode, score, how each round was won and the round clock', true],
-      ['stats', 'My kills, assists, deaths, MVPs and score', true],
-      ['state', 'My health, armor, money and weapon as they change. Off by default: it would help anyone playing against me', false],
+      ['match', 'Score and rounds', true],
+      ['stats', 'My stats', true],
+      ['state', 'Health, money and weapon', false],
     ],
   },
   dota: {
+    app: 570,
     name: 'Dota 2',
     short: 'Dota 2',
     switches: [
-      ['match', 'The kills on each side, the match clock, day or night, my hero and level', true],
-      ['stats', 'My kills, deaths, assists, last hits, denies, GPM, XPM and kill streak', true],
-      ['live', 'My gold, items, health, mana, respawn and buyback as they change. Off by default: it would help anyone playing against me', false],
+      ['match', 'Score, clock and hero', true],
+      ['stats', 'My stats', true],
+      ['live', 'Gold, items and health', false],
     ],
   },
 } as const
+type GsiGame = keyof typeof GSI
+type GsiStatus = Awaited<ReturnType<typeof window.api.gsi>>
+type BungieStatus = Awaited<ReturnType<typeof window.api.bungie>>
+const DESTINY_SWITCHES = [
+  ['activity', 'Activity'],
+  ['character', 'Guardian'],
+  ['fireteam', 'Fireteam'],
+  ['loadout', 'Loadout'],
+] as const
 const LAUNCH = '-gamestateintegration'
-type GsiStatus = { found: boolean; installed: boolean; folder: string | null; launch?: boolean | null }
-function GsiSetup({ game, set, save }: { game: 'cs2' | 'dota'; set: ActivitySettings; save: (p: Partial<ActivitySettings>) => void }) {
-  const g = GSI[game]
-  const [st, setSt] = useState<GsiStatus | null>(null)
+const why = (e: any) => String(e?.message ?? e).replace(/^Error invoking remote method '\w+': (Error: )?/, '')
+
+function Connections({ set, save }: { set: ActivitySettings; save: (p: Partial<ActivitySettings>) => void }) {
+  const [open, setOpen] = useState<'steam' | 'bungie' | null>(null)
+  const [gsi, setGsi] = useState<Partial<Record<GsiGame, GsiStatus>>>({})
+  const [bungie, setBungie] = useState<BungieStatus | null>(null)
+  const [fresh, setFresh] = useState<GsiGame[]>([]) // set up just now: the game needs one restart
   const [error, setError] = useState('')
   useEffect(() => {
-    window.api.gsi(game, 'status').then(setSt, () => setSt(null))
-  }, [game])
-  const act = (a: 'install' | 'remove') =>
-    window.api.gsi(game, a).then(
-      (s) => (setSt(s), setError('')),
-      (e) => setError(String(e?.message ?? e).replace(/^Error invoking remote method 'gsi': (Error: )?/, '')),
+    for (const g of Object.keys(GSI) as GsiGame[]) window.api.gsi(g, 'status').then((r) => setGsi((x) => ({ ...x, [g]: r })), () => {})
+    window.api.bungie('status').then(setBungie, () => {})
+  }, [])
+  const gsiAct = (g: GsiGame, a: 'install' | 'remove') => {
+    setError('')
+    window.api.gsi(g, a).then(
+      (r) => (setGsi((x) => ({ ...x, [g]: r })), setFresh((f) => (a === 'install' ? [...f, g] : f.filter((x) => x !== g)))),
+      (e) => setError(why(e)),
     )
-  const c: Record<string, boolean | undefined> = set[game] ?? {}
-  const sw = ([field, label, def]: readonly [string, string, boolean]) => (
+  }
+  const bungieAct = (a: 'link' | 'cancel' | 'unlink') => {
+    setError('')
+    if (a === 'link') setBungie((b) => b && { ...b, waiting: true })
+    if (a === 'unlink') setOpen(null)
+    return window.api.bungie(a).then(
+      (b) => (setBungie(b), a === 'link' && setOpen('bungie')),
+      (e) => {
+        if (why(e) !== 'cancelled') setError(why(e))
+        window.api.bungie('status').then(setBungie, () => {})
+      },
+    )
+  }
+  // Bungie's tile links when not linked, cancels while waiting, and opens its switches once linked.
+  const bungieClick = () => {
+    if (!bungie?.configured) return setError('This copy of Eleusinia was built without a Bungie.net app key.')
+    if (bungie.waiting) return bungieAct('cancel')
+    if (!bungie.linked) return bungieAct('link')
+    setOpen(open === 'bungie' ? null : 'bungie')
+  }
+  const live = (Object.keys(GSI) as GsiGame[]).filter((g) => gsi[g]?.installed)
+  const sw = (field: string, label: string, def: boolean, values: Record<string, boolean | undefined>, put: (v: Record<string, boolean | undefined>) => void) => (
     <label className="check-row" key={field}>
-      <input type="checkbox" role="switch" checked={c[field] ?? def} onChange={(e) => save({ [game]: { ...c, [field]: e.target.checked } })} />
+      <input type="checkbox" role="switch" checked={values[field] ?? def} onChange={(e) => put({ ...values, [field]: e.target.checked })} />
       <span>{label}</span>
     </label>
   )
-  const note = !st
-    ? 'Looking for the game…'
-    : st.installed
-      ? `Set up. If ${g.short} is running, restart it once.`
-      : st.found
-        ? "Adds a file to the game's cfg folder, the way Valve made for apps like this one."
-        : `${g.name} is not in your Steam library.`
   return (
-    <div className={`activity-gsi activity-${game}`}>
-      <div className="settings-row">
-        <span className="row-text">
-          <span className="row-title">{g.name} live match details</span>
-          <span className="row-sub">{note}</span>
-        </span>
-        {st?.found &&
-          (st.installed ? (
-            <button className="button subtle" onClick={() => act('remove')}>
-              Remove
-            </button>
-          ) : (
-            <button className="button" onClick={() => act('install')}>
-              Set up
-            </button>
-          ))}
+    <div className="connections-wrap">
+      <div className="connections" role="group" aria-label="Connections">
+        <button className={`connection${open === 'steam' ? ' open' : ''}`} data-k="steam" aria-expanded={open === 'steam'} onClick={() => setOpen(open === 'steam' ? null : 'steam')}>
+          <Brand name="steam" size={26} />
+          <span className="connection-name">Steam</span>
+          <span className={`connection-state${live.length ? ' on' : ''}`}>{live.length ? live.map((g) => GSI[g].short).join(' · ') : 'Live matches'}</span>
+        </button>
+        <button
+          className={`connection${open === 'bungie' ? ' open' : ''}${bungie?.waiting ? ' waiting' : ''}`}
+          data-k="bungie"
+          aria-expanded={bungie?.linked ? open === 'bungie' : undefined}
+          onClick={bungieClick}
+        >
+          <Brand name="bungie" size={26} />
+          <span className="connection-name">Bungie.net</span>
+          <span className={`connection-state${bungie?.linked ? ' on' : ''}`}>{bungie?.waiting ? 'Sign in, in your browser · Cancel' : bungie?.linked ? bungie.name || 'Linked' : 'Link'}</span>
+        </button>
       </div>
       {error && <p className="form-error">{error}</p>}
-      {st?.installed && st.launch !== undefined && st.launch !== true && (
-        <p className="activity-launch">
-          {st.launch === false ? 'One more step: Dota 2 only sends its details when started' : 'Make sure Dota 2 is started'} with <code>{LAUNCH}</code> in
-          its launch options. In Steam, right-click Dota 2, choose Properties, and add it under Launch options.{' '}
-          <CopyButton text={LAUNCH} label="Copy the launch option" />
-        </p>
+      {open === 'steam' && (
+        <div className="connection-panel">
+          {(Object.keys(GSI) as GsiGame[]).map((g) => {
+            const x = GSI[g]
+            const st = gsi[g]
+            const values: Record<string, boolean | undefined> = set[g] ?? {}
+            return (
+              <div className="connection-game" key={g} data-game={g}>
+                <div className="connection-game-head">
+                  <img src={`eleusinia-art://steam/${x.app}/header`} alt="" onError={hide} />
+                  <span className="row-title">{x.name}</span>
+                  {st && !st.found && <span className="row-sub">Not installed</span>}
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    aria-label={`${x.name} live match details`}
+                    checked={!!st?.installed}
+                    disabled={!st?.found}
+                    onChange={(e) => gsiAct(g, e.target.checked ? 'install' : 'remove')}
+                  />
+                </div>
+                {st?.installed && (
+                  <>
+                    {fresh.includes(g) && <p className="connection-note">Restart {x.short} once</p>}
+                    {st.launch !== undefined && st.launch !== true && (
+                      <p className="connection-note">
+                        Add <code>{LAUNCH}</code> to its Steam launch options <CopyButton text={LAUNCH} label="Copy the launch option" />
+                      </p>
+                    )}
+                    <div className="activity-details">{x.switches.map(([f, label, def]) => sw(f, label, def, values, (v) => save({ [g]: v })))}</div>
+                  </>
+                )}
+              </div>
+            )
+          })}
+        </div>
       )}
-      {st?.installed && <div className="activity-details">{g.switches.map(sw)}</div>}
+      {open === 'bungie' && bungie?.linked && (
+        <div className="connection-panel">
+          <div className="activity-details">{DESTINY_SWITCHES.map(([f, label]) => sw(f, label, true, set.destiny ?? {}, (v) => save({ destiny: v })))}</div>
+          <button className="button subtle" onClick={() => bungieAct('unlink')}>
+            Unlink
+          </button>
+        </div>
+      )}
     </div>
   )
 }

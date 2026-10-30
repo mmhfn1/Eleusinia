@@ -111,8 +111,14 @@ jobs:
           echo "MAC_SIGN_IDENTITY=$ID" >> "$GITHUB_ENV"
           echo "MAC_SIGN_KEYCHAIN=$KC" >> "$GITHUB_ENV"
 
+      # Bungie.net's app key for linking Destiny 2 accounts (src/main/bungie.ts), built into the app as Bungie apps do.
+      # Without the secrets the release still builds; Settings then says linking is not available.
       - name: Build
         shell: bash
+        env:
+          MAIN_VITE_BUNGIE_API_KEY: ${{ secrets.BUNGIE_API_KEY }}
+          MAIN_VITE_BUNGIE_CLIENT_ID: ${{ secrets.BUNGIE_CLIENT_ID }}
+          MAIN_VITE_BUNGIE_CLIENT_SECRET: ${{ secrets.BUNGIE_CLIENT_SECRET }}
         run: |
           npx electron-vite build
           npx electron-builder ${{ matrix.target }} --publish never

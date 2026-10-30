@@ -12,3 +12,7 @@ declare module '*?raw' {
   const text: string
   export default text
 }
+// Build-time values electron-vite puts in the main process (MAIN_VITE_*, from .env.local or the environment)
+interface ImportMeta {
+  readonly env: Record<string, string | undefined>
+}

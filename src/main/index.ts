@@ -14,10 +14,12 @@ import { isKey } from '../shared/protocol'
 import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared/reports'
 import { kindOf, shareable } from '../shared/sources'
 import { verifyUpdate } from '../shared/updatesig'
-import { type Game, artUrl, sharing } from '../shared/activity'
+import { DESTINY_APP, type Game, artUrl, sharing } from '../shared/activity'
+import type { Destiny } from '../shared/destiny'
 import type { Cs2 } from '../shared/cs2'
 import type { Dota } from '../shared/dota'
 import { programs, watchActivity } from './activity'
+import { type BungieConfig, createBungie } from './bungie'
 import { GSI_GAMES, type GsiGame, createGsi } from './gsi'
 import { createInbox } from './inbox'
 import { type Staged, canInstall, fetchUpdate, install, tidy } from './selfupdate'
@@ -125,11 +127,16 @@ function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (
   let game: Game | null = null
   let live: { game: GsiGame; data: Cs2 | Dota; since: number } | null = null
   const LIVE = { cs2: { app: 730, name: 'Counter-Strike 2' }, dota: { app: 570, name: 'Dota 2' } }
+  // And Destiny 2's guardian from Bungie.net (main/bungie.ts), while Destiny 2 is the game and the account is linked.
+  let guardian: Destiny | null = null
   const send = () => {
-    if (!live) return node.setActivity(game)
-    const { app, name } = LIVE[live.game]
-    const base: Game = game?.app === app ? game : { name, app, source: 'steam', since: live.since }
-    node.setActivity({ ...base, [live.game]: live.data })
+    let g = game
+    if (live) {
+      const { app, name } = LIVE[live.game]
+      g = { ...(game?.app === app ? game : { name, app, source: 'steam', since: live.since }), [live.game]: live.data }
+    }
+    if (g?.app === DESTINY_APP && guardian) g = { ...g, destiny: guardian }
+    node.setActivity(g)
   }
   const onData = (g: GsiGame, data: Cs2 | Dota | null) => {
     if (data) live = { game: g, data, since: live?.game === g ? live.since : Date.now() }
@@ -141,11 +148,47 @@ function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (
   const gsi = createGsi({ dir, diag, onData, ...(testCfg && { cfgFolder: async (g: GsiGame) => join(testCfg, g) }) })
   const on = () => sharing(node.state().settings.activity)
   let running = false
+  // Bungie's app key comes in at build time (MAIN_VITE_BUNGIE_* in .env.local, or the release workflow's secrets).
+  // ELEUSINIA_TEST_BUNGIE: testing only, a stand-in for bungie.net that approves at once, so "the browser" is a fetch.
+  const env = import.meta.env
+  const testBungie = process.env.ELEUSINIA_TEST_BUNGIE
+  const bungieConfig: BungieConfig | null = testBungie
+    ? { key: 'test', clientId: 'test', secret: 'test', base: testBungie }
+    : env.MAIN_VITE_BUNGIE_API_KEY && env.MAIN_VITE_BUNGIE_CLIENT_ID && env.MAIN_VITE_BUNGIE_CLIENT_SECRET
+      ? { key: env.MAIN_VITE_BUNGIE_API_KEY, clientId: env.MAIN_VITE_BUNGIE_CLIENT_ID, secret: env.MAIN_VITE_BUNGIE_CLIENT_SECRET }
+      : null
+  const bungie = createBungie({
+    dir,
+    config: bungieConfig,
+    fetch: (url, init) => net.fetch(url, init),
+    open: testBungie ? (url) => fetch(url) : (url) => shell.openExternal(url),
+    seal: (t) => (safeStorage.isEncryptionAvailable() ? `safe:${safeStorage.encryptString(t).toString('base64')}` : t),
+    unseal: (t) => (t.startsWith('safe:') ? safeStorage.decryptString(Buffer.from(t.slice(5), 'base64')) : t),
+    diag,
+  })
+  let destinyTimer: ReturnType<typeof setInterval> | null = null
+  // Bungie updates a profile about every 30 s; nothing is asked while Destiny 2 is not running.
+  const watchDestiny = () => {
+    const want = running && game?.app === DESTINY_APP && bungie.status().linked
+    if (want && !destinyTimer) {
+      const tick = () =>
+        bungie.destiny().then(
+          (d) => destinyTimer && ((guardian = d), send()),
+          (e) => diag(`Bungie.net: ${e?.message ?? e}`),
+        )
+      destinyTimer = setInterval(tick, 30000)
+      tick()
+    } else if (!want && destinyTimer) {
+      clearInterval(destinyTimer)
+      destinyTimer = null
+      if (guardian) (guardian = null), send()
+    }
+  }
   const apply = () => {
     if (on() && !running) {
       running = true
-      if (fake) (game = { ...JSON.parse(fake), since: Date.now() - 60000 }), send()
-      else watcher = watchActivity({ settings: () => node.state().settings.activity, onGame: (g) => ((game = g), send()), fetch: (url) => net.fetch(url), diag })
+      if (fake) (game = { ...JSON.parse(fake), since: Date.now() - 60000 }), send(), watchDestiny()
+      else watcher = watchActivity({ settings: () => node.state().settings.activity, onGame: (g) => ((game = g), send(), watchDestiny()), fetch: (url) => net.fetch(url), diag })
       gsi.update().catch(() => {})
     } else if (!on() && running) {
       running = false
@@ -153,6 +196,7 @@ function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (
       watcher = null
       gsi.stop()
       game = live = null
+      watchDestiny()
       send()
     }
   }
@@ -164,6 +208,12 @@ function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (
     const r = await (action === 'install' ? gsi.install(game) : action === 'remove' ? gsi.remove(game) : gsi.status(game))
     if (!on()) gsi.stop() // set up ahead of time: listens once sharing is on
     return r
+  })
+  ipcMain.handle('bungie', async (_e, action: unknown) => {
+    if (action === 'link') await bungie.link().finally(watchDestiny)
+    else if (action === 'cancel') bungie.cancel()
+    else if (action === 'unlink') bungie.unlink(), watchDestiny()
+    return bungie.status()
   })
   ipcMain.handle('programs', () => programs())
   ipcMain.handle('openSteam', (_e, id: unknown, kind: unknown) => {

@@ -1,5 +1,6 @@
 import type { Key } from './protocol'
 import { type Cs2, type Cs2Settings, cleanCs2, shareableCs2 } from './cs2'
+import { BUNGIE_PATH, type Destiny, type DestinySettings, cleanDestiny, shareableDestiny } from './destiny'
 import { type Dota, type DotaSettings, cleanDota, shareableDota } from './dota'
 
 // What someone is doing, shared with friends and group members only (docs/roadmap-activity.md). Pictures are never
@@ -26,6 +27,7 @@ export type Game = {
   achievements?: { got: number; total: number; recent: Achievement[] } // recent: newest first
   cs2?: Cs2 // live match details from Counter-Strike 2 (shared/cs2.ts)
   dota?: Dota // and from Dota 2 (shared/dota.ts)
+  destiny?: Destiny // Destiny 2 through the Bungie.net API (shared/destiny.ts)
 }
 // now: the sender's clock when sent, so `since` can be moved onto the receiver's clock.
 export type Activity = { now: number; game?: Game }
@@ -41,9 +43,11 @@ export type ActivitySettings = {
   extra?: Record<string, string> // program file name (lower case) → game name, added by the user
   cs2?: Cs2Settings
   dota?: DotaSettings
+  destiny?: DestinySettings
 }
 
 export const RECENT_ACHIEVEMENTS = 5
+export const DESTINY_APP = 1085660 // Destiny 2's Steam app id
 
 export const sharing = (set: ActivitySettings | undefined) => set?.games !== false
 
@@ -56,6 +60,7 @@ export function shareable(a: Activity, set: ActivitySettings | undefined): Activ
   if (set?.details !== true) delete g.genres, delete g.developer, delete g.released, delete g.about
   if (g.cs2) g.cs2 = shareableCs2(g.cs2, set?.cs2)
   if (g.dota) g.dota = shareableDota(g.dota, set?.dota)
+  if (g.destiny) g.destiny = shareableDestiny(g.destiny, set?.destiny)
   return { now: a.now, game: g }
 }
 
@@ -100,18 +105,23 @@ export function cleanActivity(x: unknown, now = Date.now()): Activity | null {
   if (cs2) game.cs2 = cs2
   const dota = game.app === 570 ? cleanDota(g.dota, shift, now) : undefined
   if (dota) game.dota = dota
+  const destiny = game.app === DESTINY_APP ? cleanDestiny(g.destiny, shift, now) : undefined
+  if (destiny) game.destiny = destiny
   return { now, game }
 }
 const ICON = /^[0-9a-f]{40}\.(jpg|png)$/
 
 // The only addresses activity pictures come from, built here from ids (eleusinia-art:// in src/main/index.ts).
 // eleusinia-art://steam/<app>/<header|capsule|hero|logo>, eleusinia-art://achievement/<app>/<icon file>, and Dota 2's
-// eleusinia-art://dota/<heroes|items>/<name> (the game's own name without npc_dota_hero_ or item_).
+// eleusinia-art://dota/<heroes|items>/<name> (the game's own name without npc_dota_hero_ or item_), and Destiny 2's
+// eleusinia-art://bungie/<path> (a bungie.net path from Destiny's icon or activity picture folders).
 const STEAM = 'https://cdn.akamai.steamstatic.com/'
 const STEAM_ART: Record<string, string> = { header: 'header.jpg', capsule: 'library_600x900.jpg', hero: 'library_hero.jpg', logo: 'logo.png' }
 export function artUrl(url: string): string | null {
   const d = /^eleusinia-art:\/\/dota\/(heroes|items)\/([a-z0-9_]{1,60})$/.exec(url)
   if (d) return `${STEAM}apps/dota2/images/dota_react/${d[1]}/${d[2]}.png`
+  const b = /^eleusinia-art:\/\/bungie(\/.*)$/.exec(url)
+  if (b) return BUNGIE_PATH.test(b[1]) ? `https://www.bungie.net${b[1]}` : null
   const m = /^eleusinia-art:\/\/(steam|achievement)\/(\d{1,8})\/([\w.]+)$/.exec(url)
   if (!m) return null
   if (m[1] === 'steam') return Object.hasOwn(STEAM_ART, m[3]) ? `${STEAM}steam/apps/${m[2]}/${STEAM_ART[m[3]]}` : null

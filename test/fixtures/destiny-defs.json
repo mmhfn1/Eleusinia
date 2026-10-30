@@ -1,0 +1,199 @@
+{
+ "DestinyActivityDefinition:2001": {
+  "displayProperties": {
+   "name": "Salvation's Edge",
+   "description": ""
+  },
+  "destinationHash": 3001,
+  "placeHash": 4001,
+  "pgcrImage": "/img/destiny_content/pgcr/europa-mission-knuckle.jpg",
+  "activityLightLevel": 1990,
+  "isPvP": false,
+  "matchmaking": {
+   "maxParty": 6
+  }
+ },
+ "DestinyActivityDefinition:2002": {
+  "displayProperties": {
+   "name": "Altar of Flame",
+   "description": ""
+  },
+  "destinationHash": 3002,
+  "placeHash": 4002,
+  "pgcrImage": "/img/destiny_content/pgcr/crucible_altar_of_flame.jpg",
+  "activityLightLevel": 0,
+  "isPvP": true,
+  "matchmaking": {
+   "maxParty": 6
+  }
+ },
+ "DestinyActivityDefinition:2003": {
+  "displayProperties": {
+   "name": "Quickplay",
+   "description": ""
+  }
+ },
+ "DestinyActivityDefinition:82913930": {
+  "displayProperties": {
+   "name": "",
+   "description": ""
+  },
+  "destinationHash": 2961497387,
+  "placeHash": 2961497387
+ },
+ "DestinyActivityModeDefinition:2043403989": {
+  "displayProperties": {
+   "name": "Raid",
+   "description": ""
+  },
+  "pgcrImage": "/img/theme/destiny/bgs/stats/banner_raid_1.jpg"
+ },
+ "DestinyActivityModeDefinition:3199098680": {
+  "displayProperties": {
+   "name": "Control",
+   "description": ""
+  },
+  "pgcrImage": "/img/theme/destiny/bgs/stats/banner_crucible_control.jpg"
+ },
+ "DestinyDestinationDefinition:3001": {
+  "displayProperties": {
+   "name": "The Pale Heart",
+   "description": ""
+  }
+ },
+ "DestinyPlaceDefinition:4001": {
+  "displayProperties": {
+   "name": "The Traveler",
+   "description": ""
+  }
+ },
+ "DestinyDestinationDefinition:3002": {
+  "displayProperties": {
+   "name": "Mercury",
+   "description": ""
+  }
+ },
+ "DestinyPlaceDefinition:4002": {
+  "displayProperties": {
+   "name": "Mercury",
+   "description": ""
+  }
+ },
+ "DestinyDestinationDefinition:2961497387": {
+  "displayProperties": {
+   "name": "Orbit",
+   "description": ""
+  }
+ },
+ "DestinyPlaceDefinition:2961497387": {
+  "displayProperties": {
+   "name": "Orbit",
+   "description": ""
+  }
+ },
+ "DestinyRecordDefinition:1001": {
+  "displayProperties": {
+   "name": "Rivensbane",
+   "description": ""
+  },
+  "titleInfo": {
+   "hasTitle": true,
+   "titlesByGender": {
+    "Male": "Rivensbane",
+    "Female": "Rivensbane"
+   },
+   "titlesByGenderHash": {
+    "3111576190": "Rivensbane",
+    "2204441813": "Rivensbane"
+   }
+  }
+ },
+ "DestinyInventoryItemDefinition:5001": {
+  "displayProperties": {
+   "name": "Prismatic",
+   "description": "",
+   "icon": "/common/destiny2_content/icons/00000000000000000000000000000033.jpg"
+  },
+  "itemTypeDisplayName": "Warlock Subclass",
+  "inventory": {
+   "tierType": 6
+  }
+ },
+ "DestinyInventoryItemDefinition:5002": {
+  "displayProperties": {
+   "name": "Ace of Spades",
+   "description": "",
+   "icon": "/common/destiny2_content/icons/00000000000000000000000000000034.jpg"
+  },
+  "itemTypeDisplayName": "Hand Cannon",
+  "inventory": {
+   "tierType": 6
+  }
+ },
+ "DestinyInventoryItemDefinition:5003": {
+  "displayProperties": {
+   "name": "Fatebringer",
+   "description": "",
+   "icon": "/common/destiny2_content/icons/00000000000000000000000000000035.jpg"
+  },
+  "itemTypeDisplayName": "Hand Cannon",
+  "inventory": {
+   "tierType": 5
+  }
+ },
+ "DestinyInventoryItemDefinition:5004": {
+  "displayProperties": {
+   "name": "Gjallarhorn",
+   "description": "",
+   "icon": "/common/destiny2_content/icons/b62083eed6a4708e581fc9a061bcc8e9.jpg"
+  },
+  "itemTypeDisplayName": "Rocket Launcher",
+  "inventory": {
+   "tierType": 6
+  }
+ },
+ "DestinyInventoryItemDefinition:5005": {
+  "displayProperties": {
+   "name": "Necrotic Grip",
+   "description": "",
+   "icon": "/common/destiny2_content/icons/00000000000000000000000000000037.jpg"
+  },
+  "itemTypeDisplayName": "Gauntlets",
+  "inventory": {
+   "tierType": 6
+  }
+ },
+ "DestinyInventoryItemDefinition:5006": {
+  "displayProperties": {
+   "name": "Chest Armor of the Righteous",
+   "description": "",
+   "icon": "/common/destiny2_content/icons/00000000000000000000000000000038.jpg"
+  },
+  "itemTypeDisplayName": "Chest Armor",
+  "inventory": {
+   "tierType": 5
+  }
+ },
+ "DestinyInventoryItemDefinition:5007": {
+  "displayProperties": {
+   "name": "Ghost Shell",
+   "description": "",
+   "icon": "/common/destiny2_content/icons/00000000000000000000000000000039.jpg"
+  },
+  "itemTypeDisplayName": "Ghost Shell",
+  "inventory": {
+   "tierType": 5
+  }
+ },
+ "DestinyInventoryItemDefinition:6001": {
+  "displayProperties": {
+   "name": "The Last Flight",
+   "description": "",
+   "icon": "/common/destiny2_content/icons/0000000000000000000000000000003d.jpg"
+  },
+  "itemTypeDisplayName": "Emblem",
+  "inventory": {
+   "tierType": 5
+  }
+ }
+}

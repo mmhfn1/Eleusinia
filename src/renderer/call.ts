@@ -49,6 +49,7 @@ declare global {
       programs(): Promise<string[]>
       openSteam(app: number, kind: 'store' | 'run'): Promise<void>
       gsi(game: 'cs2' | 'dota', action: 'status' | 'install' | 'remove'): Promise<{ found: boolean; installed: boolean; folder: string | null; launch?: boolean | null }>
+      bungie(action: 'status' | 'link' | 'cancel' | 'unlink'): Promise<{ configured: boolean; linked: boolean; waiting?: boolean; name?: string; marathon?: boolean; error?: string }>
       win(action: 'minimize' | 'maximize' | 'close' | 'state'): Promise<boolean>
       attach(items: ({ path: string } | { name: string; type: string; data: Uint8Array })[]): Promise<import('../shared/media').FileRef[]>
       pickFiles(): Promise<import('../shared/media').FileRef[]>

@@ -1,0 +1,124 @@
+{
+ "profile": {
+  "data": {
+   "characterIds": [
+    "2305843009000000001",
+    "2305843009000000002"
+   ],
+   "currentGuardianRank": 7
+  }
+ },
+ "characters": {
+  "data": {
+   "2305843009000000001": {
+    "characterId": "2305843009000000001",
+    "dateLastPlayed": "2026-10-30T15:00:00Z",
+    "minutesPlayedThisSession": 74,
+    "light": 2010,
+    "classType": 2,
+    "genderHash": 3111576190,
+    "emblemBackgroundPath": "/common/destiny2_content/icons/00000000000000000000000000000001.jpg",
+    "titleRecordHash": 1001
+   },
+   "2305843009000000002": {
+    "characterId": "2305843009000000002",
+    "dateLastPlayed": "2026-10-20T15:00:00Z",
+    "minutesPlayedThisSession": 0,
+    "light": 1990,
+    "classType": 0,
+    "genderHash": 2204441813,
+    "emblemBackgroundPath": "/common/destiny2_content/icons/00000000000000000000000000000002.jpg",
+    "titleRecordHash": 0
+   }
+  }
+ },
+ "characterActivities": {
+  "data": {
+   "2305843009000000001": {
+    "dateActivityStarted": "2026-10-30T14:40:00Z",
+    "currentActivityHash": 2001,
+    "currentActivityModeHash": 2043403989,
+    "currentActivityModeType": 4,
+    "currentPlaylistActivityHash": 2001
+   },
+   "2305843009000000002": {
+    "dateActivityStarted": "2026-10-20T14:00:00Z",
+    "currentActivityHash": 0,
+    "currentActivityModeHash": 0,
+    "currentPlaylistActivityHash": 0
+   }
+  }
+ },
+ "characterEquipment": {
+  "data": {
+   "2305843009000000001": {
+    "items": [
+     {
+      "itemHash": 5001,
+      "bucketHash": 3284755031
+     },
+     {
+      "itemHash": 5002,
+      "bucketHash": 1498876634
+     },
+     {
+      "itemHash": 5003,
+      "bucketHash": 2465295065
+     },
+     {
+      "itemHash": 5004,
+      "bucketHash": 953998645
+     },
+     {
+      "itemHash": 5005,
+      "bucketHash": 3551918588
+     },
+     {
+      "itemHash": 5006,
+      "bucketHash": 14239492
+     },
+     {
+      "itemHash": 5007,
+      "bucketHash": 4023194814
+     }
+    ]
+   }
+  }
+ },
+ "profileTransitoryData": {
+  "data": {
+   "partyMembers": [
+    {
+     "membershipId": "1",
+     "emblemHash": 6001,
+     "displayName": "Ann",
+     "status": 11
+    },
+    {
+     "membershipId": "2",
+     "emblemHash": 6001,
+     "displayName": "Osiris",
+     "status": 3
+    },
+    {
+     "membershipId": "3",
+     "emblemHash": 0,
+     "displayName": "Saint",
+     "status": 3
+    }
+   ],
+   "currentActivity": {
+    "startTime": "2026-10-30T14:40:00Z",
+    "score": 0,
+    "highestOpposingFactionScore": 0,
+    "numberOfOpponents": 0,
+    "numberOfPlayers": 3
+   },
+   "joinability": {
+    "openSlots": 3,
+    "privacySetting": 1,
+    "closedReasons": 0
+   }
+  }
+ }
+}
