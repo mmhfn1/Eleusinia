@@ -3,7 +3,7 @@
 // outside this machine; ELEUSINIA_SMOKE_PUBLIC=1 uses the public DHT instead, for an occasional real-network check.
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { existsSync, mkdtempSync, readFileSync, readdirSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
@@ -102,8 +102,15 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
   // Lets the test read what each call connection actually receives (getStats), without the app exposing anything.
   // Crashes the page as a real renderer crash would (Chromium's own command for it).
   const crash = () => ws.send(JSON.stringify({ id: ++id, method: 'Page.crash' }))
+  // ELEUSINIA_SMOKE_SHOTS=<folder>: screenshots of a few views, to look at by eye.
+  const shot = (name) =>
+    process.env.ELEUSINIA_SMOKE_SHOTS &&
+    new Promise((resolve) => {
+      pending.set(++id, (m) => (m.result?.data && writeFileSync(join(process.env.ELEUSINIA_SMOKE_SHOTS, name + '.png'), Buffer.from(m.result.data, 'base64')), resolve()))
+      ws.send(JSON.stringify({ id, method: 'Page.captureScreenshot' }))
+    })
   await ev(`(() => { window.__pcs = []; const P = RTCPeerConnection; window.RTCPeerConnection = class extends P { constructor(...a) { super(...a); window.__pcs.push(this) } } })()`)
-  return { child, ev, dir, title, windowState, crash }
+  return { child, ev, dir, title, windowState, crash, shot }
 }
 
 // What one of the live connection's slots has received (see slotsOf in call.ts): 'sound' is the second audio.
@@ -262,7 +269,9 @@ const annGame = {
   developer: 'Valve',
   achievements: { got: 1, total: 50, recent: [{ name: 'A New Beginning', desc: 'Played a match', icon: 'f75dd04fa12445a8ec43be65fa16ff1b8d2bf82e.jpg', at: Date.now() - 3600e3, rarity: 61.2 }] },
 }
-const a = await launch(9231, undefined, { ...strictEnv, ELEUSINIA_TEST_ACTIVITY: JSON.stringify(annGame) })
+// And a folder standing in for CS2's cfg folder, where Settings → Set up writes the game's file.
+const annCs2Cfg = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-cs2-'))
+const a = await launch(9231, undefined, { ...strictEnv, ELEUSINIA_TEST_ACTIVITY: JSON.stringify(annGame), ELEUSINIA_TEST_CS2_CFG: annCs2Cfg })
 let b = await launch(9232, undefined, strictEnv)
 const c = await launch(9233)
 let failed = false
@@ -359,6 +368,54 @@ try {
   // Fetched from Steam by B's own app through eleusinia-art:, built from the app id and icon name alone
   await until('the game art and achievement icon load', () => b.ev(`[...document.querySelectorAll('dialog[open] .activity-card img')].every((i) => i.complete && i.naturalWidth > 0)`), 30)
   await b.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
+
+  console.log('--- Activity: a CS2 match, through Game State Integration')
+  await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
+  await until('Settings offers to set up CS2 live details', () => a.ev(`[...document.querySelectorAll('.activity-cs2 button')].some((x) => x.textContent === 'Set up')`), 10)
+  await a.ev(`[...document.querySelectorAll('.activity-cs2 button')].find((x) => x.textContent === 'Set up').click()`)
+  await until("Set up writes the game's file", () => a.ev(`document.querySelector('.activity-cs2').textContent.includes('Set up. If CS2 is running')`), 10)
+  await a.ev(`document.querySelector('.activity-cs2').scrollIntoView()`)
+  await a.shot('settings-activity')
+  await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
+  const gsi = readFileSync(join(annCs2Cfg, 'gamestate_integration_eleusinia.cfg'), 'utf8')
+  const gsiUrl = /"uri" "([^"]+)"/.exec(gsi)[1]
+  const match = {
+    provider: { name: 'Counter-Strike: Global Offensive', appid: 730, steamid: '76561198000000001', timestamp: 1 },
+    map: { mode: 'competitive', name: 'de_mirage', phase: 'live', round: 11, team_ct: { score: 7 }, team_t: { score: 4 }, round_wins: { 1: 'ct_win_elimination', 2: 't_win_bomb', 3: 'ct_win_defuse' } },
+    round: { phase: 'live' },
+    player: {
+      steamid: '76561198000000001',
+      team: 'CT',
+      activity: 'playing',
+      match_stats: { kills: 12, assists: 3, deaths: 6, mvps: 2, score: 31 },
+      state: { health: 76, armor: 100, helmet: true, money: 4350, round_kills: 2, round_killhs: 1, equip_value: 5200 },
+      weapons: { weapon_1: { name: 'weapon_m4a1_silencer', state: 'active' } },
+    },
+    phase_countdowns: { phase: 'live', phase_ends_in: '85.0' },
+    auth: { token: /"token" "([0-9a-f]+)"/.exec(gsi)[1] },
+  }
+  // As the game does: again and again while the match runs
+  const postMatch = () => fetch(gsiUrl, { method: 'POST', body: JSON.stringify(match) }).catch(() => {})
+  await postMatch()
+  const posting = setInterval(postMatch, 2000)
+  try {
+    await until('B lists Ann on Mirage, her side 7–4', () => b.ev(`${annRow}?.querySelector('.activity-line')?.textContent.includes('Mirage 7–4')`), 20)
+    await b.ev(`${annRow}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+    const cs2Card = `document.querySelector('dialog[open] .cs2')`
+    await until("Ann's card shows the match: map, mode, round, score, round strip, clock, her K/A/D", () =>
+      b.ev(`(() => { const c = ${cs2Card}; return !!c && c.querySelector('.cs2-map').textContent === 'Mirage' && c.textContent.includes('Competitive · Round 12') && c.querySelector('.cs2-team.ct b').textContent === '7' && c.querySelector('.cs2-team.ct.ours') && c.querySelectorAll('.cs2-rounds li').length === 3 && c.querySelectorAll('.cs2-rounds li.t').length === 1 && /1:2\\d|1:1\\d/.test(c.querySelector('.cs2-clock').textContent) && c.textContent.includes('12 / 3 / 6') })()`), 10)
+    if (await b.ev(`${cs2Card}.textContent.includes('Money')`)) throw new Error('health, money and weapon were shared without being turned on')
+    console.log('ok   her health, money and weapon stay hidden until she turns them on')
+    await a.ev(`api.call('state').then((s) => api.call('setSettings', { activity: { ...s.settings.activity, cs2: { state: true } } }))`)
+    await b.shot('card-cs2')
+    await until('turned on, B sees her health, money and weapon', () => b.ev(`(() => { const c = ${cs2Card}; return !!c && c.textContent.includes('76 · 100 + helmet') && c.textContent.includes('$4,350') && c.textContent.includes('M4A1-S') && c.textContent.includes('2 kills, 1 HS') })()`), 10)
+    await b.ev(`document.querySelector('dialog[open] .activity-achievements')?.scrollIntoView()`)
+    await b.shot('card-cs2-state')
+    await b.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
+    await b.shot('home-cs2')
+  } finally {
+    clearInterval(posting)
+  }
   await a.ev(`api.call('setSettings', { activity: { games: true, achievements: false, playtime: false } })`)
   await until('turning details off removes them from what B gets', () => b.ev(bobSees('!!g && !g.achievements && g.played === undefined && g.developer === "Valve"')))
   await a.ev(`api.call('setSettings', { activity: { games: false } })`)

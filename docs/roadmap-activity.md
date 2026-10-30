@@ -16,6 +16,12 @@ achievement files (names, descriptions, icons, unlock times); global rarity from
 Still to see on a real machine: a Steam game running (only the registry value was read here, with none running), and
 macOS's `registry.vdf`.
 
+**Done:** step 2 (`src/shared/cs2.ts`, `src/main/cs2.ts`). Settings → Activity → Set up writes
+`gamestate_integration_eleusinia.cfg` (port and token kept in `gsi.json`); the smoke run drives that button and posts
+a match the way the game does. Still to see with the real game: the exact payload CS2 sends today (Premier's mode
+name, `map_round_wins`, `phase_countdowns`), checked against the format Valve's own integration file on a real
+install uses. Skins are not shown: their names live in the game's own files.
+
 ## Principles
 
 - **Read only, never inside a game.** Every source is a file, the registry, an official local API, or a public web
