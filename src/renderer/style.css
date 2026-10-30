@@ -3150,3 +3150,94 @@ img.crest {
   height: 100%;
   object-fit: cover;
 }
+/* Destiny 2: the activity's picture on top, the guardian on its emblem banner, then fireteam and loadout */
+.destiny {
+  grid-template-columns: minmax(0, 1fr); /* the picture's bleed must not widen the card */
+}
+/* Match details wrap instead of being cut short */
+.cs2-head .row-sub,
+.dota-hero .row-sub,
+.destiny-guardian .row-sub {
+  white-space: normal;
+}
+.destiny-art {
+  width: calc(100% + 24px);
+  margin: -10px -12px 0;
+  aspect-ratio: 16 / 7;
+  object-fit: cover;
+  border-radius: var(--r-md) var(--r-md) 0 0;
+  background: var(--obsidian-4);
+}
+.destiny-guardian {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 48px;
+  padding: 6px 10px 6px 60px;
+  border-radius: var(--r-sm);
+  background: var(--obsidian-4) left center / cover no-repeat;
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+}
+.destiny-title {
+  color: var(--gold);
+  font-weight: 500;
+}
+.destiny-light {
+  color: var(--gold);
+  font-family: var(--display);
+  font-size: 22px;
+  font-variant-numeric: tabular-nums;
+}
+.destiny-light::before {
+  content: '◆ ';
+  font-size: 12px;
+  vertical-align: middle;
+}
+.destiny-fireteam p {
+  margin: 0 0 4px;
+}
+.destiny-fireteam ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.destiny-fireteam li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+}
+.destiny-fireteam img,
+.destiny-blank {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-sm);
+  background: var(--obsidian-4);
+}
+.destiny-loadout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.destiny-loadout li {
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--obsidian-4);
+}
+.destiny-loadout li.exotic {
+  border-color: var(--gold);
+}
+.destiny-loadout img {
+  width: 100%;
+  height: 100%;
+}

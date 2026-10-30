@@ -211,6 +211,25 @@ objectives taken, "Dead, back in 12 s".
 
 ## 7. Destiny 2: Bungie.net API
 
+**Done** (`src/shared/destiny.ts`, `src/main/bungie.ts`), waiting on the Bungie application to try for real. Linking:
+Settings → Activity → Link with Bungie.net opens bungie.net's authorize page in the user's own browser (Bungie blocks
+in-app web views); Bungie sends the browser to the registered return page (`https://mmhfn1.github.io/eleusinia/bungie/`,
+from the mmhfn1.github.io repository), which passes the code to a server the app runs on 127.0.0.1 only while
+waiting (its port is in `state`, with 32 random hex characters checked). The client is confidential, since only those
+get a refresh token (90 days; Bungie's OAuth documentation); tokens are sealed with `safeStorage` in `bungie.json`.
+The cross save primary membership holds the characters. While Destiny 2 is the game: `GetProfile` every 30 s with
+components 100, 200, 204, 205, 1000; definitions one at a time from the Manifest entity endpoint (the item table alone
+is 60 MB), cached in `bungie-defs.json` until the Manifest version changes. Shown: the activity's picture, name, mode,
+playlist, destination and planet, time in it, recommended power, the score in PvP, "In orbit"; the guardian's class,
+title, power, Guardian Rank, emblem banner and time this session; the fireteam with emblems and open slots; subclass,
+weapons and exotic armor. Each part has its own switch. The key comes in at build time (`MAIN_VITE_BUNGIE_*`; the
+release workflow's `BUNGIE_*` secrets). Not done yet: the fireteam's own power and class (only names and emblems are in
+the transitory component), armor stats, seasonal rank.
+
+**Marathon:** Bungie's API (openapi.json 2.21.9, December 2025) has no Marathon endpoints, only `marathonMembershipId`
+on an account and Marathon error codes. So Marathon (Steam app 3065800) shows what Steam gives, like any Steam game,
+and Settings says so; when Bungie adds endpoints, the same link reaches them.
+
 Needs a Bungie application (registered by the project owner at bungie.net: API key and an OAuth client). The key
 ships in the app, as is usual for Bungie apps.
 

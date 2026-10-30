@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
 import createTestnet from 'hyperdht/testnet.js'
+import { fakeBungie } from './fake-bungie.mjs'
 
 // ELEUSINIA_SMOKE_EXE runs the packaged app instead (for example dist/win-unpacked/Eleusinia.exe after npm run dist).
 const packaged = process.env.ELEUSINIA_SMOKE_EXE
@@ -272,7 +273,10 @@ const annGame = {
 // And a folder standing in for CS2's cfg folder, where Settings → Set up writes the game's file.
 const annGsiCfg = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-gsi-')) // one subfolder per game
 const a = await launch(9231, undefined, { ...strictEnv, ELEUSINIA_TEST_ACTIVITY: JSON.stringify(annGame), ELEUSINIA_TEST_GSI_CFG: annGsiCfg })
-let b = await launch(9232, undefined, strictEnv)
+// Bob plays Destiny 2 and links a stand-in for bungie.net (test/fake-bungie.mjs) that approves at once.
+const bobGame = { name: 'Destiny 2', source: 'steam', app: 1085660, played: 211683 }
+const bungieFake = await fakeBungie()
+let b = await launch(9232, undefined, { ...strictEnv, ELEUSINIA_TEST_ACTIVITY: JSON.stringify(bobGame), ELEUSINIA_TEST_BUNGIE: bungieFake.base })
 const c = await launch(9233)
 let failed = false
 try {
@@ -371,12 +375,12 @@ try {
   await until('the game art and achievement icon load', () => b.ev(`[...document.querySelectorAll('dialog[open] .activity-card img')].every((i) => i.complete && i.naturalWidth > 0)`), 30)
   await b.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
   // A direct chat has a members sidebar like a group's, where the game replaces the friend ID, ours included
-  const dmSide = (who, game) => `(() => { const r = [...document.querySelectorAll('aside.members .member')].find((x) => x.textContent.includes('${who}')); return !!r && r.textContent.includes(${game ? "'Playing Counter-Strike 2'" : "'#'"}) })()`
+  const dmSide = (who, game) => `(() => { const r = [...document.querySelectorAll('aside.members .member')].find((x) => x.textContent.includes('${who}')); return !!r && r.textContent.includes('Playing ${game}') })()`
   await b.ev(`${annRow}.click()`)
-  await until("B's chat with Ann lists both, Ann playing Counter-Strike 2", () => b.ev(`document.querySelectorAll('aside.members .member').length === 2 && ${dmSide('Ann', true)}`))
+  await until("B's chat with Ann lists both, Ann playing Counter-Strike 2", () => b.ev(`document.querySelectorAll('aside.members .member').length === 2 && ${dmSide('Ann', 'Counter-Strike 2')}`))
   const bobRow = `[...document.querySelectorAll('.online .row-button')].find((x) => x.textContent.includes('Bob'))`
   await a.ev(`${bobRow}.click()`)
-  await until("A's chat with Bob shows Ann (you) playing Counter-Strike 2", () => a.ev(`${dmSide('(you)', true)} && ${dmSide('Bob', false)}`))
+  await until("A's chat with Bob shows Ann (you) playing Counter-Strike 2, and Bob playing Destiny 2", () => a.ev(`${dmSide('(you)', 'Counter-Strike 2')} && ${dmSide('Bob', 'Destiny 2')}`))
   for (const p of [a, b]) await p.ev(`document.querySelector('.home.back').click()`)
 
   console.log('--- Activity: a CS2 match, through Game State Integration')
@@ -471,6 +475,32 @@ try {
   // Remove drops the live details at once, and Ann is back to the game the watcher found
   await a.ev(`window.api.gsi('dota', 'remove')`)
   await until('after Remove, B lists Ann on CS2 again', () => b.ev(`${annRow}?.querySelector('.activity-line')?.textContent.includes('Counter-Strike 2')`), 10)
+
+  console.log('--- Activity: Destiny 2, with a linked Bungie.net account')
+  const bobRowA = `[...document.querySelectorAll('.online .row-button')].find((x) => x.textContent.includes('Bob'))`
+  await b.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
+  await until('Settings offers to link Bungie.net', () => b.ev(`[...document.querySelectorAll('.activity-bungie button')].some((x) => x.textContent === 'Link with Bungie.net')`), 10)
+  await b.ev(`[...document.querySelectorAll('.activity-bungie button')].find((x) => x.textContent === 'Link with Bungie.net').click()`)
+  // The sign-in goes through bungie.net's authorize page and back to the app's own server on 127.0.0.1
+  await until('B is linked, with the switches and the Marathon note', () => b.ev(`(() => { const s = document.querySelector('.activity-bungie'); return s.textContent.includes('Linked as Guardian#0042') && s.querySelectorAll('input[role="switch"]').length === 4 && s.textContent.includes('Marathon is on this account too') })()`), 15)
+  if (bungieFake.seen.authorize !== 1 || bungieFake.seen.token[0] !== 'authorization_code') throw new Error('linking did not go through the authorize page and the token exchange')
+  await b.ev(`document.querySelector('.activity-bungie').scrollIntoView()`)
+  await b.shot('settings-bungie')
+  await b.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
+  await until('A lists Bob in the raid', () => a.ev(`${bobRowA}?.querySelector('.activity-line')?.textContent.includes("Destiny 2 · Raid · Salvation's Edge")`), 20)
+  await a.ev(`${bobRowA}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+  const destinyCard = `document.querySelector('dialog[open] .destiny')`
+  await until("Bob's card shows the activity, his guardian, the fireteam and the loadout", () =>
+    a.ev(`(() => { const c = ${destinyCard}; return !!c && c.querySelector('.cs2-map').textContent === "Salvation's Edge" && c.textContent.includes('Raid · The Pale Heart, The Traveler') && c.textContent.includes('Recommended 1990') && c.textContent.includes('Warlock Rivensbane') && c.querySelector('.destiny-light').textContent === '2010' && c.textContent.includes('Guardian Rank 7') && c.textContent.includes('Fireteam of 3 of 6 · 3 open') && ['Ann', 'Osiris', 'Saint'].every((n) => c.querySelector('.destiny-fireteam').textContent.includes(n)) && c.querySelectorAll('.destiny-loadout li').length === 5 && c.querySelectorAll('.destiny-loadout li.exotic').length === 4 })()`), 10)
+  // The activity's picture and Gjallarhorn's icon are real bungie.net files, fetched through eleusinia-art:
+  await until('the activity picture and the exotic icon load from bungie.net', () => a.ev(`(() => { const imgs = [${destinyCard}.querySelector('.destiny-art'), ${destinyCard}.querySelector('.destiny-loadout img[alt="Gjallarhorn"]')]; return imgs.every((i) => i && i.complete && i.naturalWidth > 0) })()`), 30)
+  await a.shot('card-destiny')
+  await a.ev(`${destinyCard}.querySelector('.destiny-loadout').scrollIntoView()`)
+  await a.shot('card-destiny-loadout')
+  await a.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
+  await b.ev(`api.call('state').then((s) => api.call('setSettings', { activity: { ...s.settings.activity, destiny: { loadout: false, fireteam: false } } }))`)
+  await until('turning the loadout and fireteam off removes them from what A gets', () => a.ev(`api.call('state').then((s) => { const d = s.activity[Object.keys(s.activity).find((k) => s.activity[k]?.game?.app === 1085660)]?.game?.destiny; return !!d?.activity && !d.loadout && !d.fireteam })`), 10)
+
   await a.ev(`api.call('setSettings', { activity: { games: true, details: true, achievements: false, playtime: false } })`)
   await until('turning details off removes them from what B gets', () => b.ev(bobSees('!!g && !g.achievements && g.played === undefined && g.developer === "Valve"')))
   await a.ev(`api.call('setSettings', { activity: { games: false } })`)

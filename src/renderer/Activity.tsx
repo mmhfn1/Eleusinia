@@ -3,6 +3,7 @@
 import { useEffect, useReducer, useState } from 'react'
 import { type Achievement, type Activity, type ActivitySettings, type Game, sharing } from '../shared/activity'
 import { type Cs2, mapName, modeName, roundWin, weaponName } from '../shared/cs2'
+import type { Destiny } from '../shared/destiny'
 import { type Dota, heroName, itemName, stateName } from '../shared/dota'
 import { type Key, type State } from '../shared/protocol'
 import { api } from './common'
@@ -52,7 +53,12 @@ export function ActivityLine({ a }: { a?: Activity }) {
   if (!a?.game) return null
   const c = a.game.cs2
   const d = a.game.dota
-  const live = c
+  const n = a.game.destiny
+  const live = n
+    ? n.orbit
+      ? 'in orbit'
+      : n.activity && [n.activity.mode, n.activity.name].filter(Boolean).join(' · ') + (n.score ? ` ${n.score.us}–${n.score.them}` : '')
+    : c
     ? c.menu
       ? 'in the menu'
       : [c.map && mapName(c.map), cs2Score(c)].filter(Boolean).join(' ')
@@ -206,6 +212,87 @@ function DotaMatch({ d }: { d: Dota }) {
   )
 }
 
+// Destiny 2 from Bungie.net: the activity with its picture, the guardian, the fireteam and the loadout.
+const bungieArt = (path: string) => `eleusinia-art://bungie${path}`
+function DestinyMatch({ d }: { d: Destiny }) {
+  useTick(30000)
+  const a = d.activity
+  const ch = d.character
+  const f = d.fireteam
+  return (
+    <div className="cs2 destiny">
+      {a?.image && <img className="destiny-art" src={bungieArt(a.image)} alt="" onError={hide} />}
+      {d.orbit ? (
+        <p className="cs2-map">In orbit</p>
+      ) : (
+        a && (
+          <div className="cs2-head">
+            <span className="cs2-map">{a.name}</span>
+            <span className="row-sub">
+              {[a.mode, a.playlist, a.place, a.since && `for ${duration(Date.now() - a.since)}`, a.light && `Recommended ${a.light}`].filter(Boolean).join(' · ')}
+            </span>
+          </div>
+        )
+      )}
+      {d.score && (
+        <div className="cs2-score" aria-label={`Our team ${d.score.us}, the other team ${d.score.them}`}>
+          <span className="cs2-team ct ours">
+            <span>Us</span>
+            <b>{d.score.us}</b>
+          </span>
+          <span className="cs2-mid">–</span>
+          <span className="cs2-team t">
+            <b>{d.score.them}</b>
+            <span>Them</span>
+          </span>
+        </div>
+      )}
+      {ch && (
+        <div className="destiny-guardian" style={ch.emblem ? { backgroundImage: `url("${bungieArt(ch.emblem)}")` } : undefined}>
+          <span className="row-text">
+            <span className="row-title">
+              {ch.class}
+              {ch.title && <span className="destiny-title"> {ch.title}</span>}
+            </span>
+            <span className="row-sub">
+              {[ch.rank && `Guardian Rank ${ch.rank}`, ch.session !== undefined && ch.session > 0 && `${duration(ch.session * 60000)} this session`].filter(Boolean).join(' · ')}
+            </span>
+          </span>
+          <b className="destiny-light" aria-label={`Power ${ch.light}`}>
+            {ch.light}
+          </b>
+        </div>
+      )}
+      {f && (
+        <div className="destiny-fireteam">
+          <p className="row-sub">
+            Fireteam of {f.members.length}
+            {f.max ? ` of ${f.max}` : ''}
+            {f.open ? ` · ${f.open} open` : ''}
+          </p>
+          <ul aria-label="Fireteam">
+            {f.members.map((m, i) => (
+              <li key={i}>
+                {m.emblem ? <img src={bungieArt(m.emblem)} alt="" onError={hide} /> : <span className="destiny-blank" />}
+                <span>{m.name}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {d.loadout && (
+        <ul className="destiny-loadout" aria-label="Loadout">
+          {d.loadout.map((i, k) => (
+            <li key={k} className={i.exotic ? 'exotic' : ''} title={[i.name, i.kind].filter(Boolean).join(' · ')}>
+              <img src={bungieArt(i.icon)} alt={i.name} onError={hide} />
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 const PHASES: Record<string, string> = {
   warmup: 'Warmup',
   live: 'Live',
@@ -339,6 +426,7 @@ export function GameCard({ g, full = true }: { g: Game; full?: boolean }) {
         </p>
         {g.cs2 && <Cs2Match c={g.cs2} />}
         {g.dota && <DotaMatch d={g.dota} />}
+        {g.destiny && <DestinyMatch d={g.destiny} />}
         {facts.length > 0 && <p className="activity-facts">{facts.join(' · ')}</p>}
         {full && g.about && <p className="activity-about">{g.about}</p>}
         {a && (
@@ -427,6 +515,7 @@ export function ActivitySettingsSection({ st, name }: { st: State; name: (k: Key
       </div>
       {on && <GsiSetup game="cs2" set={set} save={save} />}
       {on && <GsiSetup game="dota" set={set} save={save} />}
+      {on && <BungieSetup set={set} save={save} />}
       {on && (
         <div className="activity-preview">
           <p className="row-sub">What friends see now</p>
@@ -566,6 +655,82 @@ function GsiSetup({ game, set, save }: { game: 'cs2' | 'dota'; set: ActivitySett
         </p>
       )}
       {st?.installed && <div className="activity-details">{g.switches.map(sw)}</div>}
+    </div>
+  )
+}
+
+// Settings → Activity → Destiny 2: linking the Bungie.net account (main/bungie.ts), and what of it is shared.
+type BungieStatus = Awaited<ReturnType<typeof window.api.bungie>>
+const DESTINY_SWITCHES = [
+  ['activity', 'The activity I am in, with its picture, mode, place, time in it and the score'],
+  ['character', 'My guardian: class, title, power, Guardian Rank and emblem'],
+  ['fireteam', 'Who is in my fireteam, with their emblems'],
+  ['loadout', 'My subclass, weapons and exotic armor'],
+] as const
+function BungieSetup({ set, save }: { set: ActivitySettings; save: (p: Partial<ActivitySettings>) => void }) {
+  const [st, setSt] = useState<BungieStatus | null>(null)
+  const [error, setError] = useState('')
+  useEffect(() => {
+    window.api.bungie('status').then(setSt, () => setSt(null))
+  }, [])
+  const act = (a: 'link' | 'cancel' | 'unlink') => {
+    if (a === 'link') setSt((s) => s && { ...s, waiting: true })
+    setError('')
+    return window.api.bungie(a).then(setSt, (e) => {
+      const why = String(e?.message ?? e).replace(/^Error invoking remote method 'bungie': (Error: )?/, '')
+      if (why !== 'cancelled') setError(why)
+      window.api.bungie('status').then(setSt, () => {})
+    })
+  }
+  const c: Record<string, boolean | undefined> = set.destiny ?? {}
+  const note = !st
+    ? 'Looking…'
+    : !st.configured
+      ? 'This copy of Eleusinia was built without a Bungie.net app key, so it cannot link.'
+      : st.waiting
+        ? 'Finish signing in on bungie.net, in your browser.'
+        : st.linked
+          ? `Linked as ${st.name || 'your Bungie.net account'}.`
+          : 'Link your Bungie.net account to show your activity, guardian, fireteam and loadout. You sign in on bungie.net, in your own browser.'
+  return (
+    <div className="activity-gsi activity-bungie">
+      <div className="settings-row">
+        <span className="row-text">
+          <span className="row-title">Destiny 2 with Bungie.net</span>
+          <span className="row-sub">{note}</span>
+        </span>
+        {st?.configured &&
+          (st.waiting ? (
+            <button className="button subtle" onClick={() => act('cancel')}>
+              Cancel
+            </button>
+          ) : st.linked ? (
+            <button className="button subtle" onClick={() => act('unlink')}>
+              Unlink
+            </button>
+          ) : (
+            <button className="button" onClick={() => act('link')}>
+              Link with Bungie.net
+            </button>
+          ))}
+      </div>
+      {(error || st?.error) && <p className="form-error">{error || st?.error}</p>}
+      {st?.linked && (
+        <>
+          <div className="activity-details">
+            {DESTINY_SWITCHES.map(([field, label]) => (
+              <label className="check-row" key={field}>
+                <input type="checkbox" role="switch" checked={c[field] ?? true} onChange={(e) => save({ destiny: { ...c, [field]: e.target.checked } })} />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+          <p className="activity-launch">
+            Marathon{st.marathon ? ' is on this account too, but' : ':'} Bungie.net does not give apps Marathon details yet. It shows from Steam, like
+            other games.
+          </p>
+        </>
+      )}
     </div>
   )
 }
