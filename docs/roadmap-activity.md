@@ -22,6 +22,12 @@ a match the way the game does. Still to see with the real game: the exact payloa
 name, `map_round_wins`, `phase_countdowns`), checked against the format Valve's own integration file on a real
 install uses. Skins are not shown: their names live in the game's own files.
 
+Seen with the real game (CS2 version 14193): Steam makes the requests (`Valve/Steam HTTP Client 1.0 (730)`, plain JSON,
+no compression); in the menu a post is only `provider`, `player` (`steamid`, `name`, `activity: menu`) and `auth`; in a
+casual match on Dust II it read as map, mode and live phase. CS2 reads the file only when it starts, so a game already
+running when it was set up sends nothing until it is restarted; the Steam panel shows each game's state (Live, "Start
+or restart", or why posts were turned away: `heard` and `problem` in `GsiStatus`).
+
 **Done:** step 3 (`src/shared/dota.ts`, the same server in `src/main/gsi.ts`: both games share one port and token,
 told apart by `provider.appid`). Shown: hero portrait and name, level, game state, day or night, kills per side with
 our side marked, the match clock ticking locally (paused shows frozen), K/D/A, LH/DN, GPM/XPM, kill streak; with the
@@ -217,7 +223,7 @@ in-app web views); Bungie sends the browser to the registered return page (`http
 from the mmhfn1.github.io repository), which passes the code to a server the app runs on 127.0.0.1 only while
 waiting (its port is in `state`, with 32 random hex characters checked). The client is confidential, since only those
 get a refresh token (90 days; Bungie's OAuth documentation); tokens are sealed with `safeStorage` in `bungie.json`.
-The cross save primary membership holds the characters. While Destiny 2 is the game: `GetProfile` every 30 s with
+The accounts come from the public `GetMembershipsById/<id>/254/`, with the Bungie.net id the token response names: `GetMembershipsForCurrentUser` needs the ReadBasicUserProfile scope, and the app only asks for "Read your Destiny 2 information" (needed for the private profile parts: equipment, fireteam). Nothing is kept until the accounts are known. The cross save primary membership holds the characters. While Destiny 2 is the game: `GetProfile` every 30 s with
 components 100, 200, 204, 205, 1000; definitions one at a time from the Manifest entity endpoint (the item table alone
 is 60 MB), cached in `bungie-defs.json` until the Manifest version changes. Shown: the activity's picture, name, mode,
 playlist, destination and planet, time in it, recommended power, the score in PvP, "In orbit"; the guardian's class,

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
@@ -96,4 +96,20 @@ test('a link that is never finished can be cancelled, and a copy built without a
   const none = createBungie({ dir: mkdtempSync(join(tmpdir(), 'eleusinia-bungie-')), config: null, fetch, open: async () => {}, seal: (t) => t, unseal: (t) => t, diag: () => {} })
   expect(none.status()).toEqual({ configured: false, linked: false })
   await expect(none.link()).rejects.toThrow('without a Bungie.net app key')
+})
+
+test('when Bungie.net cannot say which accounts are yours, nothing is kept and the reason is shown', async () => {
+  const { dir, b } = await setup({ noAccounts: true })
+  await expect(b.link()).rejects.toThrow('Bungie.net did not say which accounts are yours (SystemDisabled)')
+  expect(b.status()).toEqual({ configured: true, linked: false })
+  expect(existsSync(join(dir, 'bungie.json'))).toBe(false)
+})
+
+test('a half link left by an earlier version is dropped on start', async () => {
+  const { dir, make } = await setup()
+  writeFileSync(join(dir, 'bungie.json'), `sealed:${Buffer.from(JSON.stringify({ access: 'a', accessUntil: 0, refresh: 'r', refreshUntil: Date.now() + 1e9, name: '', destiny: null, marathon: false })).toString('base64')}`)
+  const b = make()
+  stop.push(b.stop)
+  expect(b.status().linked).toBe(false)
+  expect(existsSync(join(dir, 'bungie.json'))).toBe(false)
 })

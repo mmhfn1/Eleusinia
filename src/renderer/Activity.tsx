@@ -609,20 +609,36 @@ const DESTINY_SWITCHES = [
 const LAUNCH = '-gamestateintegration'
 const why = (e: any) => String(e?.message ?? e).replace(/^Error invoking remote method '\w+': (Error: )?/, '')
 
+// Whether a set-up game is sending: live, turned away (and why), or not yet (it reads the file when it starts).
+const PROBLEMS: Record<string, string> = { 'wrong token': 'Turn it off and on again', 'not JSON': 'Sent something unreadable', 'not understood': 'Sent something unreadable' }
+function GsiState({ st, short }: { st: GsiStatus; short: string }) {
+  if (st.heard && Date.now() - st.heard < 30000) return <span className="gsi-state live">Live</span>
+  if (st.problem) return <span className="gsi-state problem" title={st.problem}>{PROBLEMS[st.problem] ?? st.problem}</span>
+  return <span className="gsi-state">Start or restart {short}</span>
+}
+
 function Connections({ set, save }: { set: ActivitySettings; save: (p: Partial<ActivitySettings>) => void }) {
   const [open, setOpen] = useState<'steam' | 'bungie' | null>(null)
   const [gsi, setGsi] = useState<Partial<Record<GsiGame, GsiStatus>>>({})
   const [bungie, setBungie] = useState<BungieStatus | null>(null)
-  const [fresh, setFresh] = useState<GsiGame[]>([]) // set up just now: the game needs one restart
   const [error, setError] = useState('')
-  useEffect(() => {
+  const refresh = () => {
     for (const g of Object.keys(GSI) as GsiGame[]) window.api.gsi(g, 'status').then((r) => setGsi((x) => ({ ...x, [g]: r })), () => {})
+  }
+  useEffect(() => {
+    refresh()
     window.api.bungie('status').then(setBungie, () => {})
   }, [])
+  // While the Steam panel is open, whether each game is sending is kept current
+  useEffect(() => {
+    if (open !== 'steam') return
+    const t = setInterval(refresh, 3000)
+    return () => clearInterval(t)
+  }, [open])
   const gsiAct = (g: GsiGame, a: 'install' | 'remove') => {
     setError('')
     window.api.gsi(g, a).then(
-      (r) => (setGsi((x) => ({ ...x, [g]: r })), setFresh((f) => (a === 'install' ? [...f, g] : f.filter((x) => x !== g)))),
+      (r) => setGsi((x) => ({ ...x, [g]: r })),
       (e) => setError(why(e)),
     )
   }
@@ -684,6 +700,7 @@ function Connections({ set, save }: { set: ActivitySettings; save: (p: Partial<A
                   <img src={`eleusinia-art://steam/${x.app}/header`} alt="" onError={hide} />
                   <span className="row-title">{x.name}</span>
                   {st && !st.found && <span className="row-sub">Not installed</span>}
+                  {st?.installed && <GsiState st={st} short={x.short} />}
                   <input
                     type="checkbox"
                     role="switch"
@@ -695,7 +712,6 @@ function Connections({ set, save }: { set: ActivitySettings; save: (p: Partial<A
                 </div>
                 {st?.installed && (
                   <>
-                    {fresh.includes(g) && <p className="connection-note">Restart {x.short} once</p>}
                     {st.launch !== undefined && st.launch !== true && (
                       <p className="connection-note">
                         Add <code>{LAUNCH}</code> to its Steam launch options <CopyButton text={LAUNCH} label="Copy the launch option" />

@@ -7,8 +7,9 @@ import { createServer } from 'node:http'
 
 const fixture = (name) => JSON.parse(readFileSync(new URL(`./fixtures/${name}`, import.meta.url), 'utf8'))
 
-// expiresIn: seconds an access token lasts (0: already stale, so the app must renew it first)
-export async function fakeBungie({ expiresIn = 3600 } = {}) {
+// expiresIn: seconds an access token lasts (0: already stale, so the app must renew it first). noAccounts: the account
+// lookup fails, as when Bungie.net is down.
+export async function fakeBungie({ expiresIn = 3600, noAccounts = false } = {}) {
   const defs = fixture('destiny-defs.json')
   const seen = { authorize: 0, token: [], profile: 0, defs: 0, manifest: 0 }
   const valid = new Set()
@@ -45,8 +46,11 @@ export async function fakeBungie({ expiresIn = 3600 } = {}) {
       const d = defs[`${m[1]}:${m[2]}`]
       return d ? ok(res, d) : res.writeHead(200).end(JSON.stringify({ ErrorCode: 1665, ErrorStatus: 'DestinyDefinitionNotFound' }))
     }
-    if (!valid.has(bearer)) return res.writeHead(401).end(JSON.stringify({ ErrorCode: 99, ErrorStatus: 'WebAuthRequired' }))
-    if (u.pathname === '/Platform/User/GetMembershipsForCurrentUser/')
+    // As for an app registered with only the Destiny scope, like Eleusinia's: this one needs ReadBasicUserProfile
+    if (u.pathname === '/Platform/User/GetMembershipsForCurrentUser/') return res.writeHead(200).end(JSON.stringify({ ErrorCode: 12, ErrorStatus: 'AccessNotPermittedByApplicationScope' }))
+    // Public, by the Bungie.net id the token response names
+    if (u.pathname === '/Platform/User/GetMembershipsById/1234/254/') {
+      if (noAccounts) return res.writeHead(200).end(JSON.stringify({ ErrorCode: 5, ErrorStatus: 'SystemDisabled' }))
       return ok(res, {
         destinyMemberships: [
           { membershipType: 1, membershipId: '4611686018400000001', displayName: 'Ann', crossSaveOverride: 3 },
@@ -56,6 +60,8 @@ export async function fakeBungie({ expiresIn = 3600 } = {}) {
         marathonMembershipId: '4611686018400000009',
         bungieNetUser: { membershipId: '1234', displayName: 'Guardian', cachedBungieGlobalDisplayName: 'Guardian', cachedBungieGlobalDisplayNameCode: 42 },
       })
+    }
+    if (!valid.has(bearer)) return res.writeHead(401).end(JSON.stringify({ ErrorCode: 99, ErrorStatus: 'WebAuthRequired' }))
     if (u.pathname === '/Platform/Destiny2/3/Profile/4611686018400000002/' && u.searchParams.get('components') === '100,200,204,205,1000') {
       seen.profile++
       return ok(res, fixture('destiny-profile.json'))

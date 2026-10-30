@@ -48,6 +48,9 @@ export function createBungie({ dir, config, fetch, open, seal, unseal, diag }: O
     if (s) writeFileSync(file, seal(JSON.stringify(s)))
     else rmSync(file, { force: true })
   }
+  // Tokens without an account: left by a link that failed halfway in earlier versions
+  if (saved && !saved.name && !saved.destiny) save(null)
+  let said = '' // Bungie's last ErrorStatus, for messages
 
   async function token(body: Record<string, string>) {
     const r = await fetch(`${base}/platform/app/oauth/token/`, {
@@ -59,7 +62,7 @@ export function createBungie({ dir, config, fetch, open, seal, unseal, diag }: O
     if (!r.ok || typeof t?.access_token !== 'string' || typeof t.refresh_token !== 'string') throw new Error(t?.error_description || t?.error || `Bungie.net said ${r.status}`)
     const now = Date.now()
     const secs = (v: unknown, def: number) => (Number.isFinite(Number(v)) && v !== null && v !== '' ? Number(v) : def)
-    return { access: t.access_token as string, accessUntil: now + (secs(t.expires_in, 3600) - 60) * 1000, refresh: t.refresh_token as string, refreshUntil: now + secs(t.refresh_expires_in, 7776000) * 1000 }
+    return { member: String(t.membership_id ?? ''), access: t.access_token as string, accessUntil: now + (secs(t.expires_in, 3600) - 60) * 1000, refresh: t.refresh_token as string, refreshUntil: now + secs(t.refresh_expires_in, 7776000) * 1000 }
   }
   // A call to the Platform API; null when Bungie is down for maintenance or throttling us.
   async function api(path: string, auth = true): Promise<any> {
@@ -75,7 +78,8 @@ export function createBungie({ dir, config, fetch, open, seal, unseal, diag }: O
     const j: any = await r.json().catch(() => null)
     if (r.status === 401) return unlinked('Bungie.net no longer accepts the link. Link it again.')
     if (!j || j.ErrorCode !== 1) {
-      if (j?.ErrorStatus) diag(`Bungie.net: ${j.ErrorStatus}`)
+      said = j?.ErrorStatus ?? `HTTP ${r.status}`
+      diag(`Bungie.net: ${said}`)
       return null
     }
     return j.Response
@@ -159,17 +163,18 @@ export function createBungie({ dir, config, fetch, open, seal, unseal, diag }: O
           open(`${base}/en/oauth/authorize?client_id=${encodeURIComponent(config.clientId)}&response_type=code&state=${state}`).catch((e) => pending?.done(e))
         })
       }).finally(() => pending?.done())
-      const t = await token({ grant_type: 'authorization_code', code })
-      save({ ...t, name: '', destiny: null, marathon: false })
-      const m = await api('/User/GetMembershipsForCurrentUser/')
-      if (!m) throw new Error('Bungie.net did not say which accounts are yours. Try again later.')
+      const { member, ...t } = await token({ grant_type: 'authorization_code', code })
+      // The accounts come from the public lookup by Bungie.net id (254), which needs no extra scope; nothing is kept
+      // until they are known.
+      const m = /^\d{1,20}$/.test(member) ? await api(`/User/GetMembershipsById/${member}/254/`, false) : null
+      if (!m) throw new Error(`Bungie.net did not say which accounts are yours${said ? ` (${said})` : ''}. Try again later.`)
       const all = (Array.isArray(m.destinyMemberships) ? m.destinyMemberships : []) as any[]
       // Cross save: the primary membership holds the characters
       const d = all.find((x) => x.membershipId === m.primaryMembershipId) ?? all.find((x) => x.crossSaveOverride === x.membershipType) ?? all[0]
       const u = m.bungieNetUser ?? {}
       const name = u.cachedBungieGlobalDisplayName ? `${u.cachedBungieGlobalDisplayName}#${String(u.cachedBungieGlobalDisplayNameCode ?? '').padStart(4, '0')}` : (u.displayName ?? d?.displayName ?? '')
       error = ''
-      save({ ...saved!, name: String(name).slice(0, 60), destiny: d ? { type: Number(d.membershipType), id: String(d.membershipId) } : null, marathon: !!m.marathonMembershipId })
+      save({ ...t, name: String(name).slice(0, 60), destiny: d ? { type: Number(d.membershipType), id: String(d.membershipId) } : null, marathon: !!m.marathonMembershipId })
       diag('Bungie.net linked')
       return this.status()
     },

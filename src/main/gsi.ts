@@ -47,7 +47,9 @@ ${GAMES[game].data.map((d) => `    "${d}" "1"`).join('\n')}
 }
 `
 
-export type GsiStatus = { found: boolean; installed: boolean; folder: string | null; launch?: boolean | null } // launch: Dota's option is set (null: cannot tell)
+// launch: Dota's option is set (null: cannot tell). heard: when the game last sent something we took. problem: why the
+// last post was turned away, so a silent failure shows in Settings.
+export type GsiStatus = { found: boolean; installed: boolean; folder: string | null; launch?: boolean | null; heard?: number; problem?: string }
 
 // cfgFolder and launchOptions: testing only, standing in for the game's folder and Steam's launch options.
 type Opts = {
@@ -84,6 +86,12 @@ export function createGsi({ dir, onData, diag, cfgFolder, launchOptions = steamL
 
   let server: Server | null = null
   const lastAt = new Map<GsiGame, number>()
+  const heard = new Map<GsiGame, number>()
+  const problems = new Map<GsiGame | 'any', string>() // 'any': a post that does not say which game it is
+  const turnAway = (game: GsiGame | undefined, why: string) => {
+    if (problems.get(game ?? 'any') !== why) diag(`Live game details: a post${game ? ` from ${game}` : ''} was turned away (${why})`)
+    problems.set(game ?? 'any', why)
+  }
   let expiry: ReturnType<typeof setInterval> | null = null
   // Resolves once listening. A port that is taken (or reserved, as Windows does for whole ranges) is swapped for
   // another, and the games' files rewritten to match; a game picks that up when it next starts.
@@ -100,16 +108,22 @@ export function createGsi({ dir, onData, diag, cfgFolder, launchOptions = steamL
       })
       req.on('end', () => {
         res.writeHead(200).end()
+        let p: any
         try {
-          const p = JSON.parse(Buffer.concat(parts).toString('utf8'))
-          const token = Buffer.from(String(p?.auth?.token ?? ''))
-          if (token.length !== expected.length || !timingSafeEqual(token, expected)) return
-          const game = GSI_GAMES.find((g) => GAMES[g].app === p?.provider?.appid)
-          const data = game && GAMES[game].parse(p)
-          if (!game || !data) return
-          lastAt.set(game, Date.now())
-          onData(game, data)
-        } catch {} // not JSON: ignored
+          p = JSON.parse(Buffer.concat(parts).toString('utf8'))
+        } catch {
+          return turnAway(undefined, 'not JSON')
+        }
+        const game = GSI_GAMES.find((g) => GAMES[g].app === p?.provider?.appid)
+        const token = Buffer.from(String(p?.auth?.token ?? ''))
+        if (token.length !== expected.length || !timingSafeEqual(token, expected)) return turnAway(game, 'wrong token')
+        const data = game && GAMES[game].parse(p)
+        if (!game || !data) return turnAway(game, 'not understood')
+        lastAt.set(game, Date.now())
+        heard.set(game, Date.now())
+        problems.delete(game)
+        problems.delete('any')
+        onData(game, data)
       })
     }))
     // A game sends at least every 10 s while running; quiet for 30 s means it closed.
@@ -163,6 +177,9 @@ export function createGsi({ dir, onData, diag, cfgFolder, launchOptions = steamL
       const installed = !!cfg && existsSync(join(cfg, FILE))
       await update()
       const out: GsiStatus = { found: !!cfg, installed, folder: cfg }
+      if (heard.has(game)) out.heard = heard.get(game)
+      const problem = problems.get(game) ?? problems.get('any')
+      if (problem) out.problem = problem
       if (game === 'dota') {
         const opts = await launchOptions(GAMES.dota.app).catch(() => null)
         out.launch = opts ? opts.some((o) => o.split(/\s+/).includes(DOTA_LAUNCH)) : null
@@ -181,6 +198,8 @@ export function createGsi({ dir, onData, diag, cfgFolder, launchOptions = steamL
       const cfg = await cfgDir(game)
       if (cfg) rmSync(join(cfg, FILE), { force: true })
       lastAt.delete(game)
+      heard.delete(game)
+      problems.delete(game)
       onData(game, null)
       return this.status(game)
     },
