@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import { expect, test } from 'vitest'
 import { cleanActivity, shareable } from '../src/shared/activity'
 import { type Cs2, cleanCs2, cs2Of, mapName, modeName, roundWin, shareableCs2, weaponName } from '../src/shared/cs2'
-import { createCs2 } from '../src/main/cs2'
+import { type GsiGame, createGsi } from '../src/main/gsi'
+import type { Dota } from '../src/shared/dota'
 
 const ME = '76561198000000001'
 // What CS2 sends mid-match (the shape Valve's Game State Integration uses).
@@ -88,9 +89,9 @@ test('names as players know them', () => {
 test("the local server: set up writes the game's file, only posts with our token count, and remove takes it away", async () => {
   const cfg = mkdtempSync(join(tmpdir(), 'eleusinia-cs2cfg-'))
   const got: (Cs2 | null)[] = []
-  const cs2 = createCs2({ dir: mkdtempSync(join(tmpdir(), 'eleusinia-cs2-')), cfgFolder: async () => cfg, onData: (c) => got.push(c), diag: () => {} })
-  expect(await cs2.status()).toEqual({ found: true, installed: false, folder: cfg })
-  await cs2.install()
+  const cs2 = createGsi({ dir: mkdtempSync(join(tmpdir(), 'eleusinia-cs2-')), cfgFolder: async () => cfg, onData: (_g, c) => got.push(c as Cs2 | null), diag: () => {} })
+  expect(await cs2.status('cs2')).toEqual({ found: true, installed: false, folder: cfg })
+  await cs2.install('cs2')
   const file = readFileSync(join(cfg, 'gamestate_integration_eleusinia.cfg'), 'utf8')
   const token = /"token" "([0-9a-f]{48})"/.exec(file)![1]
   expect(file).toContain(`"uri" "http://127.0.0.1:${cs2.port}/"`)
@@ -105,7 +106,7 @@ test("the local server: set up writes the game's file, only posts with our token
   expect(got).toHaveLength(1)
   expect(got[0]!.map).toBe('de_mirage')
   expect((await fetch(`http://127.0.0.1:${cs2.port}/`)).status).toBe(405)
-  await cs2.remove()
+  await cs2.remove('cs2')
   expect(existsSync(join(cfg, 'gamestate_integration_eleusinia.cfg'))).toBe(false)
   expect(got.at(-1)).toBeNull()
   cs2.stop()
@@ -114,12 +115,12 @@ test("the local server: set up writes the game's file, only posts with our token
 test('a taken port is swapped for another, in the saved settings and the game file', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'eleusinia-cs2-'))
   const cfg = mkdtempSync(join(tmpdir(), 'eleusinia-cs2cfg-'))
-  const taken = createCs2({ dir, cfgFolder: async () => cfg, onData: () => {}, diag: () => {} }).port
+  const taken = createGsi({ dir, cfgFolder: async () => cfg, onData: () => {}, diag: () => {} }).port
   const squatter = createServer().listen(taken, '127.0.0.1')
   await once(squatter, 'listening')
   const got: (Cs2 | null)[] = []
-  const cs2 = createCs2({ dir, cfgFolder: async () => cfg, onData: (c) => got.push(c), diag: () => {} })
-  await cs2.install()
+  const cs2 = createGsi({ dir, cfgFolder: async () => cfg, onData: (_g, c) => got.push(c as Cs2 | null), diag: () => {} })
+  await cs2.install('cs2')
   expect(cs2.port).not.toBe(taken)
   const file = readFileSync(join(cfg, 'gamestate_integration_eleusinia.cfg'), 'utf8')
   expect(file).toContain(`"uri" "http://127.0.0.1:${cs2.port}/"`)
@@ -128,4 +129,40 @@ test('a taken port is swapped for another, in the saved settings and the game fi
   expect(got).toHaveLength(1)
   cs2.stop()
   squatter.close()
+})
+
+test('one server for both games: Dota 2 goes in its own folder, says which game it is, and its launch option is checked', async () => {
+  const base = mkdtempSync(join(tmpdir(), 'eleusinia-gsi-'))
+  const got: [GsiGame, Cs2 | Dota | null][] = []
+  let opts: string[] | null = ['-novid']
+  const gsi = createGsi({
+    dir: mkdtempSync(join(tmpdir(), 'eleusinia-gsi-data-')),
+    cfgFolder: async (g) => join(base, g),
+    launchOptions: async () => opts,
+    onData: (g, d) => got.push([g, d]),
+    diag: () => {},
+  })
+  expect(await gsi.status('dota')).toEqual({ found: true, installed: false, folder: join(base, 'dota'), launch: false })
+  expect((await gsi.install('dota')).installed).toBe(true) // the folder is made if missing
+  const file = readFileSync(join(base, 'dota', 'gamestate_integration_eleusinia.cfg'), 'utf8')
+  expect(file).toContain('"hero" "1"')
+  expect(file).toContain('"items" "1"')
+  expect(file).not.toContain('round_wins')
+  opts = ['', '-novid -gamestateintegration']
+  expect((await gsi.status('dota')).launch).toBe(true)
+  opts = null
+  expect((await gsi.status('dota')).launch).toBeNull()
+  const token = /"token" "([0-9a-f]{48})"/.exec(file)![1]
+  const post = (body: object) => fetch(`http://127.0.0.1:${gsi.port}/`, { method: 'POST', body: JSON.stringify({ ...body, auth: { token } }) })
+  await post({ provider: { appid: 570 }, map: { game_state: 'DOTA_GAMERULES_STATE_GAME_IN_PROGRESS', radiant_score: 3, dire_score: 1 } })
+  await post({ provider: { appid: 440 }, map: {} }) // a game we do not read
+  expect(got).toEqual([['dota', { state: 'game_in_progress', radiant: 3, dire: 1 }]])
+  // The server keeps running while CS2's file is in place, and stops when neither is
+  await gsi.install('cs2')
+  await gsi.remove('dota')
+  expect(got.at(-1)).toEqual(['dota', null])
+  expect((await fetch(`http://127.0.0.1:${gsi.port}/`)).status).toBe(405)
+  await gsi.remove('cs2')
+  expect(await fetch(`http://127.0.0.1:${gsi.port}/`).catch(() => 'closed')).toBe('closed')
+  gsi.stop()
 })

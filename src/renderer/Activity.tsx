@@ -1,10 +1,12 @@
 // Activity (docs/roadmap-activity.md): what a friend is playing, as one line in lists, a card on their profile, and
 // the Settings section that says what is shared, with a preview of exactly what friends see.
 import { useEffect, useReducer, useState } from 'react'
-import { type Achievement, type Activity, type ActivitySettings, type Game } from '../shared/activity'
+import { type Achievement, type Activity, type ActivitySettings, type Game, sharing } from '../shared/activity'
 import { type Cs2, mapName, modeName, roundWin, weaponName } from '../shared/cs2'
+import { type Dota, heroName, itemName, stateName } from '../shared/dota'
 import { type Key, type State } from '../shared/protocol'
 import { api } from './common'
+import { CopyButton } from './ui'
 
 // Re-renders every `ms`, so times since a start move on the viewer's side; nothing is resent for it.
 function useTick(ms: number) {
@@ -38,12 +40,23 @@ const cs2Score = (c: Cs2) => {
   const [us, them] = c.team === 'T' ? [c.t, c.ct] : [c.ct, c.t]
   return `${us}–${them}`
 }
+// Dota 2 the same way: "Anti-Mage 21–14".
+const dotaScore = (d: Dota) => {
+  if (d.radiant === undefined || d.dire === undefined) return ''
+  const [us, them] = d.team === 'dire' ? [d.dire, d.radiant] : [d.radiant, d.dire]
+  return `${us}–${them}`
+}
 // "Playing Deadlock · 1 h 12 min", or with live details "Playing Counter-Strike 2 · Mirage 9–7", for friend rows.
 export function ActivityLine({ a }: { a?: Activity }) {
   useTick(30000)
   if (!a?.game) return null
   const c = a.game.cs2
-  const live = c && (c.menu ? 'in the menu' : [c.map && mapName(c.map), cs2Score(c)].filter(Boolean).join(' '))
+  const d = a.game.dota
+  const live = c
+    ? c.menu
+      ? 'in the menu'
+      : [c.map && mapName(c.map), cs2Score(c)].filter(Boolean).join(' ')
+    : d && (d.menu ? 'in the menu' : d.watching ? 'watching a match' : [d.hero && heroName(d.hero), dotaScore(d)].filter(Boolean).join(' '))
   return (
     <span className="activity-line" title={a.game.name}>
       Playing <b>{a.game.name}</b> · {live || duration(Date.now() - a.game.since)}
@@ -57,6 +70,142 @@ function Countdown({ at }: { at: number }) {
   const s = Math.max(0, Math.round((at - Date.now()) / 1000))
   return <span className="cs2-clock">{`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`}</span>
 }
+// A match clock counting up from 0:00 (negative before the horn), ticking here; frozen while paused.
+const clockText = (s: number) => `${s < 0 ? '-' : ''}${Math.floor(Math.abs(s) / 60)}:${String(Math.abs(s) % 60).padStart(2, '0')}`
+function MatchClock({ d }: { d: Dota }) {
+  useTick(1000)
+  if (d.clock !== undefined) return <span className="cs2-clock">{clockText(d.clock)} · Paused</span>
+  if (d.clockAt === undefined) return <>–</>
+  return <span className="cs2-clock">{clockText(Math.floor((Date.now() - d.clockAt) / 1000))}</span>
+}
+const item = (i: string, key: number) =>
+  i ? (
+    <li key={key} title={itemName(i)}>
+      <img src={`eleusinia-art://dota/items/${i}`} alt={itemName(i)} onError={hide} />
+    </li>
+  ) : (
+    <li key={key} className="empty" />
+  )
+const bar = (label: string, v: number, max: number, kind: string) => (
+  <div className={`dota-bar ${kind}`} role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={max} aria-valuenow={v} title={`${label} ${v} / ${max}`}>
+    <span style={{ width: `${max ? Math.min(100, (v / max) * 100) : 0}%` }} />
+    <b>
+      {v.toLocaleString()} / {max.toLocaleString()}
+    </b>
+  </div>
+)
+
+// A Dota 2 match as the game describes it: our hero, the kills per side, the clock, our numbers and, if shared, gold
+// and items.
+function DotaMatch({ d }: { d: Dota }) {
+  if (d.menu) return <p className="cs2-menu">In the main menu</p>
+  const score = d.radiant !== undefined && d.dire !== undefined
+  const s = d.stats
+  const l = d.live
+  const where = [
+    d.state && stateName(d.state),
+    d.day !== undefined && d.state === 'game_in_progress' && (d.day ? 'Day' : 'Night'),
+    d.winner && `${d.winner === 'radiant' ? 'Radiant' : 'Dire'} victory`,
+  ]
+  return (
+    <div className="cs2 dota">
+      <div className="dota-hero">
+        {d.hero && <img src={`eleusinia-art://dota/heroes/${d.hero}`} alt="" onError={hide} />}
+        <span className="row-text">
+          <span className="cs2-map">{d.watching ? 'Watching a match' : d.hero ? heroName(d.hero) : 'In a match'}</span>
+          <span className="row-sub">{[d.level !== undefined && `Level ${d.level}`, ...where].filter(Boolean).join(' · ')}</span>
+        </span>
+      </div>
+      {score && (
+        <div className="cs2-score" aria-label={`Radiant ${d.radiant} kills, Dire ${d.dire} kills`}>
+          <span className={`cs2-team radiant${d.team === 'radiant' ? ' ours' : ''}`}>
+            <span>Radiant</span>
+            <b>{d.radiant}</b>
+          </span>
+          <span className="cs2-mid">
+            <MatchClock d={d} />
+          </span>
+          <span className={`cs2-team dire${d.team === 'dire' ? ' ours' : ''}`}>
+            <b>{d.dire}</b>
+            <span>Dire</span>
+          </span>
+        </div>
+      )}
+      {s && (
+        <dl className="cs2-stats">
+          <div>
+            <dt>K / D / A</dt>
+            <dd>
+              {s.kills} / {s.deaths} / {s.assists}
+            </dd>
+          </div>
+          <div>
+            <dt>LH / DN</dt>
+            <dd>
+              {s.lastHits} / {s.denies}
+            </dd>
+          </div>
+          <div>
+            <dt>GPM / XPM</dt>
+            <dd>
+              {s.gpm} / {s.xpm}
+            </dd>
+          </div>
+          {s.streak >= 3 && (
+            <div>
+              <dt>Kill streak</dt>
+              <dd>{s.streak}</dd>
+            </div>
+          )}
+        </dl>
+      )}
+      {l && (
+        <>
+          {l.respawnAt ? (
+            <p className="dota-dead">
+              Dead · respawning in <Countdown at={l.respawnAt} />
+            </p>
+          ) : (
+            <div className="dota-bars">
+              {bar('Health', l.health, l.maxHealth, 'health')}
+              {bar('Mana', l.mana, l.maxMana, 'mana')}
+            </div>
+          )}
+          <div className="dota-items">
+            <ul aria-label="Items">{l.items.map(item)}</ul>
+            {l.neutral && (
+              <ul className="neutral" aria-label="Neutral item">
+                {item(l.neutral, 0)}
+              </ul>
+            )}
+            {l.backpack.some(Boolean) && (
+              <ul className="backpack" aria-label="Backpack">
+                {l.backpack.map(item)}
+              </ul>
+            )}
+          </div>
+          <dl className="cs2-stats">
+            <div>
+              <dt>Gold</dt>
+              <dd>{l.gold.toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Buyback</dt>
+              <dd>{l.buyback !== undefined ? `Ready, ${l.buyback.toLocaleString()} gold` : 'On cooldown'}</dd>
+            </div>
+            {(l.scepter || l.shard) && (
+              <div>
+                <dt>Aghanim's</dt>
+                <dd>{[l.scepter && 'Scepter', l.shard && 'Shard'].filter(Boolean).join(' + ')}</dd>
+              </div>
+            )}
+          </dl>
+        </>
+      )}
+    </div>
+  )
+}
+
 const PHASES: Record<string, string> = {
   warmup: 'Warmup',
   live: 'Live',
@@ -185,10 +334,11 @@ export function GameCard({ g, full = true }: { g: Game; full?: boolean }) {
         <p className="activity-kicker">Playing{g.source === 'steam' ? ' on Steam' : ''}</p>
         <h3>{g.name}</h3>
         <p className="row-sub">
-          For {duration(session)}
+          {session < 60000 ? 'Just started' : `For ${duration(session)}`}
           {g.played !== undefined && ` · ${hours(g.played + Math.floor(session / 60000))} in total`}
         </p>
         {g.cs2 && <Cs2Match c={g.cs2} />}
+        {g.dota && <DotaMatch d={g.dota} />}
         {facts.length > 0 && <p className="activity-facts">{facts.join(' · ')}</p>}
         {full && g.about && <p className="activity-about">{g.about}</p>}
         {a && (
@@ -223,12 +373,12 @@ export function GameCard({ g, full = true }: { g: Game; full?: boolean }) {
 // On someone's profile card: their game, or for a friend, whether they see ours.
 export function ProfileActivity({ st, k }: { st: State; k: Key }) {
   const g = st.activity[k]?.game
-  const set = st.settings.activity
+  const set = st.settings.activity ?? {}
   const hidden = set?.hidden?.includes(k)
   return (
     <>
       {g && <GameCard g={g} />}
-      {k !== st.me && set?.games && st.friends[k] === 'friend' && (
+      {k !== st.me && sharing(set) && st.friends[k] === 'friend' && (
         <label className="check-row activity-hide">
           <input type="checkbox" role="switch" checked={!hidden} onChange={(e) => api.call('setSettings', { activity: { ...set, hidden: e.target.checked ? (set.hidden ?? []).filter((h) => h !== k) : [...(set.hidden ?? []), k] } })} />
           <span>Show them what I'm playing</span>
@@ -247,9 +397,10 @@ export function ActivitySettingsSection({ st, name }: { st: State; name: (k: Key
   const [pick, setPick] = useState('')
   const [title, setTitle] = useState('')
   const extra = Object.entries(set.extra ?? {})
+  const on = sharing(set)
   const detail = (field: 'playtime' | 'achievements' | 'details', label: string) => (
     <label className="check-row">
-      <input type="checkbox" role="switch" disabled={!set.games} checked={set[field] !== false} onChange={(e) => save({ [field]: e.target.checked })} />
+      <input type="checkbox" role="switch" disabled={!on} checked={field === 'details' ? set.details === true : set[field] !== false} onChange={(e) => save({ [field]: e.target.checked })} />
       <span>{label}</span>
     </label>
   )
@@ -263,7 +414,7 @@ export function ActivitySettingsSection({ st, name }: { st: State; name: (k: Key
   return (
     <>
       <label className="check-row">
-        <input type="checkbox" role="switch" checked={!!set.games} onChange={(e) => save({ games: e.target.checked })} />
+        <input type="checkbox" role="switch" checked={on} onChange={(e) => save({ games: e.target.checked })} />
         <span>
           Share the game I'm playing with friends and group members. Found from Steam, or by the game's program. Never
           shown to anyone else
@@ -274,8 +425,9 @@ export function ActivitySettingsSection({ st, name }: { st: State; name: (k: Key
         {detail('achievements', 'My achievements in it, with the newest ones')}
         {detail('details', 'Its genre, developer, release date and description')}
       </div>
-      {set.games && <Cs2Setup set={set} save={save} />}
-      {set.games && (
+      {on && <GsiSetup game="cs2" set={set} save={save} />}
+      {on && <GsiSetup game="dota" set={set} save={save} />}
+      {on && (
         <div className="activity-preview">
           <p className="row-sub">What friends see now</p>
           {mine ? <GameCard g={mine} /> : <p className="quiet">No game running.</p>}
@@ -337,37 +489,61 @@ export function ActivitySettingsSection({ st, name }: { st: State; name: (k: Key
   )
 }
 
-// Settings → Activity → Counter-Strike 2: the config file the game needs, and what of a match is shared.
-function Cs2Setup({ set, save }: { set: ActivitySettings; save: (p: Partial<ActivitySettings>) => void }) {
-  const [st, setSt] = useState<{ found: boolean; installed: boolean; folder: string | null } | null>(null)
+// Settings → Activity → a game with Valve's Game State Integration (main/gsi.ts): the config file the game needs, and
+// what of a match is shared.
+const GSI = {
+  cs2: {
+    name: 'Counter-Strike 2',
+    short: 'CS2',
+    switches: [
+      ['match', 'Map, mode, score, how each round was won and the round clock', true],
+      ['stats', 'My kills, assists, deaths, MVPs and score', true],
+      ['state', 'My health, armor, money and weapon as they change. Off by default: it would help anyone playing against me', false],
+    ],
+  },
+  dota: {
+    name: 'Dota 2',
+    short: 'Dota 2',
+    switches: [
+      ['match', 'The kills on each side, the match clock, day or night, my hero and level', true],
+      ['stats', 'My kills, deaths, assists, last hits, denies, GPM, XPM and kill streak', true],
+      ['live', 'My gold, items, health, mana, respawn and buyback as they change. Off by default: it would help anyone playing against me', false],
+    ],
+  },
+} as const
+const LAUNCH = '-gamestateintegration'
+type GsiStatus = { found: boolean; installed: boolean; folder: string | null; launch?: boolean | null }
+function GsiSetup({ game, set, save }: { game: 'cs2' | 'dota'; set: ActivitySettings; save: (p: Partial<ActivitySettings>) => void }) {
+  const g = GSI[game]
+  const [st, setSt] = useState<GsiStatus | null>(null)
   const [error, setError] = useState('')
   useEffect(() => {
-    window.api.cs2('status').then(setSt, () => setSt(null))
-  }, [])
+    window.api.gsi(game, 'status').then(setSt, () => setSt(null))
+  }, [game])
   const act = (a: 'install' | 'remove') =>
-    window.api.cs2(a).then(
+    window.api.gsi(game, a).then(
       (s) => (setSt(s), setError('')),
-      (e) => setError(String(e?.message ?? e).replace(/^Error invoking remote method 'cs2': (Error: )?/, '')),
+      (e) => setError(String(e?.message ?? e).replace(/^Error invoking remote method 'gsi': (Error: )?/, '')),
     )
-  const c = set.cs2 ?? {}
-  const sw = (field: 'match' | 'stats' | 'state', label: string, def: boolean) => (
-    <label className="check-row">
-      <input type="checkbox" role="switch" checked={c[field] ?? def} onChange={(e) => save({ cs2: { ...c, [field]: e.target.checked } })} />
+  const c: Record<string, boolean | undefined> = set[game] ?? {}
+  const sw = ([field, label, def]: readonly [string, string, boolean]) => (
+    <label className="check-row" key={field}>
+      <input type="checkbox" role="switch" checked={c[field] ?? def} onChange={(e) => save({ [game]: { ...c, [field]: e.target.checked } })} />
       <span>{label}</span>
     </label>
   )
   const note = !st
     ? 'Looking for the game…'
     : st.installed
-      ? 'Set up. If CS2 is running, restart it once.'
+      ? `Set up. If ${g.short} is running, restart it once.`
       : st.found
         ? "Adds a file to the game's cfg folder, the way Valve made for apps like this one."
-        : 'Counter-Strike 2 is not in your Steam library.'
+        : `${g.name} is not in your Steam library.`
   return (
-    <div className="activity-cs2">
+    <div className={`activity-gsi activity-${game}`}>
       <div className="settings-row">
         <span className="row-text">
-          <span className="row-title">Counter-Strike 2 live match details</span>
+          <span className="row-title">{g.name} live match details</span>
           <span className="row-sub">{note}</span>
         </span>
         {st?.found &&
@@ -382,13 +558,14 @@ function Cs2Setup({ set, save }: { set: ActivitySettings; save: (p: Partial<Acti
           ))}
       </div>
       {error && <p className="form-error">{error}</p>}
-      {st?.installed && (
-        <div className="activity-details">
-          {sw('match', 'Map, mode, score, how each round was won and the round clock', true)}
-          {sw('stats', 'My kills, assists, deaths, MVPs and score', true)}
-          {sw('state', 'My health, armor, money and weapon as they change. Off by default: it would help anyone playing against me', false)}
-        </div>
+      {st?.installed && st.launch !== undefined && st.launch !== true && (
+        <p className="activity-launch">
+          {st.launch === false ? 'One more step: Dota 2 only sends its details when started' : 'Make sure Dota 2 is started'} with <code>{LAUNCH}</code> in
+          its launch options. In Steam, right-click Dota 2, choose Properties, and add it under Launch options.{' '}
+          <CopyButton text={LAUNCH} label="Copy the launch option" />
+        </p>
       )}
+      {st?.installed && <div className="activity-details">{g.switches.map(sw)}</div>}
     </div>
   )
 }

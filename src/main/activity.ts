@@ -1,8 +1,8 @@
 import { execFile } from 'node:child_process'
-import { existsSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { type Achievement, type ActivitySettings, type Game, KNOWN_GAMES, RECENT_ACHIEVEMENTS } from '../shared/activity'
+import { type Achievement, type ActivitySettings, type Game, KNOWN_GAMES, RECENT_ACHIEVEMENTS, sharing } from '../shared/activity'
 import { type Vdf, achievementsOf, libraryPaths, parseKv, parseReg, parseVdf, programsOf, vget, vnum } from '../shared/steam'
 
 // Finds the game being played, every 10 s while sharing games is on (docs/roadmap-activity.md, steps 0 and 1):
@@ -65,7 +65,23 @@ export async function steamAppDir(app: number): Promise<string | null> {
   return null
 }
 
-type StoreInfo = { name?: string; genres?: string[]; developer?: string; released?: string; about?: string }
+// A game's launch options, one per Steam account on this computer ('' when none are set); null without Steam.
+export async function steamLaunchOptions(app: number): Promise<string[] | null> {
+  const s = await steamNow()
+  if (!s) return null
+  let users: string[] = []
+  try {
+    users = readdirSync(join(s.root, 'userdata'))
+  } catch {}
+  return users.flatMap((u) => {
+    const conf = readVdf(join(s.root, 'userdata', u, 'config/localconfig.vdf'))
+    if (!conf) return []
+    const o = vget(conf, 'UserLocalConfigStore', 'Software', 'Valve', 'Steam', 'apps', String(app), 'LaunchOptions')
+    return [typeof o === 'string' ? o : '']
+  })
+}
+
+type StoreInfo ={ name?: string; genres?: string[]; developer?: string; released?: string; about?: string }
 const entities = (s: string) =>
   s.replace(/&(quot|amp|lt|gt|#39|apos|nbsp);/g, (_, e) => ({ quot: '"', amp: '&', lt: '<', gt: '>', '#39': "'", apos: "'", nbsp: ' ' })[e as 'quot'] ?? '')
 
@@ -180,7 +196,7 @@ export function watchActivity({ settings, onGame, fetch, diag, every = 10000 }: 
 
   let busy = false
   async function tick() {
-    if (busy || !settings()?.games) return
+    if (busy || !sharing(settings())) return
     busy = true
     try {
       const s = await steamNow()

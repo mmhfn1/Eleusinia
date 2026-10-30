@@ -14,10 +14,11 @@ import { isKey } from '../shared/protocol'
 import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared/reports'
 import { kindOf, shareable } from '../shared/sources'
 import { verifyUpdate } from '../shared/updatesig'
-import { type Game, artUrl } from '../shared/activity'
+import { type Game, artUrl, sharing } from '../shared/activity'
 import type { Cs2 } from '../shared/cs2'
+import type { Dota } from '../shared/dota'
 import { programs, watchActivity } from './activity'
-import { createCs2 } from './cs2'
+import { GSI_GAMES, type GsiGame, createGsi } from './gsi'
 import { createInbox } from './inbox'
 import { type Staged, canInstall, fetchUpdate, install, tidy } from './selfupdate'
 import { createNode } from './node'
@@ -119,35 +120,49 @@ function loadIdentity(dir: string) {
 function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (text: string) => void) {
   const fake = process.env.ELEUSINIA_TEST_ACTIVITY
   let watcher: ReturnType<typeof watchActivity> | null = null
-  // The game from the watcher, with CS2's live details on it while CS2 is the game and is sending them.
+  // The game from the watcher, with a game's live details (main/gsi.ts) on it while that game sends them. A game
+  // sending them is running, even before the watcher, which looks every 10 s, has seen it.
   let game: Game | null = null
-  let live: Cs2 | null = null
-  const send = () => node.setActivity(game ? { ...game, ...(game.app === 730 && live && { cs2: live }) } : null)
-  // ELEUSINIA_TEST_CS2_CFG: testing only, a folder standing in for the game's cfg folder.
-  const testCfg = process.env.ELEUSINIA_TEST_CS2_CFG
-  const cs2 = createCs2({ dir, diag, onData: (c) => ((live = c), send()), ...(testCfg && { cfgFolder: async () => testCfg }) })
-  const on = () => !!node.state().settings.activity?.games
+  let live: { game: GsiGame; data: Cs2 | Dota; since: number } | null = null
+  const LIVE = { cs2: { app: 730, name: 'Counter-Strike 2' }, dota: { app: 570, name: 'Dota 2' } }
+  const send = () => {
+    if (!live) return node.setActivity(game)
+    const { app, name } = LIVE[live.game]
+    const base: Game = game?.app === app ? game : { name, app, source: 'steam', since: live.since }
+    node.setActivity({ ...base, [live.game]: live.data })
+  }
+  const onData = (g: GsiGame, data: Cs2 | Dota | null) => {
+    if (data) live = { game: g, data, since: live?.game === g ? live.since : Date.now() }
+    else if (live?.game === g) live = null
+    send()
+  }
+  // ELEUSINIA_TEST_GSI_CFG: testing only, a folder standing in for the games' cfg folders (one subfolder per game).
+  const testCfg = process.env.ELEUSINIA_TEST_GSI_CFG
+  const gsi = createGsi({ dir, diag, onData, ...(testCfg && { cfgFolder: async (g: GsiGame) => join(testCfg, g) }) })
+  const on = () => sharing(node.state().settings.activity)
   let running = false
   const apply = () => {
     if (on() && !running) {
       running = true
       if (fake) (game = { ...JSON.parse(fake), since: Date.now() - 60000 }), send()
       else watcher = watchActivity({ settings: () => node.state().settings.activity, onGame: (g) => ((game = g), send()), fetch: (url) => net.fetch(url), diag })
-      cs2.status().catch(() => {})
+      gsi.update().catch(() => {})
     } else if (!on() && running) {
       running = false
       watcher?.stop()
       watcher = null
-      cs2.stop()
+      gsi.stop()
       game = live = null
       send()
     }
   }
   apply()
   activityChanged = apply
-  ipcMain.handle('cs2', async (_e, action: unknown) => {
-    const r = await (action === 'install' ? cs2.install() : action === 'remove' ? cs2.remove() : cs2.status())
-    if (!on()) cs2.stop() // set up ahead of time: listens once sharing is on
+  ipcMain.handle('gsi', async (_e, g: unknown, action: unknown) => {
+    if (!GSI_GAMES.includes(g as GsiGame)) throw new Error('unknown game')
+    const game = g as GsiGame
+    const r = await (action === 'install' ? gsi.install(game) : action === 'remove' ? gsi.remove(game) : gsi.status(game))
+    if (!on()) gsi.stop() // set up ahead of time: listens once sharing is on
     return r
   })
   ipcMain.handle('programs', () => programs())

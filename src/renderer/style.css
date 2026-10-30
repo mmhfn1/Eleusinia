@@ -3043,7 +3043,110 @@ img.crest {
   margin: 0;
   color: var(--silver-2);
 }
-.activity-cs2 {
+.activity-gsi {
   display: grid;
   gap: 6px;
+}
+.activity-launch {
+  margin: 0;
+  color: var(--silver-2);
+  font-size: 13px;
+}
+.activity-launch code {
+  font-family: var(--mono);
+  color: var(--silver);
+}
+/* Dota 2: Radiant and Dire in the game's own green and red, on the CS2 card's layout */
+.cs2-team.radiant b {
+  color: var(--good);
+}
+.cs2-team.dire {
+  justify-content: flex-end;
+}
+.cs2-team.dire b {
+  color: var(--poor);
+}
+.cs2-team.dire.ours::after {
+  order: -1;
+}
+.dota-hero {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.dota-hero img {
+  width: 64px;
+  height: 36px;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  background: var(--obsidian-4);
+}
+.dota-bars {
+  display: grid;
+  gap: 4px;
+}
+.dota-bar {
+  position: relative;
+  height: 16px;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  background: var(--obsidian-4);
+}
+.dota-bar span {
+  position: absolute;
+  inset: 0 auto 0 0;
+}
+.dota-bar.health span {
+  background: rgb(111 213 152 / 0.45);
+}
+.dota-bar.mana span {
+  background: rgb(120 150 230 / 0.5);
+}
+.dota-bar b {
+  position: relative;
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.dota-dead {
+  margin: 0;
+  color: var(--danger);
+  font-weight: 600;
+}
+.dota-items {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.dota-items ul {
+  display: grid;
+  grid-template-columns: repeat(3, 44px);
+  gap: 3px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.dota-items ul.neutral {
+  grid-template-columns: 32px;
+}
+.dota-items ul.backpack {
+  opacity: 0.6;
+}
+.dota-items li {
+  height: 32px;
+  overflow: hidden;
+  border-radius: var(--r-sm);
+  background: var(--obsidian-4);
+}
+.dota-items ul.neutral li {
+  border-radius: 50%;
+}
+.dota-items img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }

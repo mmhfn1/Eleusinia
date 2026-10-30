@@ -16,19 +16,31 @@ achievement files (names, descriptions, icons, unlock times); global rarity from
 Still to see on a real machine: a Steam game running (only the registry value was read here, with none running), and
 macOS's `registry.vdf`.
 
-**Done:** step 2 (`src/shared/cs2.ts`, `src/main/cs2.ts`). Settings → Activity → Set up writes
+**Done:** step 2 (`src/shared/cs2.ts`, `src/main/gsi.ts`). Settings → Activity → Set up writes
 `gamestate_integration_eleusinia.cfg` (port and token kept in `gsi.json`); the smoke run drives that button and posts
 a match the way the game does. Still to see with the real game: the exact payload CS2 sends today (Premier's mode
 name, `map_round_wins`, `phase_countdowns`), checked against the format Valve's own integration file on a real
 install uses. Skins are not shown: their names live in the game's own files.
+
+**Done:** step 3 (`src/shared/dota.ts`, the same server in `src/main/gsi.ts`: both games share one port and token,
+told apart by `provider.appid`). Shown: hero portrait and name, level, game state, day or night, kills per side with
+our side marked, the match clock ticking locally (paused shows frozen), K/D/A, LH/DN, GPM/XPM, kill streak; with the
+live switch (off by default) gold, health and mana bars, items, backpack and neutral item with icons, buyback,
+Aghanim's scepter and shard, "Dead · respawning in 0:23". Settings checks Steam's `localconfig.vdf` for the
+`-gamestateintegration` launch option Dota has needed since March 2022, and says how to add it when it is missing
+(the app never edits Steam's files). A game that is sending live details counts as running even before the watcher
+has seen it. Not done yet: abilities and talents, the draft during hero selection, Roshan and Aegis (`buildings`,
+`events`), net worth. Still to see with the real game: the payload Dota sends today; Dota 2 is not installed on the
+machine this was written on.
 
 ## Principles
 
 - **Read only, never inside a game.** Every source is a file, the registry, an official local API, or a public web
   API. No memory reading, no injection, no overlays drawn into games: nothing an anti-cheat (VAC, Vanguard,
   BattlEye, Easy Anti-Cheat) could object to.
-- **Off until turned on, per source and per detail.** Settings has a switch per integration, and inside each one a
-  switch per group of details (for CS2: score, own stats, loadout, money). A live preview shows exactly what friends
+- **A switch per source and per detail.** Game activity is on by default; the store details, and anything that would
+  help an opponent (such as CS2's live state), are off until turned on. Settings has a switch per integration, and
+  inside each one a switch per group of details (for CS2: score, own stats, loadout, money). A live preview shows exactly what friends
   will see.
 - **Friends and group members only.** Activity travels over existing links, never on the DHT, never in the public
   profile card. Per-person "hide my activity from" list.

@@ -14,12 +14,14 @@ const game: Game = {
   achievements: { got: 1, total: 2, recent: [{ name: 'A', desc: 'B', icon: 'f'.repeat(40) + '.jpg', at: 500, rarity: 3.5 }] },
 }
 
-test('only what was chosen leaves: nothing until games are on, then each detail can be turned off', () => {
+test('only what was chosen leaves: on unless turned off, store details only when turned on, each detail can be turned off', () => {
   const a: Activity = { now: 5000, game }
-  expect(shareable(a, undefined)).toEqual({ now: 5000 })
   expect(shareable(a, { games: false })).toEqual({ now: 5000 })
-  expect(shareable(a, { games: true }).game).toEqual(game)
-  const g = shareable(a, { games: true, playtime: false, achievements: false, details: false }).game!
+  const { genres, developer, released, about, ...plain } = game
+  expect(shareable(a, undefined).game).toEqual(plain)
+  expect(shareable(a, {}).game).toEqual(plain)
+  expect(shareable(a, { details: true }).game).toEqual(game)
+  const g = shareable(a, { games: true, playtime: false, achievements: false }).game!
   expect(Object.keys(g).sort()).toEqual(['app', 'name', 'since', 'source'])
   expect(a.game).toEqual(game) // the original is untouched
 })

@@ -1,5 +1,6 @@
 import type { Key } from './protocol'
 import { type Cs2, type Cs2Settings, cleanCs2, shareableCs2 } from './cs2'
+import { type Dota, type DotaSettings, cleanDota, shareableDota } from './dota'
 
 // What someone is doing, shared with friends and group members only (docs/roadmap-activity.md). Pictures are never
 // sent as links: a card names a Steam app id or an achievement's icon file, and the receiving app builds the address
@@ -24,31 +25,37 @@ export type Game = {
   about?: string
   achievements?: { got: number; total: number; recent: Achievement[] } // recent: newest first
   cs2?: Cs2 // live match details from Counter-Strike 2 (shared/cs2.ts)
+  dota?: Dota // and from Dota 2 (shared/dota.ts)
 }
 // now: the sender's clock when sent, so `since` can be moved onto the receiver's clock.
 export type Activity = { now: number; game?: Game }
 
-// What may be shared, set in Settings → Activity. Off until `games` is turned on; each detail is on unless turned off.
+// What may be shared, set in Settings → Activity. On unless `games` is turned off; each detail is on unless turned
+// off, except the store `details`, which are off unless turned on.
 export type ActivitySettings = {
   games?: boolean
   playtime?: boolean
   achievements?: boolean
-  details?: boolean // genre, developer, release date, description
+  details?: boolean // genre, developer, release date, description; off unless true
   hidden?: Key[] // people who never see it
   extra?: Record<string, string> // program file name (lower case) → game name, added by the user
   cs2?: Cs2Settings
+  dota?: DotaSettings
 }
 
 export const RECENT_ACHIEVEMENTS = 5
 
+export const sharing = (set: ActivitySettings | undefined) => set?.games !== false
+
 // Only what the user chose to share leaves this computer.
 export function shareable(a: Activity, set: ActivitySettings | undefined): Activity {
-  if (!set?.games || !a.game) return { now: a.now }
+  if (!sharing(set) || !a.game) return { now: a.now }
   const g: Game = { ...a.game }
-  if (set.playtime === false) delete g.played
-  if (set.achievements === false) delete g.achievements
-  if (set.details === false) delete g.genres, delete g.developer, delete g.released, delete g.about
-  if (g.cs2) g.cs2 = shareableCs2(g.cs2, set.cs2)
+  if (set?.playtime === false) delete g.played
+  if (set?.achievements === false) delete g.achievements
+  if (set?.details !== true) delete g.genres, delete g.developer, delete g.released, delete g.about
+  if (g.cs2) g.cs2 = shareableCs2(g.cs2, set?.cs2)
+  if (g.dota) g.dota = shareableDota(g.dota, set?.dota)
   return { now: a.now, game: g }
 }
 
@@ -91,15 +98,20 @@ export function cleanActivity(x: unknown, now = Date.now()): Activity | null {
   }
   const cs2 = game.app === 730 ? cleanCs2(g.cs2, shift, now) : undefined
   if (cs2) game.cs2 = cs2
+  const dota = game.app === 570 ? cleanDota(g.dota, shift, now) : undefined
+  if (dota) game.dota = dota
   return { now, game }
 }
 const ICON = /^[0-9a-f]{40}\.(jpg|png)$/
 
 // The only addresses activity pictures come from, built here from ids (eleusinia-art:// in src/main/index.ts).
-// eleusinia-art://steam/<app>/<header|capsule|hero|logo> and eleusinia-art://achievement/<app>/<icon file>.
+// eleusinia-art://steam/<app>/<header|capsule|hero|logo>, eleusinia-art://achievement/<app>/<icon file>, and Dota 2's
+// eleusinia-art://dota/<heroes|items>/<name> (the game's own name without npc_dota_hero_ or item_).
 const STEAM = 'https://cdn.akamai.steamstatic.com/'
 const STEAM_ART: Record<string, string> = { header: 'header.jpg', capsule: 'library_600x900.jpg', hero: 'library_hero.jpg', logo: 'logo.png' }
 export function artUrl(url: string): string | null {
+  const d = /^eleusinia-art:\/\/dota\/(heroes|items)\/([a-z0-9_]{1,60})$/.exec(url)
+  if (d) return `${STEAM}apps/dota2/images/dota_react/${d[1]}/${d[2]}.png`
   const m = /^eleusinia-art:\/\/(steam|achievement)\/(\d{1,8})\/([\w.]+)$/.exec(url)
   if (!m) return null
   if (m[1] === 'steam') return Object.hasOwn(STEAM_ART, m[3]) ? `${STEAM}steam/apps/${m[2]}/${STEAM_ART[m[3]]}` : null
