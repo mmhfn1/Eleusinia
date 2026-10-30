@@ -16,7 +16,7 @@ achievement files (names, descriptions, icons, unlock times); global rarity from
 Still to see on a real machine: a Steam game running (only the registry value was read here, with none running), and
 macOS's `registry.vdf`.
 
-**Done:** step 2 (`src/shared/cs2.ts`, `src/main/gsi.ts`). Settings → Activity → Set up writes
+**Done:** step 2 (`src/shared/cs2.ts`, `src/main/gsi.ts`). Settings → Activity → the Steam tile writes
 `gamestate_integration_eleusinia.cfg` (port and token kept in `gsi.json`); the smoke run drives that button and posts
 a match the way the game does. Still to see with the real game: the exact payload CS2 sends today (Premier's mode
 name, `map_round_wins`, `phase_countdowns`), checked against the format Valve's own integration file on a real
@@ -212,7 +212,7 @@ objectives taken, "Dead, back in 12 s".
 ## 7. Destiny 2: Bungie.net API
 
 **Done** (`src/shared/destiny.ts`, `src/main/bungie.ts`), waiting on the Bungie application to try for real. Linking:
-Settings → Activity → Link with Bungie.net opens bungie.net's authorize page in the user's own browser (Bungie blocks
+Settings → Activity → the Bungie.net tile opens bungie.net's authorize page in the user's own browser (Bungie blocks
 in-app web views); Bungie sends the browser to the registered return page (`https://mmhfn1.github.io/eleusinia/bungie/`,
 from the mmhfn1.github.io repository), which passes the code to a server the app runs on 127.0.0.1 only while
 waiting (its port is in `state`, with 32 random hex characters checked). The client is confidential, since only those

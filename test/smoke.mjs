@@ -385,10 +385,14 @@ try {
 
   console.log('--- Activity: a CS2 match, through Game State Integration')
   await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
-  await until('Settings offers to set up CS2 live details', () => a.ev(`[...document.querySelectorAll('.activity-cs2 button')].some((x) => x.textContent === 'Set up')`), 10)
-  await a.ev(`[...document.querySelectorAll('.activity-cs2 button')].find((x) => x.textContent === 'Set up').click()`)
-  await until("Set up writes the game's file", () => a.ev(`document.querySelector('.activity-cs2').textContent.includes('Set up. If CS2 is running')`), 10)
-  await a.ev(`document.querySelector('.activity-cs2').scrollIntoView()`)
+  // Settings → Activity: the Steam tile opens a switch per game
+  await until('Settings shows the Steam and Bungie.net tiles', () => a.ev(`!!document.querySelector('.connection[data-k="steam"]') && !!document.querySelector('.connection[data-k="bungie"]')`), 10)
+  await a.ev(`document.querySelector('.connection[data-k="steam"]').click()`)
+  const cs2Switch = `document.querySelector('input[aria-label="Counter-Strike 2 live match details"]')`
+  await until('the Steam panel offers CS2', () => a.ev(`!!${cs2Switch} && !${cs2Switch}.disabled && !${cs2Switch}.checked`), 10)
+  await a.ev(`${cs2Switch}.click()`)
+  await until("turning CS2 on writes the game's file and shows its switches", () => a.ev(`(() => { const g = document.querySelector('.connection-game[data-game="cs2"]'); return ${cs2Switch}.checked && g.textContent.includes('Restart CS2 once') && g.querySelectorAll('.activity-details input[role="switch"]').length === 3 })()`), 10)
+  await a.ev(`document.querySelector('.connections').scrollIntoView()`)
   await a.shot('settings-activity')
   await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
   const gsi = readFileSync(join(annGsiCfg, 'cs2', 'gamestate_integration_eleusinia.cfg'), 'utf8')
@@ -433,11 +437,14 @@ try {
 
   console.log('--- Activity: a Dota 2 match, through the same Game State Integration server')
   await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
-  await until('Settings offers to set up Dota 2 live details', () => a.ev(`[...document.querySelectorAll('.activity-dota button')].some((x) => x.textContent === 'Set up')`), 10)
-  await a.ev(`[...document.querySelectorAll('.activity-dota button')].find((x) => x.textContent === 'Set up').click()`)
-  // Steam here has no Dota launch option for it (or no Steam at all), so Settings says how to add it
-  await until('Set up writes the file and says to add the launch option', () => a.ev(`(() => { const d = document.querySelector('.activity-dota'); return d.textContent.includes('Set up. If Dota 2 is running') && d.querySelector('.activity-launch code')?.textContent === '-gamestateintegration' })()`), 10)
-  await a.ev(`document.querySelector('.activity-dota').scrollIntoView()`)
+  await until('Settings shows the Steam tile with CS2 live', () => a.ev(`document.querySelector('.connection[data-k="steam"] .connection-state')?.textContent === 'CS2'`), 10)
+  await a.ev(`document.querySelector('.connection[data-k="steam"]').click()`)
+  const dotaSwitch = `document.querySelector('input[aria-label="Dota 2 live match details"]')`
+  await until('the Steam panel offers Dota 2', () => a.ev(`!!${dotaSwitch} && !${dotaSwitch}.disabled && !${dotaSwitch}.checked`), 10)
+  await a.ev(`${dotaSwitch}.click()`)
+  // Steam here has no Dota launch option for it (or no Steam at all), so Settings says to add it
+  await until('turning Dota 2 on writes the file and asks for the launch option', () => a.ev(`(() => { const g = document.querySelector('.connection-game[data-game="dota"]'); return ${dotaSwitch}.checked && g.querySelector('.connection-note code')?.textContent === '-gamestateintegration' })()`), 10)
+  await a.ev(`document.querySelector('.connections').scrollIntoView()`)
   await a.shot('settings-dota')
   await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
   const dotaCfg = readFileSync(join(annGsiCfg, 'dota', 'gamestate_integration_eleusinia.cfg'), 'utf8')
@@ -479,12 +486,13 @@ try {
   console.log('--- Activity: Destiny 2, with a linked Bungie.net account')
   const bobRowA = `[...document.querySelectorAll('.online .row-button')].find((x) => x.textContent.includes('Bob'))`
   await b.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
-  await until('Settings offers to link Bungie.net', () => b.ev(`[...document.querySelectorAll('.activity-bungie button')].some((x) => x.textContent === 'Link with Bungie.net')`), 10)
-  await b.ev(`[...document.querySelectorAll('.activity-bungie button')].find((x) => x.textContent === 'Link with Bungie.net').click()`)
+  const bungieTile = `document.querySelector('.connection[data-k="bungie"]')`
+  await until('Settings offers to link Bungie.net', () => b.ev(`${bungieTile}?.textContent.includes('Link')`), 10)
+  await b.ev(`${bungieTile}.click()`)
   // The sign-in goes through bungie.net's authorize page and back to the app's own server on 127.0.0.1
-  await until('B is linked, with the switches and the Marathon note', () => b.ev(`(() => { const s = document.querySelector('.activity-bungie'); return s.textContent.includes('Linked as Guardian#0042') && s.querySelectorAll('input[role="switch"]').length === 4 && s.textContent.includes('Marathon is on this account too') })()`), 15)
+  await until('B is linked: the tile names the account and its switches open', () => b.ev(`(() => { const p = document.querySelector('.connection-panel'); return ${bungieTile}.textContent.includes('Guardian#0042') && !!p && p.querySelectorAll('input[role="switch"]').length === 4 && [...p.querySelectorAll('button')].some((x) => x.textContent === 'Unlink') })()`), 15)
   if (bungieFake.seen.authorize !== 1 || bungieFake.seen.token[0] !== 'authorization_code') throw new Error('linking did not go through the authorize page and the token exchange')
-  await b.ev(`document.querySelector('.activity-bungie').scrollIntoView()`)
+  await b.ev(`document.querySelector('.connections').scrollIntoView()`)
   await b.shot('settings-bungie')
   await b.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
   await until('A lists Bob in the raid', () => a.ev(`${bobRowA}?.querySelector('.activity-line')?.textContent.includes("Destiny 2 · Raid · Salvation's Edge")`), 20)

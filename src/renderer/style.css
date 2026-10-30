@@ -3043,16 +3043,96 @@ img.crest {
   margin: 0;
   color: var(--silver-2);
 }
-.activity-gsi {
+/* Settings → Activity → connections: a tile per service, its panel below */
+.connections-wrap {
+  display: grid;
+  gap: 8px;
+}
+.connections {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 8px;
+}
+.connection {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  align-items: center;
+  column-gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--obsidian-3);
+  color: var(--silver);
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms, background 120ms;
+}
+.connection:hover {
+  border-color: var(--stone);
+  background: var(--obsidian-4);
+}
+.connection:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.connection.open {
+  border-color: var(--silver-2);
+}
+.connection .brand {
+  grid-row: span 2;
+}
+.connection-name {
+  font-weight: 600;
+}
+.connection-state {
+  overflow: hidden;
+  color: var(--mist-2);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.connection-state.on {
+  color: var(--good);
+}
+.connection.waiting .connection-state {
+  color: var(--fair);
+}
+.connection-panel {
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--obsidian-2);
+}
+.connection-game {
   display: grid;
   gap: 6px;
+  width: 100%;
 }
-.activity-launch {
+.connection-game-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.connection-game-head img {
+  width: 64px;
+  height: 30px;
+  object-fit: cover;
+  border-radius: var(--r-sm);
+  background: var(--obsidian-4);
+}
+.connection-game-head .row-title {
+  flex: 1;
+}
+.connection-note {
   margin: 0;
-  color: var(--silver-2);
-  font-size: 13px;
+  color: var(--fair);
+  font-size: 12px;
 }
-.activity-launch code {
+.connection-note code {
   font-family: var(--mono);
   color: var(--silver);
 }

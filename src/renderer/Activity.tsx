@@ -7,7 +7,7 @@ import type { Destiny } from '../shared/destiny'
 import { type Dota, heroName, itemName, stateName } from '../shared/dota'
 import { type Key, type State } from '../shared/protocol'
 import { api } from './common'
-import { CopyButton } from './ui'
+import { Brand, CopyButton } from './ui'
 
 // Re-renders every `ms`, so times since a start move on the viewer's side; nothing is resent for it.
 function useTick(ms: number) {
@@ -513,9 +513,7 @@ export function ActivitySettingsSection({ st, name }: { st: State; name: (k: Key
         {detail('achievements', 'My achievements in it, with the newest ones')}
         {detail('details', 'Its genre, developer, release date and description')}
       </div>
-      {on && <GsiSetup game="cs2" set={set} save={save} />}
-      {on && <GsiSetup game="dota" set={set} save={save} />}
-      {on && <BungieSetup set={set} save={save} />}
+      {on && <Connections set={set} save={save} />}
       {on && (
         <div className="activity-preview">
           <p className="row-sub">What friends see now</p>
@@ -578,158 +576,149 @@ export function ActivitySettingsSection({ st, name }: { st: State; name: (k: Key
   )
 }
 
-// Settings → Activity → a game with Valve's Game State Integration (main/gsi.ts): the config file the game needs, and
-// what of a match is shared.
+// Settings → Activity → connections: Steam (CS2 and Dota 2 through Valve's Game State Integration, main/gsi.ts) and
+// Bungie.net (Destiny 2, main/bungie.ts). A tile each; its panel has one switch per game and what of it is shared.
 const GSI = {
   cs2: {
+    app: 730,
     name: 'Counter-Strike 2',
     short: 'CS2',
     switches: [
-      ['match', 'Map, mode, score, how each round was won and the round clock', true],
-      ['stats', 'My kills, assists, deaths, MVPs and score', true],
-      ['state', 'My health, armor, money and weapon as they change. Off by default: it would help anyone playing against me', false],
+      ['match', 'Score and rounds', true],
+      ['stats', 'My stats', true],
+      ['state', 'Health, money and weapon', false],
     ],
   },
   dota: {
+    app: 570,
     name: 'Dota 2',
     short: 'Dota 2',
     switches: [
-      ['match', 'The kills on each side, the match clock, day or night, my hero and level', true],
-      ['stats', 'My kills, deaths, assists, last hits, denies, GPM, XPM and kill streak', true],
-      ['live', 'My gold, items, health, mana, respawn and buyback as they change. Off by default: it would help anyone playing against me', false],
+      ['match', 'Score, clock and hero', true],
+      ['stats', 'My stats', true],
+      ['live', 'Gold, items and health', false],
     ],
   },
 } as const
+type GsiGame = keyof typeof GSI
+type GsiStatus = Awaited<ReturnType<typeof window.api.gsi>>
+type BungieStatus = Awaited<ReturnType<typeof window.api.bungie>>
+const DESTINY_SWITCHES = [
+  ['activity', 'Activity'],
+  ['character', 'Guardian'],
+  ['fireteam', 'Fireteam'],
+  ['loadout', 'Loadout'],
+] as const
 const LAUNCH = '-gamestateintegration'
-type GsiStatus = { found: boolean; installed: boolean; folder: string | null; launch?: boolean | null }
-function GsiSetup({ game, set, save }: { game: 'cs2' | 'dota'; set: ActivitySettings; save: (p: Partial<ActivitySettings>) => void }) {
-  const g = GSI[game]
-  const [st, setSt] = useState<GsiStatus | null>(null)
+const why = (e: any) => String(e?.message ?? e).replace(/^Error invoking remote method '\w+': (Error: )?/, '')
+
+function Connections({ set, save }: { set: ActivitySettings; save: (p: Partial<ActivitySettings>) => void }) {
+  const [open, setOpen] = useState<'steam' | 'bungie' | null>(null)
+  const [gsi, setGsi] = useState<Partial<Record<GsiGame, GsiStatus>>>({})
+  const [bungie, setBungie] = useState<BungieStatus | null>(null)
+  const [fresh, setFresh] = useState<GsiGame[]>([]) // set up just now: the game needs one restart
   const [error, setError] = useState('')
   useEffect(() => {
-    window.api.gsi(game, 'status').then(setSt, () => setSt(null))
-  }, [game])
-  const act = (a: 'install' | 'remove') =>
-    window.api.gsi(game, a).then(
-      (s) => (setSt(s), setError('')),
-      (e) => setError(String(e?.message ?? e).replace(/^Error invoking remote method 'gsi': (Error: )?/, '')),
+    for (const g of Object.keys(GSI) as GsiGame[]) window.api.gsi(g, 'status').then((r) => setGsi((x) => ({ ...x, [g]: r })), () => {})
+    window.api.bungie('status').then(setBungie, () => {})
+  }, [])
+  const gsiAct = (g: GsiGame, a: 'install' | 'remove') => {
+    setError('')
+    window.api.gsi(g, a).then(
+      (r) => (setGsi((x) => ({ ...x, [g]: r })), setFresh((f) => (a === 'install' ? [...f, g] : f.filter((x) => x !== g)))),
+      (e) => setError(why(e)),
     )
-  const c: Record<string, boolean | undefined> = set[game] ?? {}
-  const sw = ([field, label, def]: readonly [string, string, boolean]) => (
+  }
+  const bungieAct = (a: 'link' | 'cancel' | 'unlink') => {
+    setError('')
+    if (a === 'link') setBungie((b) => b && { ...b, waiting: true })
+    if (a === 'unlink') setOpen(null)
+    return window.api.bungie(a).then(
+      (b) => (setBungie(b), a === 'link' && setOpen('bungie')),
+      (e) => {
+        if (why(e) !== 'cancelled') setError(why(e))
+        window.api.bungie('status').then(setBungie, () => {})
+      },
+    )
+  }
+  // Bungie's tile links when not linked, cancels while waiting, and opens its switches once linked.
+  const bungieClick = () => {
+    if (!bungie?.configured) return setError('This copy of Eleusinia was built without a Bungie.net app key.')
+    if (bungie.waiting) return bungieAct('cancel')
+    if (!bungie.linked) return bungieAct('link')
+    setOpen(open === 'bungie' ? null : 'bungie')
+  }
+  const live = (Object.keys(GSI) as GsiGame[]).filter((g) => gsi[g]?.installed)
+  const sw = (field: string, label: string, def: boolean, values: Record<string, boolean | undefined>, put: (v: Record<string, boolean | undefined>) => void) => (
     <label className="check-row" key={field}>
-      <input type="checkbox" role="switch" checked={c[field] ?? def} onChange={(e) => save({ [game]: { ...c, [field]: e.target.checked } })} />
+      <input type="checkbox" role="switch" checked={values[field] ?? def} onChange={(e) => put({ ...values, [field]: e.target.checked })} />
       <span>{label}</span>
     </label>
   )
-  const note = !st
-    ? 'Looking for the game…'
-    : st.installed
-      ? `Set up. If ${g.short} is running, restart it once.`
-      : st.found
-        ? "Adds a file to the game's cfg folder, the way Valve made for apps like this one."
-        : `${g.name} is not in your Steam library.`
   return (
-    <div className={`activity-gsi activity-${game}`}>
-      <div className="settings-row">
-        <span className="row-text">
-          <span className="row-title">{g.name} live match details</span>
-          <span className="row-sub">{note}</span>
-        </span>
-        {st?.found &&
-          (st.installed ? (
-            <button className="button subtle" onClick={() => act('remove')}>
-              Remove
-            </button>
-          ) : (
-            <button className="button" onClick={() => act('install')}>
-              Set up
-            </button>
-          ))}
+    <div className="connections-wrap">
+      <div className="connections" role="group" aria-label="Connections">
+        <button className={`connection${open === 'steam' ? ' open' : ''}`} data-k="steam" aria-expanded={open === 'steam'} onClick={() => setOpen(open === 'steam' ? null : 'steam')}>
+          <Brand name="steam" size={26} />
+          <span className="connection-name">Steam</span>
+          <span className={`connection-state${live.length ? ' on' : ''}`}>{live.length ? live.map((g) => GSI[g].short).join(' · ') : 'Live matches'}</span>
+        </button>
+        <button
+          className={`connection${open === 'bungie' ? ' open' : ''}${bungie?.waiting ? ' waiting' : ''}`}
+          data-k="bungie"
+          aria-expanded={bungie?.linked ? open === 'bungie' : undefined}
+          onClick={bungieClick}
+        >
+          <Brand name="bungie" size={26} />
+          <span className="connection-name">Bungie.net</span>
+          <span className={`connection-state${bungie?.linked ? ' on' : ''}`}>{bungie?.waiting ? 'Sign in, in your browser · Cancel' : bungie?.linked ? bungie.name || 'Linked' : 'Link'}</span>
+        </button>
       </div>
       {error && <p className="form-error">{error}</p>}
-      {st?.installed && st.launch !== undefined && st.launch !== true && (
-        <p className="activity-launch">
-          {st.launch === false ? 'One more step: Dota 2 only sends its details when started' : 'Make sure Dota 2 is started'} with <code>{LAUNCH}</code> in
-          its launch options. In Steam, right-click Dota 2, choose Properties, and add it under Launch options.{' '}
-          <CopyButton text={LAUNCH} label="Copy the launch option" />
-        </p>
+      {open === 'steam' && (
+        <div className="connection-panel">
+          {(Object.keys(GSI) as GsiGame[]).map((g) => {
+            const x = GSI[g]
+            const st = gsi[g]
+            const values: Record<string, boolean | undefined> = set[g] ?? {}
+            return (
+              <div className="connection-game" key={g} data-game={g}>
+                <div className="connection-game-head">
+                  <img src={`eleusinia-art://steam/${x.app}/header`} alt="" onError={hide} />
+                  <span className="row-title">{x.name}</span>
+                  {st && !st.found && <span className="row-sub">Not installed</span>}
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    aria-label={`${x.name} live match details`}
+                    checked={!!st?.installed}
+                    disabled={!st?.found}
+                    onChange={(e) => gsiAct(g, e.target.checked ? 'install' : 'remove')}
+                  />
+                </div>
+                {st?.installed && (
+                  <>
+                    {fresh.includes(g) && <p className="connection-note">Restart {x.short} once</p>}
+                    {st.launch !== undefined && st.launch !== true && (
+                      <p className="connection-note">
+                        Add <code>{LAUNCH}</code> to its Steam launch options <CopyButton text={LAUNCH} label="Copy the launch option" />
+                      </p>
+                    )}
+                    <div className="activity-details">{x.switches.map(([f, label, def]) => sw(f, label, def, values, (v) => save({ [g]: v })))}</div>
+                  </>
+                )}
+              </div>
+            )
+          })}
+        </div>
       )}
-      {st?.installed && <div className="activity-details">{g.switches.map(sw)}</div>}
-    </div>
-  )
-}
-
-// Settings → Activity → Destiny 2: linking the Bungie.net account (main/bungie.ts), and what of it is shared.
-type BungieStatus = Awaited<ReturnType<typeof window.api.bungie>>
-const DESTINY_SWITCHES = [
-  ['activity', 'The activity I am in, with its picture, mode, place, time in it and the score'],
-  ['character', 'My guardian: class, title, power, Guardian Rank and emblem'],
-  ['fireteam', 'Who is in my fireteam, with their emblems'],
-  ['loadout', 'My subclass, weapons and exotic armor'],
-] as const
-function BungieSetup({ set, save }: { set: ActivitySettings; save: (p: Partial<ActivitySettings>) => void }) {
-  const [st, setSt] = useState<BungieStatus | null>(null)
-  const [error, setError] = useState('')
-  useEffect(() => {
-    window.api.bungie('status').then(setSt, () => setSt(null))
-  }, [])
-  const act = (a: 'link' | 'cancel' | 'unlink') => {
-    if (a === 'link') setSt((s) => s && { ...s, waiting: true })
-    setError('')
-    return window.api.bungie(a).then(setSt, (e) => {
-      const why = String(e?.message ?? e).replace(/^Error invoking remote method 'bungie': (Error: )?/, '')
-      if (why !== 'cancelled') setError(why)
-      window.api.bungie('status').then(setSt, () => {})
-    })
-  }
-  const c: Record<string, boolean | undefined> = set.destiny ?? {}
-  const note = !st
-    ? 'Looking…'
-    : !st.configured
-      ? 'This copy of Eleusinia was built without a Bungie.net app key, so it cannot link.'
-      : st.waiting
-        ? 'Finish signing in on bungie.net, in your browser.'
-        : st.linked
-          ? `Linked as ${st.name || 'your Bungie.net account'}.`
-          : 'Link your Bungie.net account to show your activity, guardian, fireteam and loadout. You sign in on bungie.net, in your own browser.'
-  return (
-    <div className="activity-gsi activity-bungie">
-      <div className="settings-row">
-        <span className="row-text">
-          <span className="row-title">Destiny 2 with Bungie.net</span>
-          <span className="row-sub">{note}</span>
-        </span>
-        {st?.configured &&
-          (st.waiting ? (
-            <button className="button subtle" onClick={() => act('cancel')}>
-              Cancel
-            </button>
-          ) : st.linked ? (
-            <button className="button subtle" onClick={() => act('unlink')}>
-              Unlink
-            </button>
-          ) : (
-            <button className="button" onClick={() => act('link')}>
-              Link with Bungie.net
-            </button>
-          ))}
-      </div>
-      {(error || st?.error) && <p className="form-error">{error || st?.error}</p>}
-      {st?.linked && (
-        <>
-          <div className="activity-details">
-            {DESTINY_SWITCHES.map(([field, label]) => (
-              <label className="check-row" key={field}>
-                <input type="checkbox" role="switch" checked={c[field] ?? true} onChange={(e) => save({ destiny: { ...c, [field]: e.target.checked } })} />
-                <span>{label}</span>
-              </label>
-            ))}
-          </div>
-          <p className="activity-launch">
-            Marathon{st.marathon ? ' is on this account too, but' : ':'} Bungie.net does not give apps Marathon details yet. It shows from Steam, like
-            other games.
-          </p>
-        </>
+      {open === 'bungie' && bungie?.linked && (
+        <div className="connection-panel">
+          <div className="activity-details">{DESTINY_SWITCHES.map(([f, label]) => sw(f, label, true, set.destiny ?? {}, (v) => save({ destiny: v })))}</div>
+          <button className="button subtle" onClick={() => bungieAct('unlink')}>
+            Unlink
+          </button>
+        </div>
       )}
     </div>
   )
