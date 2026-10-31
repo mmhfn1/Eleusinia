@@ -211,6 +211,25 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
     <Dialog label="Settings" close={close} className="settings-dialog">
       <h1>Settings</h1>
       <section className="settings-section">
+        <h2>Profile</h2>
+        <div className="settings-row">
+          <Avatar k={st.me} p={st.profile} size={40} />
+          <span className="row-text">
+            <span className="row-title">{st.profile.name}</span>
+            <span className="row-sub">{st.profile.handle}</span>
+          </span>
+          <button
+            className="button"
+            onClick={() => {
+              close()
+              edit()
+            }}
+          >
+            Edit profile
+          </button>
+        </div>
+      </section>
+      <section className="settings-section">
         <h2>General</h2>
         <label className="check-row">
           <input type="checkbox" role="switch" checked={st.settings.closeToTray !== false} onChange={(e) => api.call('setSettings', { closeToTray: e.target.checked })} />
@@ -234,31 +253,12 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
         </label>
       </section>
       <section className="settings-section">
-        <h2>Activity</h2>
-        <ActivitySettingsSection st={st} name={(k) => labelOf(st.profiles[k] ?? NOBODY, k)} />
-      </section>
-      <section className="settings-section">
-        <h2>Profile</h2>
-        <div className="settings-row">
-          <Avatar k={st.me} p={st.profile} size={40} />
-          <span className="row-text">
-            <span className="row-title">{st.profile.name}</span>
-            <span className="row-sub">{st.profile.handle}</span>
-          </span>
-          <button
-            className="button"
-            onClick={() => {
-              close()
-              edit()
-            }}
-          >
-            Edit profile
-          </button>
-        </div>
-      </section>
-      <section className="settings-section">
         <h2>Audio devices and quality</h2>
         <AudioSettings st={st} />
+      </section>
+      <section className="settings-section">
+        <h2>Activity</h2>
+        <ActivitySettingsSection st={st} name={(k) => labelOf(st.profiles[k] ?? NOBODY, k)} />
       </section>
       <section className="settings-section">
         <h2>Hotkeys</h2>
