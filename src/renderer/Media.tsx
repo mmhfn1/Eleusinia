@@ -463,8 +463,26 @@ function Screen({ stream, label, big, mirror, volume }: ScreenProps) {
   // Asks the document, not the state: the state only catches up once fullscreenchange has fired.
   const toggle = () => (document.fullscreenElement === fig.current ? document.exitFullscreen() : fig.current?.requestFullscreen())?.catch(() => {})
   const word = full ? 'Exit full screen' : 'Full screen'
+  // The title and controls of the large view fade 1 s after the last mouse move, click or key press over it
+  const [idle, setIdle] = useState(false)
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const wake = () => {
+    setIdle(false)
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => setIdle(true), 1000)
+  }
+  useEffect(() => {
+    if (big) wake()
+    return () => clearTimeout(timer.current)
+  }, [big])
   return (
-    <figure ref={fig} className={`screen ${big ? 'big' : ''} ${mirror ? 'mirror' : ''}`}>
+    <figure
+      ref={fig}
+      className={`screen ${big ? 'big' : ''} ${mirror ? 'mirror' : ''} ${big && idle ? 'idle' : ''}`}
+      onPointerMove={big ? wake : undefined}
+      onPointerDown={big ? wake : undefined}
+      onKeyDown={big ? wake : undefined}
+    >
       <video ref={ref} autoPlay playsInline muted onDoubleClick={big ? toggle : undefined} />
       <figcaption>{label}</figcaption>
       {big && (
@@ -494,7 +512,7 @@ function Screen({ stream, label, big, mirror, volume }: ScreenProps) {
 
 // Screens and cameras in this call. With a screen shared (or a video picked), one is shown large and the rest as
 // thumbnails; with only cameras, they share a grid. Each person is told what we show of their screen and camera, so
-// they send only that: nothing while hidden or minimised, a thumbnail, or their full stream.
+// they send only that: no video while hidden or minimised (the screen's sound goes on), a thumbnail, or their full stream.
 type Item = { k: Key; slot: call.Slot }
 const itemId = (i: Item) => `${i.slot}:${i.k}`
 const GRID_FULL = 4 // up to this many cameras in the grid each get full quality; beyond it, thumbnails
