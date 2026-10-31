@@ -3240,13 +3240,40 @@ img.crest {
 .destiny-guardian .row-sub {
   white-space: normal;
 }
-.destiny-art {
-  width: calc(100% + 24px);
+.destiny-activity {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-content: end;
+  min-height: 72px;
   margin: -10px -12px 0;
-  aspect-ratio: 16 / 7;
-  object-fit: cover;
+  padding: 10px 12px;
   border-radius: var(--r-md) var(--r-md) 0 0;
-  background: var(--obsidian-4);
+  background: var(--obsidian-4) center / cover no-repeat;
+  box-shadow: inset 0 -60px 40px -20px rgb(0 0 0 / 0.75);
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.9);
+}
+.destiny-activity-name {
+  font-family: var(--display);
+  font-size: 17px;
+  font-weight: 600;
+}
+.destiny-activity-mode {
+  grid-column: 1;
+  color: var(--silver-2);
+  font-size: 12px;
+}
+.destiny-activity-light {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: end;
+  color: var(--gold);
+  font-size: 12px;
+}
+.destiny-activity-light::before {
+  content: '◆ ';
+}
+.destiny-where {
+  margin: 0;
 }
 .destiny-guardian {
   display: flex;
@@ -3334,4 +3361,8 @@ img.crest {
 }
 .gsi-state.problem {
   color: var(--fair);
+}
+.destiny-clan b {
+  color: var(--silver);
+  font-weight: 600;
 }

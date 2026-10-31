@@ -45,9 +45,11 @@ test('linking: bungie.net in the browser, the code back on 127.0.0.1, the cross 
   const d = await b.destiny()
   expect(d!.activity!.name).toBe("Salvation's Edge")
   expect(d!.loadout).toHaveLength(5)
+  expect([d!.character!.clan, d!.character!.tag]).toEqual(['The Last Wardens', 'LW'])
   const asked = fake.seen.defs
   await b.destiny()
   expect(fake.seen.defs).toBe(asked)
+  expect(fake.seen.clan).toBe(1) // once an hour, not on every look
   expect(fake.seen.manifest).toBe(1)
   // A restart keeps the link and the definitions
   const again = make()

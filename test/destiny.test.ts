@@ -23,12 +23,16 @@ test('a raid: the activity, the guardian in it, the fireteam and the loadout', (
   expect(Object.keys(defs)).not.toContain('DestinyInventoryItemDefinition:5007')
   expect(Object.keys(defs)).toContain('DestinyPlaceDefinition:4001') // the second round, from the activity's own definition
   const d = destinyOf(p, defs, NOW)!
-  expect(d.activity).toEqual({ name: "Salvation's Edge", mode: 'Raid', place: 'The Pale Heart, The Traveler', image: '/img/destiny_content/pgcr/europa-mission-knuckle.jpg', since: Date.parse('2026-10-30T14:40:00Z'), light: 1990 })
+  expect(d.activity).toEqual({ name: "Salvation's Edge", mode: 'Raid', place: 'The Pale Heart', image: '/img/destiny_content/pgcr/europa-mission-knuckle.jpg', since: Date.parse('2026-10-30T14:40:00Z'), light: 1990 })
   expect(d.character).toEqual({ class: 'Warlock', light: 2010, emblem: `/common/destiny2_content/icons/${(1).toString(16).padStart(32, '0')}.jpg`, title: 'Rivensbane', rank: 7, session: 74 })
   expect(d.fireteam!.members.map((m) => m.name)).toEqual(['Ann', 'Osiris', 'Saint'])
   expect(d.fireteam!.members[2].emblem).toBeUndefined()
   expect([d.fireteam!.max, d.fireteam!.open]).toEqual([6, 3])
   expect(d.score).toBeUndefined() // a raid has none
+  // Nor does a strike with points: us against them is for matches against players
+  const strike = profile()
+  Object.assign(strike.profileTransitoryData.data.currentActivity, { score: 3541, highestOpposingFactionScore: 0, numberOfOpponents: 0 })
+  expect(destinyOf(strike, resolve(strike), NOW)!.score).toBeUndefined()
   // Subclass, the three weapons, exotic armor only
   expect(d.loadout!.map((i) => [i.name, i.exotic])).toEqual([
     ['Prismatic', true],
@@ -73,6 +77,9 @@ test('what is shared, each part on unless turned off, and a friend\'s details ar
   const g = shareable({ now: 1, game: { name: 'Destiny 2', since: 0, source: 'steam', app: 1085660, destiny: d } }, { destiny: { loadout: false } }).game!
   expect(g.destiny!.loadout).toBeUndefined()
 
+  const withClan = { ...d, character: { ...d.character!, clan: 'The Last Wardens', tag: 'LW' } }
+  expect(cleanDestiny(withClan, 0, NOW)!.character).toMatchObject({ clan: 'The Last Wardens', tag: 'LW' })
+  expect(cleanDestiny({ ...d, character: { ...d.character!, clan: 'x'.repeat(200), tag: 'TOOLONGTAG' } }, 0, NOW)!.character).toMatchObject({ clan: 'x'.repeat(60), tag: 'TOOLONGT' })
   const c = cleanDestiny(d, -10_000, NOW)!
   expect(c.activity!.since).toBe(d.activity!.since! - 10_000)
   expect({ ...c, activity: { ...c.activity, since: d.activity!.since } }).toEqual(d)

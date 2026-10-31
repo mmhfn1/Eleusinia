@@ -15,7 +15,8 @@ export type Destiny = {
     light?: number // recommended power
     pvp?: boolean
   }
-  character?: { class: string; light: number; emblem?: string; title?: string; rank?: number; session?: number } // emblem: the wide banner; rank: Guardian Rank; session: minutes this session
+  // emblem: the wide banner; rank: Guardian Rank; session: minutes this session; clan and tag: the clan's name and callsign
+  character?: { class: string; light: number; emblem?: string; title?: string; rank?: number; session?: number; clan?: string; tag?: string }
   fireteam?: { members: { name: string; emblem?: string }[]; max?: number; open?: number }
   score?: { us: number; them: number }
   loadout?: DestinyItem[] // subclass, kinetic, energy, power weapons, then exotic armor
@@ -115,7 +116,8 @@ export function destinyOf(p: any, defs: Defs, now = Date.now()): Destiny | null 
     else {
       const mode = def('DestinyActivityModeDefinition', act.currentActivityModeHash)
       const playlist = nameOf(def('DestinyActivityDefinition', act.currentPlaylistActivityHash))
-      const place = [nameOf(def('DestinyDestinationDefinition', a.destinationHash)), nameOf(def('DestinyPlaceDefinition', a.placeHash))].filter((x, i, all) => x && all.indexOf(x) === i)
+      // The destination names the place well enough ("Savathûn's Throne World"); the planet only when there is none
+      const place = [nameOf(def('DestinyDestinationDefinition', a.destinationHash)) ?? nameOf(def('DestinyPlaceDefinition', a.placeHash))].filter(Boolean)
       const since = Date.parse(act.dateActivityStarted)
       d.activity = {
         name,
@@ -139,7 +141,8 @@ export function destinyOf(p: any, defs: Defs, now = Date.now()): Destiny | null 
     const max = num(a?.matchmaking?.maxParty, 12)
     if (members.length) d.fireteam = { members: members.slice(0, 12), ...(max && { max }), ...(num(t.joinability?.openSlots, 12) !== undefined && { open: num(t.joinability.openSlots, 12) }) }
     const c = t.currentActivity
-    if (!d.orbit && c && (c.numberOfOpponents > 0 || c.score > 0 || c.highestOpposingFactionScore > 0)) d.score = { us: num(c.score) ?? 0, them: num(c.highestOpposingFactionScore) ?? 0 }
+    // Us against them only means something against other players (a strike's score is not a match score)
+    if (!d.orbit && c && (a?.isPvP === true || c.numberOfOpponents > 0)) d.score = { us: num(c.score) ?? 0, them: num(c.highestOpposingFactionScore) ?? 0 }
   }
   const items = ((p.characterEquipment?.data?.[id]?.items ?? []) as any[]).map((i) => ({ bucket: i?.bucketHash, item: itemOf(def('DestinyInventoryItemDefinition', i?.itemHash)) }))
   const pick = (buckets: number[], exoticOnly = false) =>
@@ -171,6 +174,8 @@ export function cleanDestiny(x: any, shift: number, now: number): Destiny | unde
     if (text(c.title, 40)) d.character.title = text(c.title, 40)
     if (num(c.rank, 100)) d.character.rank = num(c.rank, 100)
     if (num(c.session, 100000) !== undefined) d.character.session = num(c.session, 100000)
+    if (text(c.clan, 60)) d.character.clan = text(c.clan, 60)
+    if (text(c.tag, 8)) d.character.tag = text(c.tag, 8)
   }
   const f = x.fireteam
   if (f && Array.isArray(f.members)) {
