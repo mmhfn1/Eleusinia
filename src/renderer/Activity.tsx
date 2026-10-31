@@ -221,17 +221,19 @@ function DestinyMatch({ d }: { d: Destiny }) {
   const f = d.fireteam
   return (
     <div className="cs2 destiny">
-      {a?.image && <img className="destiny-art" src={bungieArt(a.image)} alt="" onError={hide} />}
       {d.orbit ? (
         <p className="cs2-map">In orbit</p>
       ) : (
         a && (
-          <div className="cs2-head">
-            <span className="cs2-map">{a.name}</span>
-            <span className="row-sub">
-              {[a.mode, a.playlist, a.place, a.since && `for ${duration(Date.now() - a.since)}`, a.light && `Recommended ${a.light}`].filter(Boolean).join(' · ')}
-            </span>
-          </div>
+          <>
+            {/* The activity's picture as a short strip under its name and mode */}
+            <div className="destiny-activity" style={a.image ? { backgroundImage: `url("${bungieArt(a.image)}")` } : undefined}>
+              <span className="destiny-activity-name">{a.name}</span>
+              <span className="destiny-activity-mode">{[a.mode, a.playlist].filter(Boolean).join(' · ')}</span>
+              {a.light && <span className="destiny-activity-light" aria-label={`Recommended power ${a.light}`}>{a.light}</span>}
+            </div>
+            {(a.place || a.since) && <p className="row-sub destiny-where">{[a.place, a.since && duration(Date.now() - a.since)].filter(Boolean).join(' · ')}</p>}
+          </>
         )
       )}
       {d.score && (
@@ -254,6 +256,11 @@ function DestinyMatch({ d }: { d: Destiny }) {
               {ch.class}
               {ch.title && <span className="destiny-title"> {ch.title}</span>}
             </span>
+            {ch.clan && (
+              <span className="row-sub destiny-clan">
+                {ch.tag && <b>[{ch.tag}]</b>} {ch.clan}
+              </span>
+            )}
             <span className="row-sub">
               {[ch.rank && `Guardian Rank ${ch.rank}`, ch.session !== undefined && ch.session > 0 && `${duration(ch.session * 60000)} this session`].filter(Boolean).join(' · ')}
             </span>
@@ -416,7 +423,7 @@ export function GameCard({ g, full = true }: { g: Game; full?: boolean }) {
   const a = g.achievements
   return (
     <section className="activity-card" aria-label={`Playing ${g.name}`}>
-      {g.app && <img className="activity-art" src={`eleusinia-art://steam/${g.app}/header`} alt="" onError={hide} />}
+      {g.app && !g.destiny?.activity?.image && <img className="activity-art" src={`eleusinia-art://steam/${g.app}/header`} alt="" onError={hide} />}
       <div className="activity-body">
         <p className="activity-kicker">Playing{g.source === 'steam' ? ' on Steam' : ''}</p>
         <h3>{g.name}</h3>

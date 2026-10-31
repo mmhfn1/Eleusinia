@@ -119,6 +119,19 @@ export function createBungie({ dir, config, fetch, open, seal, unseal, diag }: O
     return defs.defs
   }
 
+  // The clan (public GroupV2 lookup, type 1 = clan), asked at most once an hour: it rarely changes
+  let clan: { at: number; of: string; value: { clan: string; tag?: string } | null } | null = null
+  async function clanOf(type: number, id: string) {
+    if (clan && clan.of === id && Date.now() - clan.at < 3600e3) return clan.value
+    const r = await api(`/GroupV2/User/${type}/${encodeURIComponent(id)}/0/1/`, false)
+    if (!r) return clan?.of === id ? clan.value : null // keep what we had while Bungie cannot say
+    const g = r.results?.[0]?.group
+    const name = typeof g?.name === 'string' ? g.name.trim().slice(0, 60) : ''
+    const tag = typeof g?.clanInfo?.clanCallsign === 'string' ? g.clanInfo.clanCallsign.trim().slice(0, 8) : ''
+    clan = { at: Date.now(), of: id, value: name ? { clan: name, ...(tag && { tag }) } : null }
+    return clan.value
+  }
+
   let pending: { server: Server; done: (e?: Error) => void } | null = null
   function cancel() {
     pending?.done(new Error('cancelled'))
@@ -190,7 +203,10 @@ export function createBungie({ dir, config, fetch, open, seal, unseal, diag }: O
       const { type, id } = saved.destiny
       const p = await api(`/Destiny2/${type}/Profile/${encodeURIComponent(id)}/?components=${COMPONENTS}`)
       if (!p) return null
-      return destinyOf(p, await definitions(p))
+      const d = destinyOf(p, await definitions(p))
+      const c = await clanOf(type, id)
+      if (d?.character && c) Object.assign(d.character, c)
+      return d
     },
     stop: cancel,
   }

@@ -61,6 +61,11 @@ export async function fakeBungie({ expiresIn = 3600, noAccounts = false } = {}) 
         bungieNetUser: { membershipId: '1234', displayName: 'Guardian', cachedBungieGlobalDisplayName: 'Guardian', cachedBungieGlobalDisplayNameCode: 42 },
       })
     }
+    // Public: the clan of the cross save account
+    if (u.pathname === '/Platform/GroupV2/User/3/4611686018400000002/0/1/') {
+      seen.clan = (seen.clan ?? 0) + 1
+      return ok(res, { results: [{ group: { groupId: '77', name: 'The Last Wardens', clanInfo: { clanCallsign: 'LW' } } }], totalResults: 1 })
+    }
     if (!valid.has(bearer)) return res.writeHead(401).end(JSON.stringify({ ErrorCode: 99, ErrorStatus: 'WebAuthRequired' }))
     if (u.pathname === '/Platform/Destiny2/3/Profile/4611686018400000002/' && u.searchParams.get('components') === '100,200,204,205,1000') {
       seen.profile++

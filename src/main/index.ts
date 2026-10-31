@@ -167,7 +167,7 @@ function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (
     diag,
   })
   let destinyTimer: ReturnType<typeof setInterval> | null = null
-  // Bungie updates a profile about every 30 s; nothing is asked while Destiny 2 is not running.
+  // Every 5 s while Destiny 2 runs (one request; definitions only when new), nothing otherwise.
   const watchDestiny = () => {
     const want = running && game?.app === DESTINY_APP && bungie.status().linked
     if (want && !destinyTimer) {
@@ -176,7 +176,7 @@ function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (
           (d) => destinyTimer && ((guardian = d), send()),
           (e) => diag(`Bungie.net: ${e?.message ?? e}`),
         )
-      destinyTimer = setInterval(tick, 30000)
+      destinyTimer = setInterval(tick, 5000)
       tick()
     } else if (!want && destinyTimer) {
       clearInterval(destinyTimer)
