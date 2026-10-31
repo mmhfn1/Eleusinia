@@ -89,7 +89,7 @@ test('names as players know them', () => {
 test("the local server: set up writes the game's file, only posts with our token count, and remove takes it away", async () => {
   const cfg = mkdtempSync(join(tmpdir(), 'eleusinia-cs2cfg-'))
   const got: (Cs2 | null)[] = []
-  const cs2 = createGsi({ dir: mkdtempSync(join(tmpdir(), 'eleusinia-cs2-')), cfgFolder: async () => cfg, onData: (_g, c) => got.push(c as Cs2 | null), diag: () => {} })
+  const cs2 = createGsi({ dir: mkdtempSync(join(tmpdir(), 'eleusinia-cs2-')), cfgFolder: async (g) => (g === 'cs2' ? cfg : null), onData: (_g, c) => got.push(c as Cs2 | null), diag: () => {} })
   expect(await cs2.status('cs2')).toEqual({ found: true, installed: false, folder: cfg })
   await cs2.install('cs2')
   const file = readFileSync(join(cfg, 'gamestate_integration_eleusinia.cfg'), 'utf8')
@@ -127,7 +127,7 @@ test('a taken port is swapped for another, in the saved settings and the game fi
   const taken = (squatter.address() as { port: number }).port
   writeFileSync(join(dir, 'gsi.json'), JSON.stringify({ port: taken, token: 'a'.repeat(48) }))
   const got: (Cs2 | null)[] = []
-  const cs2 = createGsi({ dir, cfgFolder: async () => cfg, onData: (_g, c) => got.push(c as Cs2 | null), diag: () => {} })
+  const cs2 = createGsi({ dir, cfgFolder: async (g) => (g === 'cs2' ? cfg : null), onData: (_g, c) => got.push(c as Cs2 | null), diag: () => {} })
   await cs2.install('cs2')
   expect(cs2.port).not.toBe(taken)
   const file = readFileSync(join(cfg, 'gamestate_integration_eleusinia.cfg'), 'utf8')

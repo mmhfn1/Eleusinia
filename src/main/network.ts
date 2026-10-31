@@ -45,12 +45,12 @@ const STRICT = { dht: { quickFirewall: false, ephemeral: true }, server: { holep
 
 // One encrypted, authenticated stream per peer, found by public key over the DHT. `allow` is for tests: refusing a
 // peer's link stands in for two routers that never let a direct connection through. `strict` (also for tests) makes
-// direct connections fail for real, so only a relay can link two strict peers.
-export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allow: (key: Key) => boolean = () => true, strict = false) {
+// direct connections fail for real, so only a relay can link two strict peers. `raceMs`: see adopt.
+export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allow: (key: Key) => boolean = () => true, strict = false, raceMs = 15000) {
   const me = keyPair.publicKey.toString('hex')
   // Our identity is the default key, so hyperdht's own dials to a relay show who we are and the relay can check.
   const dht = new DHT({ ...dhtOpts, ...(strict && STRICT.dht), keyPair })
-  const links = new Map<Key, { sock: any; initiator: Key }>()
+  const links = new Map<Key, { sock: any; initiator: Key; at: number }>()
   const dialing = new Set<string>()
   let usesRelays = false
 
@@ -59,13 +59,15 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
     if (!allow(key)) return sock.destroy()
     const old = links.get(key)
     if (old) {
-      // Both sides dialed at once: both keep the stream dialed by the smaller key. The same side dialing again
-      // means it lost the old stream, which is only half alive here, so the new one replaces it.
-      if (old.initiator < initiator || (old.initiator === initiator && initiator === me)) return sock.destroy()
+      // Both sides dialed at once (their streams open within moments of each other): both keep the stream dialed by
+      // the smaller key. Otherwise the peer lost the old stream (it restarted, or its network changed), which is
+      // only half alive here and would hold their new one off until it times out, so the new one replaces it.
+      const race = old.initiator !== initiator && Date.now() - old.at < raceMs
+      if ((race && old.initiator < initiator) || (old.initiator === initiator && initiator === me)) return sock.destroy()
       links.delete(key)
       old.sock.destroy()
     }
-    links.set(key, { sock, initiator })
+    links.set(key, { sock, initiator, at: Date.now() })
     sock.setKeepAlive(5000)
     // Both sides send a keepalive every 5 s, so a stream that hears nothing for 20 s is dead (a dropped
     // connection that was never closed); closing it lets the peer show offline and be redialed.

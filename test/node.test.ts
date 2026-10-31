@@ -385,6 +385,35 @@ test('someone watching the request topic of a person sees one-off keys, never wh
   await watcher.destroy()
 }, 120000)
 
+// A copy that restarts (or whose network changes) dials in while the other side still holds its old stream, which is
+// only half alive. Whichever key is smaller, the new stream must win at once, not after the old one times out.
+test('a peer that comes back while its old stream is still open here links again at once', async () => {
+  for (const flip of [false, true]) {
+    const [k1, k2] = [DHT.keyPair(), DHT.keyPair()].sort((x, y) => Buffer.compare(x.publicKey, y.publicKey))
+    const [aKp, bKp] = flip ? [k2, k1] : [k1, k2]
+    const quiet = { open() {}, close() {}, msg() {} }
+    const got: string[] = []
+    const a = createNet(aKp, { ...quiet, msg: (_k, w: any) => got.push(w.t) }, { bootstrap: testnet.bootstrap }, () => true, false, 500)
+    const b1 = createNet(bKp, quiet, { bootstrap: testnet.bootstrap })
+    await Promise.all([a.listening, b1.listening])
+    const aKey = aKp.publicKey.toString('hex')
+    const bKey = bKp.publicKey.toString('hex')
+    a.dial(bKey) // the side that stays up made the first link (the case the old rule got wrong when its key is smaller)
+    await until(() => a.linked(bKey) && b1.linked(aKey))
+    await new Promise((r) => setTimeout(r, 600)) // past the window where both dialing at once is assumed
+    // The second copy of B dials while the first still holds its stream open
+    const b2 = createNet(bKp, quiet, { bootstrap: testnet.bootstrap })
+    await b2.listening
+    const start = Date.now()
+    b2.dial(aKey)
+    await until(() => b2.linked(aKey))
+    b2.send(aKey, { t: 'ping-from-new' } as any)
+    await until(() => got.includes('ping-from-new'))
+    expect(Date.now() - start).toBeLessThan(15000)
+    await Promise.all([a.destroy(), b1.destroy(), b2.destroy()])
+  }
+}, 120000)
+
 test('a stranger cannot link at all, so cannot learn our address, ask for our card or push one on us', async () => {
   const a = start()
   await a.node.setProfile({ username: 'ann', name: 'Ann' })

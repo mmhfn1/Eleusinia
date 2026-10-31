@@ -407,7 +407,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const n = (asked.get(key) ?? 0) + 1
       asked.set(key, n)
       const ok = !!relayKey && n <= 10 && w.key !== key && known(w.key) && net.linked(w.key) && relayKeys.has(w.key)
-      if (!ok) diag('network', `can't relay for …${key.slice(-6)} to …${w.key.slice(-6)}: ${!relayKey ? 'relaying off' : !known(w.key) ? 'not a contact' : !net.linked(w.key) ? 'not linked with them' : !relayKeys.has(w.key) ? 'they do not relay' : 'too many asks'}`)
+      if (!ok) tell(`cant:${key}:${w.key}`, `can't relay for …${key.slice(-6)} to …${w.key.slice(-6)}: ${!relayKey ? 'relaying off' : !known(w.key) ? 'not a contact' : !net.linked(w.key) ? 'not linked with them' : !relayKeys.has(w.key) ? 'they do not relay' : 'too many asks'}`)
       net.send(key, { t: 'reach', key: w.key, ok })
     } else if (w.t === 'relayed') {
       if (!isKey(w.by) || !known(w.by) || !relayKey) return
@@ -429,6 +429,10 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   // pairs our encrypted stream with theirs and sees only ciphertext, plus who talks to whom, when and how much.
   // Only tried on demand, after a direct dial failed, and closed again when idle.
   const IDLE = 10 * 60000
+  // Relay attempts repeat every tick for as long as someone is unreachable; each line goes to the diagnostics once
+  // until it changes, so the repeats do not push everything else out of a problem report.
+  const told = new Map<string, string>()
+  const tell = (id: string, text: string) => told.get(id) !== text && (told.set(id, text), diag('network', text))
   const RETRY = redialMs * 2 // first backoff after a failed attempt: 30 s in use, doubling up to 20 times that
   let relayKey: Key | null = null // ours, while relaying is on
   const relayKeys = new Map<Key, Key>() // contacts that relay, by the relay key their hello gave
@@ -463,7 +467,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       .sort(() => Math.random() - 0.5)
       .sort((a, b) => +(b === lastGood.get(k)) - +(a === lastGood.get(k)))
       .slice(0, 3)
-    diag('network', `asking ${cands.length} contact${cands.length === 1 ? '' : 's'} to relay for …${k.slice(-6)}`)
+    tell(`ask:${k}`, `asking ${cands.length} contact${cands.length === 1 ? '' : 's'} to relay for …${k.slice(-6)}`)
     const by = await new Promise<Key | null>((resolve) => {
       let left = cands.length
       if (!left) return resolve(null)
@@ -478,7 +482,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     if (net.linked(k)) return void attempting.delete(k)
     // Nobody to ask, or nobody able yet (often a mutual friend still linking with them): asked again on the next tick,
     // without backing off, since asking costs a few small messages. Only a relayed dial that fails backs off.
-    if (!by || !relayKeys.has(by)) return diag('network', `no contact could relay for …${k.slice(-6)} yet`), void attempting.delete(k)
+    if (!by || !relayKeys.has(by)) return tell(`none:${k}`, `no contact could relay for …${k.slice(-6)} yet`), void attempting.delete(k)
+    told.delete(`none:${k}`)
     diag('network', `linking with …${k.slice(-6)} through …${by.slice(-6)}`)
     pendingVia.set(k, by)
     net.dial(k, relayKeys.get(by))

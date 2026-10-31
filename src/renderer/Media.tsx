@@ -3,7 +3,7 @@ import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
 import { usable } from '../shared/devices'
 import { type Key, type State } from '../shared/protocol'
 import type { Steadiness } from '../shared/quality'
-import { type Quality, SOUND_KBPS, type Verdict, choices, defaultQuality, fitQuality, heightLabel, streamKbps } from '../shared/video'
+import { type Level, type Quality, SOUND_KBPS, type Verdict, choices, defaultQuality, fitQuality, heightLabel, streamKbps } from '../shared/video'
 import * as call from './call'
 import { Avatar, Dialog, Icon } from './ui'
 import type { SourceKind } from '../shared/sources'
@@ -464,6 +464,7 @@ function Screen({ stream, label, big, mirror, volume }: ScreenProps) {
   const toggle = () => (document.fullscreenElement === fig.current ? document.exitFullscreen() : fig.current?.requestFullscreen())?.catch(() => {})
   const word = full ? 'Exit full screen' : 'Full screen'
   // The title and controls of the large view fade 1 s after the last mouse move, click or key press over it
+  const unmuted = useRef(1) // the volume to go back to when unmuting
   const [idle, setIdle] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
   const wake = () => {
@@ -488,8 +489,15 @@ function Screen({ stream, label, big, mirror, volume }: ScreenProps) {
       {big && (
         <div className="screen-controls">
           {volume && (
-            <label className="screen-volume" title={`Volume of ${volume.name}'s stream: ${Math.round(volume.value * 100)}%`}>
-              <Icon name="volume" size={16} />
+            <div className="screen-volume" title={`Volume of ${volume.name}'s stream: ${Math.round(volume.value * 100)}%`}>
+              <button
+                className="icon-button"
+                aria-label={volume.value ? `Mute ${volume.name}'s stream` : `Unmute ${volume.name}'s stream`}
+                aria-pressed={!volume.value}
+                onClick={() => (volume.value ? ((unmuted.current = volume.value), volume.set(0)) : volume.set(unmuted.current))}
+              >
+                <Icon name={volume.value ? 'volume' : 'volumeOff'} size={16} />
+              </button>
               <input
                 type="range"
                 min={0}
@@ -499,7 +507,7 @@ function Screen({ stream, label, big, mirror, volume }: ScreenProps) {
                 aria-label={`Volume of ${volume.name}'s stream`}
                 onChange={(e) => volume.set(Number(e.target.value) / 100)}
               />
-            </label>
+            </div>
           )}
           <button className="icon-button screen-full" aria-label={word} title={word} onClick={toggle}>
             <Icon name={full ? 'collapse' : 'expand'} size={16} />
@@ -510,15 +518,33 @@ function Screen({ stream, label, big, mirror, volume }: ScreenProps) {
   )
 }
 
-// Screens and cameras in this call. With a screen shared (or a video picked), one is shown large and the rest as
+// A shared screen nobody here has joined: where its video would be, who shares what, and Join stream.
+function StreamInvite({ label, big, join }: { label: string; big?: boolean; join: () => void }) {
+  return (
+    <figure className={`screen invite ${big ? 'big' : ''}`}>
+      <div className="invite-body">
+        <Icon name="screen" size={big ? 32 : 20} />
+        <button className="button primary" onClick={join}>
+          Join stream
+        </button>
+      </div>
+      <figcaption>{label}</figcaption>
+    </figure>
+  )
+}
+
+// Screens and cameras in this call. Shared screens are joined, one at a time, as on Discord; the others wait as Join
+// stream tiles, and send nothing. With a stream joined (or a video picked), one is shown large and the rest as
 // thumbnails; with only cameras, they share a grid. Each person is told what we show of their screen and camera, so
-// they send only that: no video while hidden or minimised (the screen's sound goes on), a thumbnail, or their full stream.
+// they send only that: nothing for a stream we have not joined, sound only while hidden or minimised, a thumbnail, or
+// their full stream.
 type Item = { k: Key; slot: call.Slot }
 const itemId = (i: Item) => `${i.slot}:${i.k}`
 const GRID_FULL = 4 // up to this many cameras in the grid each get full quality; beyond it, thumbnails
 
 export function Stage({ name, settings }: { name: (k: Key) => string; settings: () => void }) {
   const [focus, setFocus] = useState<string | null>(null)
+  const [joined, setJoined] = useState<Key | null>(null)
   const [hidden, setHidden] = useState(false)
   const [away, setAway] = useState(document.hidden)
   const items: Item[] = [
@@ -537,8 +563,19 @@ export function Stage({ name, settings }: { name: (k: Key) => string; settings: 
   }, [])
   const mine = call.sharing()
   const cam = call.filming()
-  const main = items.find((i) => itemId(i) === focus) ?? items.find((i) => i.slot === 'screen') ?? null
-  const level = (i: Item) => (hidden || away ? 'off' : !main ? (items.length <= GRID_FULL ? 'full' : 'thumb') : itemId(i) === itemId(main) ? 'full' : 'thumb')
+  // The stream we joined, while it lasts; one that ended is left, so its next share starts unjoined again
+  const watching = joined && call.shares.has(joined) ? joined : null
+  useEffect(() => {
+    if (joined && !watching) setJoined(null)
+  })
+  const join = (k: Key) => (setJoined(k), setFocus(null))
+  const live = (i: Item) => i.slot === 'camera' || i.k === watching
+  const main = items.find((i) => itemId(i) === focus) ?? items.find((i) => i.slot === 'screen' && i.k === watching) ?? items.find((i) => i.slot === 'screen') ?? null
+  const level = (i: Item): Level => {
+    if (!live(i)) return 'off'
+    if (hidden || away) return i.slot === 'screen' ? 'audio' : 'off'
+    return !main ? (items.length <= GRID_FULL ? 'full' : 'thumb') : itemId(i) === itemId(main) ? 'full' : 'thumb'
+  }
   useEffect(() => {
     for (const i of items) call.show(i.k, i.slot, level(i))
   })
@@ -550,11 +587,16 @@ export function Stage({ name, settings }: { name: (k: Key) => string; settings: 
     i.slot === 'screen'
       ? `${name(i.k)}: ${info(i).name}${info(i).sound ? ' · with sound' : ''} · ${heightLabel(info(i).height)}, ${info(i).fps} fps`
       : name(i.k)
-  const tile = (i: Item) => (
-    <button key={itemId(i)} className="stage-thumb" aria-label={`Show ${label(i)} large`} onClick={() => setFocus(itemId(i))}>
-      <Screen stream={media(i)} label={i.slot === 'screen' ? `${name(i.k)}'s screen` : name(i.k)} />
-    </button>
-  )
+  const tile = (i: Item) =>
+    live(i) ? (
+      <button key={itemId(i)} className="stage-thumb" aria-label={`Show ${label(i)} large`} onClick={() => setFocus(itemId(i))}>
+        <Screen stream={media(i)} label={i.slot === 'screen' ? `${name(i.k)}'s screen` : name(i.k)} />
+      </button>
+    ) : (
+      <div key={itemId(i)} className="stage-thumb">
+        <StreamInvite label={`${name(i.k)}'s screen`} join={() => join(i.k)} />
+      </div>
+    )
   const ownTiles = (
     <>
       {mine && (
@@ -569,7 +611,7 @@ export function Stage({ name, settings }: { name: (k: Key) => string; settings: 
       )}
     </>
   )
-  const watching = items.length
+  const count = items.length
   return (
     <section className={`stage ${hidden ? 'collapsed' : ''}`} aria-label="Shared screens and cameras">
       <div className="stage-bar">
@@ -580,7 +622,7 @@ export function Stage({ name, settings }: { name: (k: Key) => string; settings: 
           </span>
         ) : (
           <span className="row-sub">
-            {watching ? `${watching} ${watching === 1 ? 'video' : 'videos'} in this call` : 'Your camera is on'}
+            {count ? `${count} ${count === 1 ? 'video' : 'videos'} in this call` : 'Your camera is on'}
           </span>
         )}
         {mine && (
@@ -598,13 +640,19 @@ export function Stage({ name, settings }: { name: (k: Key) => string; settings: 
             Show everyone
           </button>
         )}
-        {watching > 0 && (
+        {watching && (
+          <button className="button subtle" onClick={() => setJoined(null)}>
+            Leave stream
+          </button>
+        )}
+        {count > 0 && (
           <button className="button subtle" aria-pressed={hidden} onClick={() => setHidden(!hidden)}>
             {hidden ? 'Show video' : 'Hide video'}
           </button>
         )}
       </div>
-      {!hidden && main && (
+      {!hidden && main && !live(main) && <StreamInvite key={itemId(main)} big label={label(main)} join={() => join(main.k)} />}
+      {!hidden && main && live(main) && (
         <Screen
           key={itemId(main)}
           stream={media(main)}
