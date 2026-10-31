@@ -696,8 +696,10 @@ function startApp() {
     if (closed) return
     e.preventDefault()
     if (hooked) uIOhook.stop()
-    await node.destroy().catch(() => {})
+    // The marker goes first: closing the network can take seconds, and an installer or Windows shutting down may end
+    // the process before that finishes, which would then be reported as a crash
     rmSync(running, { force: true })
+    await node.destroy().catch(() => {})
     tray.destroy()
     // macOS and Linux: an update downloaded earlier is put in place as Eleusinia closes, like the installer on Windows
     if (staged)

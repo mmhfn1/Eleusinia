@@ -2464,9 +2464,11 @@ kbd {
 /* The call: everyone under one pool of light above the chat, the speaker lifted and breathing. */
 .oculus {
   display: flex;
+  flex-wrap: wrap; /* a narrow window or a big call takes more rows, never spills over the sidebars */
   justify-content: center;
   align-items: flex-end;
-  gap: 48px;
+  gap: 20px clamp(16px, 4vw, 48px);
+  overflow: hidden;
   min-height: 220px;
   padding: 28px 20px 22px;
   border-bottom: 1px solid var(--line);
@@ -2485,6 +2487,13 @@ kbd {
 .oculus-person figcaption {
   display: grid;
   justify-items: center;
+  max-width: 120px;
+}
+.oculus-person figcaption > * {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .oculus-person .row-sub.held {
   color: var(--gold);

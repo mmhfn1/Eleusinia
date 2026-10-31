@@ -211,6 +211,33 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
     <Dialog label="Settings" close={close} className="settings-dialog">
       <h1>Settings</h1>
       <section className="settings-section">
+        <h2>General</h2>
+        <label className="check-row">
+          <input type="checkbox" role="switch" checked={st.settings.closeToTray !== false} onChange={(e) => api.call('setSettings', { closeToTray: e.target.checked })} />
+          <span>
+            Minimize to the system tray when the window is closed
+          </span>
+        </label>
+        <label className="check-row">
+          <input type="checkbox" role="switch" checked={!!st.settings.relay} onChange={(e) => api.call('setSettings', { relay: e.target.checked })} />
+          <span>
+            Connect through mutual friends when a direct connection fails (experimental). They can see when you talk, never
+            what you say. Voice, text and pictures only
+          </span>
+        </label>
+        <label className="check-row">
+          <input type="checkbox" role="switch" checked={!!st.settings.suggest} onChange={(e) => api.call('setSettings', { suggest: e.target.checked })} />
+          <span>
+            Suggest me to people typing the start of my username. Anyone can then see when you are online; with this off
+            you are found only by your exact friend ID
+          </span>
+        </label>
+      </section>
+      <section className="settings-section">
+        <h2>Activity</h2>
+        <ActivitySettingsSection st={st} name={(k) => labelOf(st.profiles[k] ?? NOBODY, k)} />
+      </section>
+      <section className="settings-section">
         <h2>Profile</h2>
         <div className="settings-row">
           <Avatar k={st.me} p={st.profile} size={40} />
@@ -237,33 +264,6 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
         <h2>Hotkeys</h2>
         <Hotkeys st={st} />
         {WINDOWS && <RunAsAdmin />}
-      </section>
-      <section className="settings-section">
-        <h2>General</h2>
-        <label className="check-row">
-          <input type="checkbox" role="switch" checked={st.settings.closeToTray !== false} onChange={(e) => api.call('setSettings', { closeToTray: e.target.checked })} />
-          <span>
-            Minimize to the system tray when the window is closed
-          </span>
-        </label>
-        <label className="check-row">
-          <input type="checkbox" role="switch" checked={!!st.settings.relay} onChange={(e) => api.call('setSettings', { relay: e.target.checked })} />
-          <span>
-            Connect through mutual friends when a direct connection fails (experimental). They can see when you talk, never
-            what you say. Voice, text and pictures only
-          </span>
-        </label>
-        <label className="check-row">
-          <input type="checkbox" role="switch" checked={!!st.settings.suggest} onChange={(e) => api.call('setSettings', { suggest: e.target.checked })} />
-          <span>
-            Suggest me to people typing the start of my username. Anyone can then see when you are online; with this off
-            you are found only by your exact friend ID
-          </span>
-        </label>
-      </section>
-      <section className="settings-section">
-        <h2>Activity</h2>
-        <ActivitySettingsSection st={st} name={(k) => labelOf(st.profiles[k] ?? NOBODY, k)} />
       </section>
       <section className="settings-section">
         <h2>Storage</h2>
