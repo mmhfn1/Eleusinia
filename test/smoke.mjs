@@ -115,11 +115,12 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
 }
 
 // What one of the live connection's slots has received (see slotsOf in call.ts): 'sound' is the second audio.
+const joinStream = `document.querySelector('.stage .screen.invite button').click()`
 const received = (slot, field = 'packetsReceived') => `(async () => {
   const pc = window.__pcs.find((p) => p.connectionState === 'connected')
   const ts = pc?.getTransceivers() ?? []
   const audio = ts.filter((x) => x.receiver.track.kind === 'audio')
-  const t = { voice: audio[0], camera: ts.filter((x) => x.receiver.track.kind === 'video')[1], sound: audio[1] }['${slot}']
+  const t = { voice: audio[0], screen: ts.filter((x) => x.receiver.track.kind === 'video')[0], camera: ts.filter((x) => x.receiver.track.kind === 'video')[1], sound: audio[1] }['${slot}']
   let n = 0
   if (t) (await t.receiver.getStats()).forEach((r) => r.type === 'inbound-rtp' && (n = r.${field} ?? 0))
   return n
@@ -615,6 +616,15 @@ try {
   console.log('     ', JSON.stringify(menu))
   if (menu[0] !== '720' || menu[1] !== '30') throw new Error('stream quality did not default to 720p at 30 fps')
   await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Share').click()`)
+  // As on Discord: a stream is offered, not pushed. Until B joins, A sends B none of it
+  await until('B is offered the stream where it will play, with Join stream', () => b.ev(`document.querySelector('.stage .screen.invite.big button')?.textContent === 'Join stream'`), 20)
+  const unjoined = await b.ev(received('screen'))
+  await sleep(3000)
+  const unjoinedAfter = await b.ev(received('screen'))
+  const unjoinedBytes = await b.ev(received('screen', 'bytesReceived'))
+  if (unjoinedAfter > unjoined + 20) throw new Error(`A sent its screen to B before B joined: ${unjoined} -> ${unjoinedAfter} packets, ${unjoinedBytes} bytes in all`)
+  console.log('ok   nothing of the stream reaches B before B joins')
+  await b.ev(joinStream)
   await until("B shows the shared window large, at 720p", () => b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight === 720`), 30)
   // Full screen: the button enters it, and follows the document when it ends another way (Esc, F11).
   const fullBtn = `document.querySelector('.stage .screen.big .screen-full')`
@@ -663,6 +673,13 @@ try {
   await until('B hides the screens (so A stops sending them)', () => b.ev(`!document.querySelector('.stage .screen') && document.querySelector('.stage').classList.contains('collapsed')`), 5)
   await b.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Show video').click()`)
   await until('B shows them again and frames flow', () => b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight > 0`), 30)
+  // Leaving the stream stops it reaching B and offers it again
+  await b.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Leave stream').click()`)
+  await until('B leaves the stream: Join stream again, no video playing', () => b.ev(`!!document.querySelector('.stage .screen.invite.big') && !document.querySelector('.stage .screen video')`), 5)
+  const left = await b.ev(received('screen'))
+  await sleep(3000)
+  if ((await b.ev(received('screen'))) > left + 30) throw new Error('A kept sending its screen after B left the stream')
+  console.log('ok   after leaving, the stream no longer reaches B')
   await a.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Stop sharing').click()`)
   await until('A stops; the stage closes for B', () => b.ev(`!document.querySelector('.stage')`), 10)
 
@@ -693,11 +710,19 @@ try {
     const how = await until('A shares with computer sound, or says why it cannot', () =>
       a.ev(`(() => { const badge = document.querySelector('.stage .sharing-badge')?.textContent ?? ''; const note = [...document.querySelectorAll('.call-notice')].some((n) => n.textContent.includes('sound is not being shared')); return badge.includes('with sound') ? 'sound' : note ? 'refused' : false })()`), 20)
     if (how === 'sound') {
+      await until('B is offered the stream with sound', () => b.ev(`!!document.querySelector('.stage .screen.invite.big figcaption')?.textContent.includes('with sound')`), 20)
+      await b.ev(joinStream)
       await until('B sees the share is with sound, and its sound arrives on its own slot', async () =>
         (await b.ev(`!!document.querySelector('.stage .screen.big figcaption')?.textContent.includes('with sound')`)) && (await b.ev(received('sound'))) > 0, 20)
       await b.ev(`(() => { const r = document.querySelector('.screen.big .screen-controls .screen-volume input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(r, '50'); r.dispatchEvent(new Event('input', { bubbles: true })) })()`)
       await until("B turns the stream down to 50% with the slider beside the full screen button", () =>
         b.ev(`(() => { const c = document.querySelector('.screen.big .screen-controls'); return c.querySelector('.screen-volume input').value === '50' && c.lastElementChild.classList.contains('screen-full') })()`), 5)
+      // The speaker icon mutes the stream and unmutes it back to where it was
+      const volBtn = `document.querySelector('.screen.big .screen-volume button')`
+      await b.ev(`${volBtn}.click()`)
+      await until('the speaker icon mutes the stream', () => b.ev(`${volBtn}.getAttribute('aria-pressed') === 'true' && document.querySelector('.screen.big .screen-volume input').value === '0'`), 5)
+      await b.ev(`${volBtn}.click()`)
+      await until('and unmutes it back to 50%', () => b.ev(`${volBtn}.getAttribute('aria-pressed') === 'false' && document.querySelector('.screen.big .screen-volume input').value === '50'`), 5)
       // With the video hidden (as when the window is minimised), the stream's sound still arrives
       await b.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Hide video').click()`)
       const before = await b.ev(received('sound'))

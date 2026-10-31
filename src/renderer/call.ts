@@ -127,7 +127,8 @@ let camera: Out<CameraSource> | null = null
 const wants = new Map<string, Level>()
 const shown = new Map<string, Level>()
 // Nothing but voice goes through a friend's relay: it is capped for voice and text.
-const want = (slot: Slot, k: Key) => (state?.relayed?.includes(k) ? 'off' : (wants.get(`${slot}:${k}`) ?? 'full'))
+// A screen goes to no one until they join it; cameras show by themselves, as before.
+const want = (slot: Slot, k: Key): Level => (state?.relayed?.includes(k) ? 'off' : (wants.get(`${slot}:${k}`) ?? (slot === 'screen' ? 'off' : 'full')))
 let starved = 0 // samples in a row where our stream to someone was held back by their or our bandwidth
 let cpuBound = 0 // ... or by our computer not encoding fast enough
 let upload: { kbps: number | null; at: number } | null = null
@@ -524,8 +525,8 @@ async function applyLevel(k: Key) {
   if (!p) return
   const s = slotsOf(p.pc)
   if (screen && s.screen) await setEncoding(s.screen.sender, encodingFor(want('screen', k), screen.q, streamKbps(screen.src, screen.q)))
-  // The sound keeps going whatever the viewer shows: a minimised window or hidden video still hears the stream
-  if (screen?.sound && s.sound) await setEncoding(s.sound.sender, { active: true, maxBitrate: SOUND_KBPS * 1000 })
+  // The sound goes to everyone who joined, even with their window minimised or the video hidden ('audio')
+  if (screen?.sound && s.sound) await setEncoding(s.sound.sender, { active: want('screen', k) !== 'off', maxBitrate: SOUND_KBPS * 1000 })
   if (camera && s.camera) await setEncoding(s.camera.sender, encodingFor(want('camera', k), camera.q, streamKbps(camera.src, camera.q)))
   for (const t of [s.screen, s.camera]) if (t) await setEncoding(t.sender, LOW)
 }
@@ -596,9 +597,10 @@ async function use(cap: { track: MediaStreamTrack; sound?: MediaStreamTrack }, s
   starved = cpuBound = 0
   for (const [k, p] of peers) {
     const s = slotsOf(p.pc)
+    // What each viewer gets is set first: a sender's default is everything, and nobody has joined a new stream yet
+    await applyLevel(k)
     await s.screen?.sender.replaceTrack(cap.track)
     await s.sound?.sender.replaceTrack(cap.sound ?? null)
-    await applyLevel(k)
   }
   if (old) (old.track.onended = null), old.track.stop(), old.sound?.stop()
   sendShare(null)
@@ -644,6 +646,8 @@ export function stopShare() {
   screen.sound?.stop()
   screen = null
   soundRefused = false
+  // A new share starts unjoined for everyone, whatever they watched of this one
+  for (const id of [...wants.keys()]) if (id.startsWith('screen:')) wants.delete(id)
   for (const p of peers.values()) {
     const s = slotsOf(p.pc)
     s.screen?.sender.replaceTrack(null)
@@ -1060,7 +1064,7 @@ async function handle(from: Key, c: string, d: any) {
   } else if (d.k === 'voice') {
     voices.set(from, { muted: !!d.muted, deafened: !!d.deafened })
   } else if (d.k === 'want') {
-    if (['off', 'thumb', 'full'].includes(d.level)) {
+    if (['off', 'audio', 'thumb', 'full'].includes(d.level)) {
       wants.set(`${d.slot === 'camera' ? 'camera' : 'screen'}:${from}`, d.level)
       await applyLevel(from)
     }

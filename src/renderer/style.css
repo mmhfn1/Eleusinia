@@ -3386,3 +3386,35 @@ img.crest {
     transition: none;
   }
 }
+/* A stream not joined: where its video would be, a Join stream button */
+.screen.invite {
+  display: grid;
+  place-items: center;
+  background: var(--obsidian-3);
+}
+.screen.invite.big {
+  min-height: 240px;
+}
+.invite-body {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  color: var(--mist);
+}
+.stage-thumb .invite-body {
+  gap: 4px;
+}
+.stage-thumb .invite-body .button {
+  padding: 2px 10px;
+  font-size: 12px;
+  min-height: 0;
+  height: 26px;
+}
+.stage-thumb .screen.invite figcaption {
+  display: none;
+}
+.screen-volume .icon-button {
+  padding: 0;
+  color: inherit;
+  background: none;
+}

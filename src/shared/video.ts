@@ -3,7 +3,9 @@
 
 export type Source = { width: number; height: number; fps: number } // what the screen or window can deliver
 export type Quality = { height: number; fps: number; motion: boolean } // the streamer's choice, always final
-export type Level = 'off' | 'thumb' | 'full' // what a viewer is showing of a stream
+// What a viewer is showing of a stream. audio: a stream they joined, with their window hidden or minimised (no
+// video, but a screen's sound goes on); off: nothing at all, a stream they have not joined.
+export type Level = 'off' | 'audio' | 'thumb' | 'full'
 
 const HEIGHTS = [720, 1080, 1440, 2160]
 const RATES = [15, 30, 60, 120, 144, 240]
@@ -42,7 +44,7 @@ export function streamKbps(src: Source, q: Quality) {
 // What one viewer is sent: nothing while they are not showing the stream, a small copy for a thumbnail,
 // and exactly the streamer's chosen quality whenever it is shown full size.
 export function encodingFor(level: Level, q: Quality, kbps: number) {
-  if (level === 'off') return { active: false }
+  if (level === 'off' || level === 'audio') return { active: false }
   if (level === 'thumb') return { active: true, scaleResolutionDownBy: Math.max(1, q.height / 180), maxBitrate: 150_000, maxFramerate: Math.min(q.fps, 15) }
   return { active: true, scaleResolutionDownBy: 1, maxBitrate: kbps * 1000, maxFramerate: q.fps }
 }
