@@ -524,7 +524,8 @@ async function applyLevel(k: Key) {
   if (!p) return
   const s = slotsOf(p.pc)
   if (screen && s.screen) await setEncoding(s.screen.sender, encodingFor(want('screen', k), screen.q, streamKbps(screen.src, screen.q)))
-  if (screen?.sound && s.sound) await setEncoding(s.sound.sender, { active: want('screen', k) !== 'off', maxBitrate: SOUND_KBPS * 1000 })
+  // The sound keeps going whatever the viewer shows: a minimised window or hidden video still hears the stream
+  if (screen?.sound && s.sound) await setEncoding(s.sound.sender, { active: true, maxBitrate: SOUND_KBPS * 1000 })
   if (camera && s.camera) await setEncoding(s.camera.sender, encodingFor(want('camera', k), camera.q, streamKbps(camera.src, camera.q)))
   for (const t of [s.screen, s.camera]) if (t) await setEncoding(t.sender, LOW)
 }

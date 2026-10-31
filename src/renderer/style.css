@@ -3366,3 +3366,23 @@ img.crest {
   color: var(--silver);
   font-weight: 600;
 }
+/* The large view's title and controls fade while the viewer is idle (Screen in Media.tsx), and the pointer hides;
+   a control with keyboard focus keeps them shown */
+.screen.big figcaption,
+.screen.big .screen-controls {
+  transition: opacity 300ms;
+}
+.screen.big.idle:not(:focus-within) figcaption,
+.screen.big.idle:not(:focus-within) .screen-controls {
+  opacity: 0;
+  pointer-events: none;
+}
+.screen.big.idle:not(:focus-within) {
+  cursor: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .screen.big figcaption,
+  .screen.big .screen-controls {
+    transition: none;
+  }
+}

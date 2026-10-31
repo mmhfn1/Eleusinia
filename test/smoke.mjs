@@ -507,7 +507,7 @@ try {
   await a.ev(`${bobRowA}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
   const destinyCard = `document.querySelector('dialog[open] .destiny')`
   await until("Bob's card shows the activity, his guardian, the fireteam and the loadout", () =>
-    a.ev(`(() => { const c = ${destinyCard}; return !!c && c.querySelector('.destiny-activity-name').textContent === "Salvation's Edge" && c.querySelector('.destiny-activity-mode').textContent === 'Raid' && c.querySelector('.destiny-activity-light').textContent === '1990' && c.querySelector('.destiny-where').textContent.startsWith('The Pale Heart · ') && !document.querySelector('dialog[open] .activity-art') && c.textContent.includes('Warlock Rivensbane') && c.querySelector('.destiny-light').textContent === '2010' && c.querySelector('.destiny-clan')?.textContent.trim() === '[LW] The Last Wardens' && c.textContent.includes('Guardian Rank 7') && c.textContent.includes('Fireteam 3/6 · 3 open') && ['Ann', 'Osiris', 'Saint'].every((n) => c.querySelector('.destiny-fireteam').textContent.includes(n)) && c.querySelectorAll('.destiny-loadout li').length === 5 && c.querySelectorAll('.destiny-loadout li.exotic').length === 4 })()`), 10)
+    a.ev(`(() => { const c = ${destinyCard}; return !!c && c.querySelector('.destiny-activity-name').textContent === "Salvation's Edge" && c.querySelector('.destiny-activity-mode').textContent === 'Raid' && c.querySelector('.destiny-activity-light').textContent === '1990' && c.querySelector('.destiny-where').textContent.startsWith('The Pale Heart') && !document.querySelector('dialog[open] .activity-art') && c.textContent.includes('Warlock Rivensbane') && c.querySelector('.destiny-light').textContent === '2010' && c.querySelector('.destiny-clan')?.textContent.trim() === '[LW] The Last Wardens' && c.textContent.includes('Guardian Rank 7') && c.textContent.includes('Fireteam 3/6 · 3 open') && ['Ann', 'Osiris', 'Saint'].every((n) => c.querySelector('.destiny-fireteam').textContent.includes(n)) && c.querySelectorAll('.destiny-loadout li').length === 5 && c.querySelectorAll('.destiny-loadout li.exotic').length === 4 })()`), 10)
   // The activity's picture and Gjallarhorn's icon are real bungie.net files, fetched through eleusinia-art:
   const pictureLoads = `new Promise((ok) => { const i = new Image(); i.onload = () => ok(i.naturalWidth > 0); i.onerror = () => ok(false); i.src = ${destinyCard}.querySelector('.destiny-activity').style.backgroundImage.slice(5, -2) })`
   await until('the activity picture and the exotic icon load from bungie.net', () => a.ev(`${pictureLoads}.then((art) => { const g = ${destinyCard}.querySelector('.destiny-loadout img[alt="Gjallarhorn"]'); return art && g.complete && g.naturalWidth > 0 })`), 30)
@@ -655,6 +655,10 @@ try {
   await until(`A switched to "${ownTitles[0]}" without stopping, and B still sees it`, async () =>
     (await a.ev(`document.querySelector('.stage .sharing-badge')?.textContent.includes(${JSON.stringify(ownTitles[0])})`)) &&
     (await b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight > 0 && document.querySelector('.stage .screen.big figcaption').textContent.includes(${JSON.stringify(ownTitles[0])})`)), 30)
+  // The title and controls fade a second after the last mouse move over the screen, and come back on the next one
+  await until("the screen's title and controls fade when the mouse is still", () => b.ev(`(() => { const f = document.querySelector('.stage .screen.big'); return f.classList.contains('idle') && getComputedStyle(f.querySelector('figcaption')).opacity === '0' })()`), 5)
+  await b.ev(`document.querySelector('.stage .screen.big').dispatchEvent(new PointerEvent('pointermove', { bubbles: true }))`)
+  await until('moving the mouse brings them back', () => b.ev(`!document.querySelector('.stage .screen.big').classList.contains('idle')`), 2)
   await b.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Hide video').click()`)
   await until('B hides the screens (so A stops sending them)', () => b.ev(`!document.querySelector('.stage .screen') && document.querySelector('.stage').classList.contains('collapsed')`), 5)
   await b.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Show video').click()`)
@@ -694,6 +698,11 @@ try {
       await b.ev(`(() => { const r = document.querySelector('.screen.big .screen-controls .screen-volume input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(r, '50'); r.dispatchEvent(new Event('input', { bubbles: true })) })()`)
       await until("B turns the stream down to 50% with the slider beside the full screen button", () =>
         b.ev(`(() => { const c = document.querySelector('.screen.big .screen-controls'); return c.querySelector('.screen-volume input').value === '50' && c.lastElementChild.classList.contains('screen-full') })()`), 5)
+      // With the video hidden (as when the window is minimised), the stream's sound still arrives
+      await b.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Hide video').click()`)
+      const before = await b.ev(received('sound'))
+      await until('with the video hidden, the screen sound keeps arriving', async () => (await b.ev(received('sound'))) > before + 50, 10)
+      await b.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Show video').click()`)
     } else console.log("      this system could not leave Eleusinia's own audio out, so no sound was shared, as intended")
     await a.ev(press('Stop sharing'))
     await until('A stops; the stage closes for B', () => b.ev(`!document.querySelector('.stage')`), 10)
