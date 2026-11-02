@@ -5,19 +5,22 @@ import { createCandidates, createWatchdog, lightOpus, offers, quickVideo, relayC
 import { fellBack, nextDevice, usable } from '../shared/devices'
 import { type Jingle, LOOP_EVERY, RING_MS, loopNow } from '../shared/jingles'
 import { CALL_VERSION, type Event, type Key, type State } from '../shared/protocol'
-import { type PingReading, SAMPLE_EVERY, type Sample, grade, jitterTarget, pingSummary, remember, rememberPing, videoHold, worst } from '../shared/quality'
+import { type PingReading, SAMPLE_EVERY, type Sample, grade, handsFree, jitterTarget, patched, pingSummary, remember, rememberPing, trouble, videoHold, worst } from '../shared/quality'
 import type { SourceKind } from '../shared/sources'
 import { gate, hear, rms } from '../shared/speaking'
 import { play } from './jingles'
 import {
   type Level,
   type Quality,
+  PREVIEW_EVERY,
+  PREVIEW_WIDTH,
   RAMP_MS,
   SOUND_KBPS,
   STARVED_AFTER,
   type Source,
   type Verdict,
   canStream,
+  cleanPreview,
   cameraSource,
   encodingFor,
   streamKbps,
@@ -71,7 +74,7 @@ type Peer = {
   pc: RTCPeerConnection
   audio: HTMLAudioElement // muted: it only keeps their stream flowing into Web Audio (see playVoice)
   voice?: Listen & { gain: GainNode }
-  relayed?: boolean
+  relayed?: boolean // the route last logged: through the chat link (relay.ts) or direct
   candidates: ReturnType<typeof createCandidates>
   offer?: number
   screen?: MediaStream // their shared screen, once frames arrive
@@ -109,13 +112,16 @@ const counters = new Map<string, { stun: number; stunTotal: number; rtcp: number
 // Their voice arriving: packets so far, and when that count last grew. A link whose audio still arrives is never
 // restarted or rebuilt (createWatchdog's flowing), since that would cut a call that still works.
 const heardFrom = new Map<Key, { n: number; at: number }>()
+// The last ~10 s of each voice's made-up audio counters (patched), and the voices currently logged as patched over.
+const concealment = new Map<Key, { concealed: number; total: number }[]>()
+const patchy = new Set<Key>() // silence made up while someone is quiet (Opus sends nothing then) does not count
 const flowing = (k: Key) => Date.now() - (heardFrom.get(k)?.at ?? 0) < SAMPLE_EVERY * 2 + 500
 let sampler: ReturnType<typeof setInterval> | null = null
 let measuring = false
 
 // Screen sharing. Ours: the captured track, its source and the quality the user chose (always final).
 // Theirs: what each sharer in the call told us. Wants: what each side is showing of the other's share.
-export type ShareInfo = { name: string; width: number; height: number; fps: number; starved: boolean; sound?: boolean }
+export type ShareInfo = { name: string; width: number; height: number; fps: number; starved: boolean; sound?: boolean; preview?: string }
 export const shares = new Map<Key, ShareInfo>()
 export const cameras = new Map<Key, ShareInfo>()
 // Whether each person in the call has muted or deafened themselves, as they told us.
@@ -123,6 +129,8 @@ export const voices = new Map<Key, { muted: boolean; deafened: boolean }>()
 type Out<S> = { track: MediaStreamTrack; stream: MediaStream; src: S; q: Quality; at: number }
 let screen: (Out<ScreenSource> & { sound?: MediaStreamTrack }) | null = null
 let camera: Out<CameraSource> | null = null
+let previews: ReturnType<typeof setInterval> | null = null
+let grabbing = false // a still screen sends no new frame, so a grab can wait; one at a time
 // Keyed `${slot}:${person}`: what each viewer shows of our screen and camera, and what we show of theirs.
 const wants = new Map<string, Level>()
 const shown = new Map<string, Level>()
@@ -427,8 +435,7 @@ function connect(k: Key) {
       if (screen) sendShare(k)
       if (camera) sendCamera(k)
       await applyLevel(k)
-      peer.relayed = await isRelayed(pc)
-      if (peer.relayed) log(`connection to ${who(k)} goes through the relay`)
+      peer.relayed = undefined // a new route: measure() logs it on its next sample
     }
     notify()
   }
@@ -511,13 +518,6 @@ async function describe(k: Key, pc: RTCPeerConnection, sdp: RTCSessionDescriptio
   await addRelay(k, pc)
 }
 
-async function isRelayed(pc: RTCPeerConnection) {
-  const stats = await pc.getStats()
-  let pair: any
-  stats.forEach((s) => s.type === 'transport' && (pair = stats.get(s.selectedCandidatePairId)))
-  return stats.get(pair?.remoteCandidateId)?.candidateType === 'relay'
-}
-
 // Sends one viewer what they are showing of our screen and camera: nothing, a thumbnail, or our chosen quality (see
 // encodingFor). The screen's sound follows its picture, so nobody is sent sound for a screen they have hidden.
 async function applyLevel(k: Key) {
@@ -592,7 +592,7 @@ async function capture(src: ScreenSource, q: Quality, sound: boolean) {
 // Puts a captured screen (and its sound) on every connection, replacing whatever was shared before.
 async function use(cap: { track: MediaStreamTrack; sound?: MediaStreamTrack }, src: ScreenSource, q: Quality) {
   const old = screen
-  cap.track.onended = () => stopShare() // the shared window was closed
+  cap.track.onended = () => stopShare('the shared window or screen went away')
   screen = { track: cap.track, stream: new MediaStream([cap.track]), src, q, at: Date.now(), sound: cap.sound }
   starved = cpuBound = 0
   for (const [k, p] of peers) {
@@ -604,7 +604,32 @@ async function use(cap: { track: MediaStreamTrack; sound?: MediaStreamTrack }, s
   }
   if (old) (old.track.onended = null), old.track.stop(), old.sound?.stop()
   sendShare(null)
+  setTimeout(sendPreview, 1500) // once the capture has frames
+  previews ??= setInterval(sendPreview, PREVIEW_EVERY)
   notify()
+}
+
+// A still of our screen for whoever in the call has not joined it, so their Join stream tile shows what it is. Never
+// to anyone watching (they have the stream) or linked through a friend's relay (they cannot join).
+async function sendPreview() {
+  if (!conv || !screen) return
+  const to = [...(active.get(conv) ?? [])].filter((k) => want('screen', k) === 'off' && !state.relayed.includes(k))
+  if (!to.length) return
+  if (grabbing) return
+  grabbing = true
+  const image = await snapshot(screen.track).catch(() => null)
+  grabbing = false
+  if (image && conv && screen) for (const k of to) send(conv, k, { k: 'preview', image })
+}
+
+async function snapshot(track: MediaStreamTrack) {
+  const frame: ImageBitmap = await new (window as any).ImageCapture(track).grabFrame()
+  const c = document.createElement('canvas')
+  c.width = PREVIEW_WIDTH
+  c.height = Math.round((PREVIEW_WIDTH * frame.height) / frame.width)
+  c.getContext('2d')!.drawImage(frame, 0, 0, c.width, c.height)
+  frame.close()
+  return c.toDataURL('image/jpeg', 0.6)
 }
 
 const shareWords = (src: ScreenSource, q: Quality, sound: boolean) => `a ${src.id.startsWith('window') ? 'window' : 'screen'} at ${q.height}p ${q.fps} fps${q.motion ? ' (motion)' : ''}${sound ? ' with sound' : ''}`
@@ -638,13 +663,15 @@ export async function setQuality(q: Quality) {
   notify()
 }
 
-export function stopShare() {
+export function stopShare(why = 'by choice') {
   if (!screen) return
-  log('stopped sharing')
+  log(`stopped sharing (${why})`)
   screen.track.onended = null
   screen.track.stop()
   screen.sound?.stop()
   screen = null
+  if (previews) clearInterval(previews)
+  previews = null
   soundRefused = false
   // A new share starts unjoined for everyone, whatever they watched of this one
   for (const id of [...wants.keys()]) if (id.startsWith('screen:')) wants.delete(id)
@@ -734,12 +761,15 @@ async function checkLimits() {
 // Round trip, loss and jitter of what we send, as the other side reports it; the route's round trip until it has.
 // fresh: a round trip measured since the last sample, if any. The connection's own checks (STUN, every few seconds
 // whether or not anyone talks) come first; the voice reports (RTCP) go quiet in silence, so they only fill in.
-async function sampleLink(k: Key, pc: RTCPeerConnection): Promise<{ s: Sample | null; fresh: number | null }> {
+async function sampleLink(k: Key, pc: RTCPeerConnection): Promise<{ s: Sample | null; fresh: number | null; route: Route | null }> {
   const stats = await pc.getStats()
   let s: Sample | null = null
   let pair: any
   let rtcp: any
+  let direct = 0 // direct candidate pairs that answered, to tell a blocked network from a route not yet switched
+  const type = (id: string) => stats.get(id)?.candidateType
   stats.forEach((r) => {
+    if (r.type === 'candidate-pair' && r.state === 'succeeded' && type(r.remoteCandidateId) !== 'relay') direct++
     if (r.type === 'remote-inbound-rtp' && r.kind === 'audio' && r.roundTripTime !== undefined) {
       rtcp = r
       s = { rtt: r.roundTripTime * 1000, loss: r.fractionLost ?? 0, jitter: (r.jitter ?? 0) * 1000 }
@@ -752,7 +782,17 @@ async function sampleLink(k: Key, pc: RTCPeerConnection): Promise<{ s: Sample | 
   // After a new route (ICE restart) the counters start again from zero, which reads as nothing new this time.
   const delta = (n: number, total: number, n0 = 0, total0 = 0) => (n > n0 ? ((total - total0) / (n - n0)) * 1000 : null)
   const fresh = delta(now.stun, now.stunTotal, was?.stun, was?.stunTotal) ?? delta(now.rtcp, now.rtcpTotal, was?.rtcp, was?.rtcpTotal)
-  return { s: s ?? (pair?.currentRoundTripTime !== undefined ? { rtt: pair.currentRoundTripTime * 1000 } : null), fresh: fresh !== null && fresh >= 0 ? fresh : null }
+  const route = pair ? { relayed: type(pair.remoteCandidateId) === 'relay', local: type(pair.localCandidateId), remote: type(pair.remoteCandidateId), direct } : null
+  return { s: s ?? (pair?.currentRoundTripTime !== undefined ? { rtt: pair.currentRoundTripTime * 1000 } : null), fresh: fresh !== null && fresh >= 0 ? fresh : null, route }
+}
+type Route = { relayed: boolean; local?: string; remote?: string; direct: number }
+
+// Logs a link's route when it is new or changes: through the chat link (which a closing chat link takes down with it)
+// or direct, and with which kinds of address, so a report shows whether direct routes were blocked or just not used.
+function noteRoute(k: Key, p: Peer, r: Route) {
+  if (p.relayed === r.relayed) return
+  p.relayed = r.relayed
+  log(r.relayed ? `connection to ${who(k)} goes through the chat link (${r.direct ? `${r.direct} direct routes answered too` : 'no direct route answered'})` : `connection to ${who(k)} goes direct (${r.local} to ${r.remote})`)
 }
 
 // Whether their voice still arrives (for the watchdog), and how much the player keeps in hand for it (jitterTarget).
@@ -761,9 +801,15 @@ async function hearing(k: Key, pc: RTCPeerConnection, at: number) {
   if (!voice || pc.signalingState === 'closed') return
   let n = 0
   let jitter = 0
+  let counts = { concealed: 0, total: 0 }
   ;(await voice.getStats()).forEach((r) => {
-    if (r.type === 'inbound-rtp') (n = r.packetsReceived ?? 0), (jitter = (r.jitter ?? 0) * 1000)
+    if (r.type === 'inbound-rtp') (n = r.packetsReceived ?? 0), (jitter = (r.jitter ?? 0) * 1000), (counts = { concealed: (r.concealedSamples ?? 0) - (r.silentConcealedSamples ?? 0), total: r.totalSamplesReceived ?? 0 })
   })
+  const seen = [...(concealment.get(k) ?? []), counts].slice(-6)
+  concealment.set(k, seen)
+  const made = patched(seen[0], counts)
+  if (made >= 0.05 && !patchy.has(k)) patchy.add(k), log(`${who(k)}'s voice arrives patched over: ${Math.round(made * 100)} % made up for lost or late packets`)
+  else if (made < 0.02 && patchy.delete(k)) log(`${who(k)}'s voice arrives whole again`)
   const was = heardFrom.get(k)
   if (!was || n !== was.n) heardFrom.set(k, { n, at: n > (was?.n ?? 0) ? at : (was?.at ?? 0) })
   const target = jitterTarget(jitter, voice.jitterBufferTarget ?? null)
@@ -792,14 +838,15 @@ async function measure() {
   measuring = true
   try {
     const live = [...peers].filter(([, p]) => p.pc.connectionState === 'connected')
-    for (const m of [samples, pingReadings, counters]) for (const k of m.keys()) if (k && !live.some(([l]) => l === k)) m.delete(k)
+    for (const m of [samples, pingReadings, counters, concealment]) for (const k of m.keys()) if (k && !live.some(([l]) => l === k)) m.delete(k)
     const at = Date.now()
     for (const [k, p] of peers) await hearing(k, p.pc, at).catch(() => {}) // every connection, connected or not
     if (live.length) {
       samples.delete('')
       pingReadings.delete('')
       for (const [k, p] of live) {
-        const { s, fresh } = await sampleLink(k, p.pc).catch(() => ({ s: null, fresh: null }))
+        const { s, fresh, route } = await sampleLink(k, p.pc).catch(() => ({ s: null, fresh: null, route: null }))
+        if (route) noteRoute(k, p, route)
         if (s) samples.set(k, remember(samples.get(k), s))
         holdVideo(k, p.pc)
         if (fresh !== null) pingReadings.set(k, rememberPing(pingReadings.get(k), { ms: fresh, at }))
@@ -811,7 +858,7 @@ async function measure() {
     }
     await checkLimits()
     const now = signal()
-    if (now.grade !== lastGrade) log(`connection ${now.grade ?? 'unknown'}; ping ${now.pings.map((p) => `${p.k ? who(p.k) : 'network'} ${Number.isFinite(p.ms) ? `${p.ms} ms ±${p.spread} (${p.steadiness})` : 'none'}`).join(', ')}`)
+    if (now.grade !== lastGrade) log(`connection ${now.grade ?? 'unknown'}; ping ${now.pings.map((p) => `${p.k ? who(p.k) : 'network'} ${Number.isFinite(p.ms) ? `${p.ms} ms ±${p.spread} (${[p.steadiness, trouble(samples.get(p.k))].filter(Boolean).join(', ')})` : 'none'}`).join(', ')}`)
     lastGrade = now.grade
   } finally {
     measuring = false
@@ -842,6 +889,7 @@ async function useMic(id: string) {
   stream.getTracks().forEach((t) => ((t.onended = null), t.stop()))
   stream = fresh
   micId = id
+  noteHandsFree(track)
   listenOwn(fresh)
 }
 
@@ -870,12 +918,15 @@ function followDevices(micEnded = false) {
 }
 const onDeviceChange = () => followDevices()
 
+const noteHandsFree = (t: MediaStreamTrack) => handsFree(t.label) && log('microphone is a Bluetooth hands-free one: phone quality both ways')
+
 // Short notes for the call panel: devices standing in for unplugged ones, and a missing fallback route.
 export function notices() {
   const out: string[] = []
   if (!conv) return out
   if (fellBack(state.settings.mic, micId)) out.push('Your microphone is unplugged, so the system default is in use.')
   if (fellBack(state.settings.out, outId)) out.push('Your speakers are unplugged, so the system default is in use.')
+  if (handsFree(stream?.getAudioTracks()[0]?.label ?? '')) out.push("Your microphone is a Bluetooth headset's, which puts the headset in phone-call mode: you sound, and hear everyone, like a phone line. Another microphone keeps the headset's sound clear.")
   // Only worth saying while it matters: someone is not connected and the fallback could have helped.
   const struggling = [...peers.values()].some((p) => p.pc.connectionState !== 'connected')
   if (relayMissing && struggling) out.push('No network address for the fallback route, so a call works only where a direct connection does.')
@@ -895,7 +946,7 @@ export async function join(c: string) {
   const fresh = await mic(micId).catch(() => mic((micId = '')))
   cleaned = await cleanOrNot(fresh)
   stream = fresh
-  fresh.getAudioTracks().forEach((t) => (t.onended = () => followDevices(true)))
+  fresh.getAudioTracks().forEach((t) => ((t.onended = () => followDevices(true)), noteHandsFree(t)))
   conv = c
   muted = deafened = false
   relayMissing = false
@@ -1055,8 +1106,13 @@ async function handle(from: Key, c: string, d: any) {
   } else if (d.k === 'share') {
     // From another app, so every field is checked and capped.
     const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Math.round(Number(v)) || 0))
-    if (d.on) shares.set(from, { name: String(d.name ?? '').slice(0, 100), width: n(d.width, 8192), height: n(d.height, 8192), fps: n(d.fps, 480), starved: !!d.starved, sound: !!d.sound })
+    if (!!d.on !== shares.has(from)) log(`${who(from)} ${d.on ? 'started' : 'stopped'} sharing their screen`)
+    if (d.on) shares.set(from, { name: String(d.name ?? '').slice(0, 100), width: n(d.width, 8192), height: n(d.height, 8192), fps: n(d.fps, 480), starved: !!d.starved, sound: !!d.sound, preview: shares.get(from)?.preview })
     else (shares.delete(from), shown.delete(`screen:${from}`))
+  } else if (d.k === 'preview') {
+    const s = shares.get(from)
+    const image = cleanPreview(d.image)
+    if (s && image) s.preview = image
   } else if (d.k === 'camera') {
     const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Math.round(Number(v)) || 0))
     if (d.on) cameras.set(from, { name: String(d.name ?? '').slice(0, 100), width: n(d.width, 8192), height: n(d.height, 8192), fps: n(d.fps, 480), starved: !!d.starved })
@@ -1100,10 +1156,13 @@ export function onState(next: State) {
   if (!prev) return
   for (const k of prev.online) {
     if (next.online.includes(k)) continue
-    for (const c of active.keys()) left(c, k)
+    const gone = () => {
+      for (const c of active.keys()) left(c, k)
+      drop(k)
+    }
     const w = peers.has(k) && watchdogs.get(k)
-    if (w) w.away(() => (drop(k), notify()))
-    else drop(k)
+    if (w) w.away(() => (gone(), notify()))
+    else gone()
   }
   // Tell people who just came online that a call is running, unless our call with them never broke.
   for (const k of next.online) {

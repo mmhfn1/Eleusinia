@@ -1088,7 +1088,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
                 {control(call.muted || call.deafened ? 'Unmute' : 'Mute', call.muted || call.deafened ? 'micOff' : 'mic', call.toggleMute, call.muted || call.deafened)}
                 {control(call.deafened ? 'Undeafen' : 'Deafen', call.deafened ? 'headphonesOff' : 'headphones', call.toggleDeafen, call.deafened)}
                 {control(call.sharing() ? 'Stream settings' : 'Share screen', 'screen', () => setShareDialog(true), !!call.sharing())}
-                {call.sharing() && control('Stop sharing', 'close', call.stopShare)}
+                {call.sharing() && control('Stop sharing', 'close', () => call.stopShare())}
                 {control(call.filming() ? 'Camera settings' : 'Turn on camera', 'camera', () => setCameraDialog(true), !!call.filming())}
                 {call.filming() && control('Turn off camera', 'close', call.stopCamera)}
                 {control('Leave call', 'phone', call.leave, undefined, 'leave')}

@@ -519,7 +519,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       // A stranger dialing is how a new request rings: they announce it first, then dial, so looking now finds it at
       // once instead of at the next 30 s check.
       knock: (key) => !s.friends[key] && !declinedRecently(key) && ring(key),
-      open(key) {
+      open(key, replaced) {
         const by = pendingVia.get(key)
         if (by) {
           pendingVia.delete(key)
@@ -530,7 +530,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
           net.send(key, { t: 'relayed', by })
         } else directFailed.delete(key)
         retries.delete(key)
-        diag('network', `linked with …${key.slice(-6)}${by ? ' through a friend' : ''}${known(key) ? '' : key === inbox ? ' (developers inbox)' : ' (not a friend)'}`)
+        diag('network', `linked with …${key.slice(-6)}${replaced ? ' again, replacing its old link' : ''}${by ? ' through a friend' : ''}${known(key) ? '' : key === inbox ? ' (developers inbox)' : ' (not a friend)'}`)
         if (key === inbox) deliver()
         if (wants(key)) greet(key)
         if (known(key)) files.opened(key)

@@ -48,6 +48,22 @@ export function videoHold(samples: Sample[] = [], current: number | null = null)
   return settle(lossy && rtt >= 100 && Number.isFinite(rtt) ? Math.min(500, Math.ceil((rtt * 1.2) / 50) * 50) : null, current, 100)
 }
 
+// What drags a link below good, for the diagnostics: the loss and jitter grade() counts, so a report says why.
+export function trouble(samples: Sample[] = []): string {
+  if (!samples.length) return ''
+  const loss = median(samples.map((s) => s.loss ?? 0))
+  const jitter = median(samples.map((s) => s.jitter ?? 0))
+  return [loss >= 0.02 && `${Math.round(loss * 100)} % lost`, jitter >= 30 && `jitter ${Math.round(jitter)} ms`].filter(Boolean).join(', ')
+}
+
+// How much of a voice the player had to make up for lost or late packets, 0-1, between two readings of its counters.
+export const patched = (was: { concealed: number; total: number } | undefined, now: { concealed: number; total: number }) =>
+  was && now.total > was.total ? Math.max(0, now.concealed - was.concealed) / (now.total - was.total) : 0
+
+// Windows's name for a Bluetooth headset's microphone: using it switches the headset to its phone-call mode, which
+// makes both the voice it sends and everything it plays sound like a phone line.
+export const handsFree = (label: string) => /hands-free/i.test(label)
+
 const ORDER: Grade[] = ['good', 'fair', 'poor']
 // A call is only as good as its weakest link.
 export const worst = (grades: (Grade | null)[]) =>
