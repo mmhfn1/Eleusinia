@@ -52,6 +52,13 @@ export function encodingFor(level: Level, q: Quality, kbps: number) {
 // A shared screen's sound (games, video, music): Opus at a rate where music holds up.
 export const SOUND_KBPS = 128
 
+// A still of a shared screen for the people who have not joined it (their Join stream tile): small, refreshed every
+// 10 s, and only JPEG data that fits the cap is shown.
+export const PREVIEW_WIDTH = 240
+export const PREVIEW_EVERY = 10000
+export const PREVIEW_MAX = 30000
+export const cleanPreview = (v: unknown) => (typeof v === 'string' && v.length <= PREVIEW_MAX && /^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(v) ? v : undefined)
+
 // What a camera can deliver, from its track's capabilities, falling back to what it is doing now.
 export function cameraSource(
   caps: { width?: { max?: number }; height?: { max?: number }; frameRate?: { max?: number } },

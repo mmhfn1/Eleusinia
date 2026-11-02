@@ -519,9 +519,10 @@ function Screen({ stream, label, big, mirror, volume }: ScreenProps) {
 }
 
 // A shared screen nobody here has joined: where its video would be, who shares what, and Join stream.
-function StreamInvite({ label, big, join }: { label: string; big?: boolean; join: () => void }) {
+function StreamInvite({ label, big, preview, join }: { label: string; big?: boolean; preview?: string; join: () => void }) {
   return (
     <figure className={`screen invite ${big ? 'big' : ''}`}>
+      {preview && <img className="invite-preview" src={preview} alt="" />}
       <div className="invite-body">
         <Icon name="screen" size={big ? 32 : 20} />
         <button className="button primary" onClick={join}>
@@ -594,7 +595,7 @@ export function Stage({ name, settings }: { name: (k: Key) => string; settings: 
       </button>
     ) : (
       <div key={itemId(i)} className="stage-thumb">
-        <StreamInvite label={`${name(i.k)}'s screen`} join={() => join(i.k)} />
+        <StreamInvite label={`${name(i.k)}'s screen`} preview={call.shares.get(i.k)?.preview} join={() => join(i.k)} />
       </div>
     )
   const ownTiles = (
@@ -631,7 +632,7 @@ export function Stage({ name, settings }: { name: (k: Key) => string; settings: 
           </button>
         )}
         {mine && (
-          <button className="button danger" onClick={call.stopShare}>
+          <button className="button danger" onClick={() => call.stopShare()}>
             Stop sharing
           </button>
         )}
@@ -651,7 +652,7 @@ export function Stage({ name, settings }: { name: (k: Key) => string; settings: 
           </button>
         )}
       </div>
-      {!hidden && main && !live(main) && <StreamInvite key={itemId(main)} big label={label(main)} join={() => join(main.k)} />}
+      {!hidden && main && !live(main) && <StreamInvite key={itemId(main)} big label={label(main)} preview={call.shares.get(main.k)?.preview} join={() => join(main.k)} />}
       {!hidden && main && live(main) && (
         <Screen
           key={itemId(main)}

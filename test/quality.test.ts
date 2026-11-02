@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { lightOpus } from '../src/shared/callstate'
 import { clampOffset, cropRect } from '../src/shared/crop'
-import { WINDOW, grade, jitterTarget, pingSummary, remember, rememberPing, videoHold, worst } from '../src/shared/quality'
+import { WINDOW, grade, handsFree, jitterTarget, patched, pingSummary, remember, rememberPing, trouble, videoHold, worst } from '../src/shared/quality'
 
 const many = (n: number, s: object) => Array.from({ length: n }, () => ({ rtt: 40, ...s }))
 
@@ -105,4 +105,15 @@ test('video waits for resent pieces only on long lossy links', () => {
   expect(videoHold(many(5, { rtt: 900, loss: 0.03 }))).toBe(500)
   expect(videoHold(many(5, { rtt: 320, loss: 0.03 }), 450)).toBe(450) // 400 is not a clear step down
   expect(videoHold(many(5, { rtt: 290 }), 450)).toBe(null) // clean again: let go
+})
+
+test('reports say what drags a link down, how much of a voice was made up, and spot a Bluetooth hands-free microphone', () => {
+  expect(trouble(many(5, {}))).toBe('')
+  expect(trouble(many(5, { loss: 0.09, jitter: 45 }))).toBe('9 % lost, jitter 45 ms')
+  expect(trouble(many(5, { rtt: 320 }))).toBe('') // distance is already in the ping
+  expect(patched(undefined, { concealed: 50, total: 1000 })).toBe(0)
+  expect(patched({ concealed: 50, total: 1000 }, { concealed: 150, total: 2000 })).toBe(0.1)
+  expect(patched({ concealed: 50, total: 1000 }, { concealed: 0, total: 0 })).toBe(0) // a new connection's counters
+  expect(handsFree('Headset (WH-1000XM4 Hands-Free AG Audio)')).toBe(true)
+  expect(handsFree('Headset Microphone (USB Audio)')).toBe(false)
 })

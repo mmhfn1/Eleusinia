@@ -618,6 +618,7 @@ try {
   await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Share').click()`)
   // As on Discord: a stream is offered, not pushed. Until B joins, A sends B none of it
   await until('B is offered the stream where it will play, with Join stream', () => b.ev(`document.querySelector('.stage .screen.invite.big button')?.textContent === 'Join stream'`), 20)
+  await until('the Join stream tile shows a still of the shared window', () => b.ev(`document.querySelector('.stage .screen.invite.big img.invite-preview')?.src.startsWith('data:image/jpeg;base64,')`), 15)
   const unjoined = await b.ev(received('screen'))
   await sleep(3000)
   const unjoinedAfter = await b.ev(received('screen'))
@@ -737,6 +738,9 @@ try {
   await until(`call is ${forced ? 'relayed through the chat link' : 'direct'}`, async () =>
     (await a.ev(`document.querySelector('.callers').textContent.includes('relayed')`)) === forced &&
     (await b.ev(`document.querySelector('.callers').textContent.includes('relayed')`)) === forced, 10)
+  // and the reports say so, from the route in use rather than the first one that answered
+  await until(`A's diagnostics log the route as ${forced ? 'through the chat link' : 'direct'}`, () =>
+    a.ev(`api.diagnostics().then((d) => d.events.some((e) => e.text.includes(${forced ? "'goes through the chat link'" : "'goes direct ('"})))`), 10)
   // Per-person volume: B turns Ann down; it is saved, and checked again after B restarts below.
   const annKey = await a.ev(`api.call('state').then((s) => s.me)`)
   await b.ev(`(() => { const r = document.querySelector('.caller input[aria-label="Volume for Ann"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(r, '40'); r.dispatchEvent(new Event('input', { bubbles: true })) })()`)

@@ -22,7 +22,7 @@ export function lineReader() {
 }
 
 type Handlers = {
-  open(key: Key): void
+  open(key: Key, replaced?: boolean): void // replaced: a new stream took over from a half-dead one
   close(key: Key): void
   msg(key: Key, w: Wire): void
   packet?(key: Key, b: Buffer): void
@@ -92,7 +92,7 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
       links.delete(key)
       on.close(key)
     })
-    on.open(key) // also after a replacement: greeting twice is harmless, a lost greeting is not
+    on.open(key, !!old) // also after a replacement: greeting twice is harmless, a lost greeting is not
   }
 
   // A peer asking to link through a relay is turned away unless we use relays ourselves, and anyone not admitted is.

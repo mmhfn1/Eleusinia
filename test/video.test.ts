@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { cameraSource, canStream, choices, defaultQuality, encodingFor, fitQuality, streamKbps, widthFor } from '../src/shared/video'
+import { PREVIEW_MAX, cameraSource, canStream, choices, cleanPreview, defaultQuality, encodingFor, fitQuality, streamKbps, widthFor } from '../src/shared/video'
 
 const fourK = { width: 3840, height: 2160, fps: 120 }
 const laptop = { width: 1920, height: 1080, fps: 60 }
@@ -55,4 +55,13 @@ test('a camera offers what it can do, falling back to what it is doing now', () 
   expect(cameraSource({ width: { max: 1920 }, height: { max: 1080 }, frameRate: { max: 60 } }, { width: 640, height: 480, frameRate: 30 })).toEqual({ width: 1920, height: 1080, fps: 60 })
   expect(cameraSource({}, { width: 640, height: 480, frameRate: 29.97 })).toEqual({ width: 640, height: 480, fps: 30 })
   expect(choices(cameraSource({}, { width: 640, height: 480, frameRate: 30 })).heights).toEqual([480]) // an old webcam: its own size only
+})
+
+test('a screen preview is shown only as small JPEG data', () => {
+  const jpeg = 'data:image/jpeg;base64,/9j/4AAQSkZJRg=='
+  expect(cleanPreview(jpeg)).toBe(jpeg)
+  expect(cleanPreview('data:image/svg+xml;base64,PHN2Zz4=')).toBe(undefined)
+  expect(cleanPreview('https://example.com/x.jpg')).toBe(undefined)
+  expect(cleanPreview('data:image/jpeg;base64,' + 'A'.repeat(PREVIEW_MAX))).toBe(undefined)
+  expect(cleanPreview(42)).toBe(undefined)
 })
