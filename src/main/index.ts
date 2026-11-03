@@ -502,6 +502,8 @@ function startApp() {
   const running = join(dir, 'running')
   if (existsSync(running)) crashed('Eleusinia closed unexpectedly last time', 'It did not shut down normally: a crash, the computer losing power, or the app being ended from Task Manager.', false)
   writeFileSync(running, '')
+  // Windows ends the app at shutdown, restart or logoff without will-quit, which would read as a crash next start
+  win.on('session-end', () => rmSync(running, { force: true }))
   ipcMain.handle('call', async (_e, method: string, ...args: unknown[]) => {
     if (!Object.hasOwn(node, method)) throw new Error('Unknown method')
     const result = await (node as any)[method](...args)

@@ -126,9 +126,9 @@ export default function App() {
       {update && (
         <div role="status" className="toast update-toast">
           <span>
-            Eleusinia {update} is ready.{call.conv ? ' Restarting ends your call.' : ''}
+            Eleusinia {update} is ready.{call.conv ? ' You rejoin your call after the restart.' : ''}
           </span>
-          <button className="button primary" onClick={() => window.api.installUpdate()}>
+          <button className="button primary" onClick={() => call.restartForUpdate()}>
             Restart now
           </button>
           <button className="button subtle" onClick={() => setUpdate(null)}>

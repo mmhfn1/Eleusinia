@@ -20,7 +20,7 @@ Only the installed app sends to the real inbox. Copies run from source (`npm run
 `ELEUSINIA_INBOX` names a test inbox, as `npm run smoke` does, so stopping a development run never files a report.
 
 Diagnostics cover the last 15 minutes and live in memory only. A crash report never contains a memory dump. When
-the app itself was ended abruptly (a crash, power loss, ending it in Task Manager), the next start sends a short
+the app itself was ended abruptly (a crash, power loss, ending it in Task Manager; not Windows shutting down or logging off, which `session-end` catches), the next start sends a short
 "closed unexpectedly" report without events, since none survived.
 
 ## Running the inbox

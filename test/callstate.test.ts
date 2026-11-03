@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { type IceCandidate, OFFLINE_GRACE, RESTART_AFTER, RESTART_GRACE, backoff, createCandidates, createWatchdog, offers, quickVideo, restartAfterFor } from '../src/shared/callstate'
+import { type IceCandidate, OFFLINE_GRACE, REJOIN_MS, RESTART_AFTER, RESTART_GRACE, backoff, createCandidates, createWatchdog, offers, quickVideo, rejoinFrom, restartAfterFor } from '../src/shared/callstate'
 
 // Stands in for RTCPeerConnection: rejects candidates until a remote description is set, as the real one does.
 function fakePc() {
@@ -325,4 +325,14 @@ test('video codecs start at a useful bitrate, audio and others untouched', () =>
   expect(out).toContain('a=fmtp:111 minptime=10;useinbandfec=1\r\n')
   expect(out).toContain('a=fmtp:97 apt=96\r\n')
   expect(quickVideo(out, 1000)).toBe(out) // applied twice, still once
+})
+
+test('a call saved before an update restart is rejoined only soon after', () => {
+  const saved = JSON.stringify({ conv: 'g1', at: 1000 })
+  expect(rejoinFrom(saved, 1000 + 5000)).toBe('g1')
+  expect(rejoinFrom(saved, 1000 + REJOIN_MS)).toBe(null)
+  expect(rejoinFrom(saved, 500)).toBe(null) // clock went back
+  expect(rejoinFrom(null, 1000)).toBe(null)
+  expect(rejoinFrom('not json', 1000)).toBe(null)
+  expect(rejoinFrom(JSON.stringify({ conv: 5, at: 1000 }), 1000)).toBe(null)
 })
