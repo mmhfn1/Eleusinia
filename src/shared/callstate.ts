@@ -159,3 +159,15 @@ export function quickVideo(sdp: string, kbps = VIDEO_START_KBPS) {
 // raddr is the unspecified address of the same family, as the candidate grammar expects.
 export const relayCandidate = (ip: string, port: number) =>
   `candidate:9 1 udp 16777215 ${ip} ${port} typ relay raddr ${ip.includes(':') ? '::' : '0.0.0.0'} rport 0`
+
+// The call to rejoin after restarting into an update: saved just before the restart, good for 3 minutes, so a later
+// ordinary start never pulls someone into a call.
+export const REJOIN_MS = 180000
+export function rejoinFrom(saved: string | null, now: number): string | null {
+  try {
+    const r = JSON.parse(saved ?? 'null')
+    return typeof r?.conv === 'string' && typeof r.at === 'number' && now >= r.at && now - r.at < REJOIN_MS ? r.conv : null
+  } catch {
+    return null
+  }
+}

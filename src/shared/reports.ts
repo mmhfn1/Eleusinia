@@ -19,7 +19,7 @@ export const KINDS: Kind[] = ['bug', 'feedback', 'idea', 'crash']
 export type Area = 'app' | 'network' | 'call' | 'error'
 export const AREAS: Area[] = ['app', 'network', 'call', 'error']
 export type Diag = { at: number; area: Area; text: string }
-export type Meta = { version: string; build: string; os: string; arch: string; electron: string; chrome: string; locale: string; memoryGb: number }
+export type Meta = { version: string; build: string; os: string; arch: string; electron: string; chrome: string; locale: string; memoryGb: number; appMemoryMb?: number } // appMemoryMb: all of the app's processes, from 0.0.45
 
 export type Report = {
   id: string // 16 hex, chosen by the sender, so a report resent after a lost receipt is stored once
@@ -72,6 +72,8 @@ export function cleanReport(r: any): Report | null {
       locale: str(m.locale, 20),
       memoryGb: Math.round(Number(m.memoryGb) || 0),
     }
+    const mb = Math.round(Number(m.appMemoryMb))
+    if (mb > 0 && mb < 1e6) out.meta.appMemoryMb = mb
   }
   if (Array.isArray(r.events)) {
     out.events = r.events

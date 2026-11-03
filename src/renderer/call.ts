@@ -1,7 +1,7 @@
 import { RnnoiseWorkletNode } from '@sapphi-red/web-noise-suppressor'
 import rnnoiseWasm from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?inline'
 import rnnoiseWorklet from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?raw'
-import { createCandidates, createWatchdog, lightOpus, offers, quickVideo, relayCandidate, restartAfterFor } from '../shared/callstate'
+import { createCandidates, createWatchdog, lightOpus, offers, quickVideo, rejoinFrom, relayCandidate, restartAfterFor } from '../shared/callstate'
 import { fellBack, nextDevice, usable } from '../shared/devices'
 import { type Jingle, LOOP_EVERY, RING_MS, loopNow } from '../shared/jingles'
 import { CALL_VERSION, type Event, type Key, type State } from '../shared/protocol'
@@ -1150,10 +1150,30 @@ function serial(fn: () => Promise<void>) {
 }
 export const onSignal = (from: Key, c: string, d: any) => serial(() => handle(from, c, d))
 
+// Restarting into an update during a call: the call is remembered, and the new version rejoins it as it starts.
+const REJOIN = 'rejoin-after-update'
+export function restartForUpdate() {
+  try {
+    if (conv) localStorage.setItem(REJOIN, JSON.stringify({ conv, at: Date.now() }))
+  } catch {}
+  return window.api.installUpdate()
+}
+function rejoinAfterUpdate() {
+  let saved: string | null = null
+  try {
+    saved = localStorage.getItem(REJOIN)
+    localStorage.removeItem(REJOIN)
+  } catch {}
+  const c = rejoinFrom(saved, Date.now())
+  if (!c || !membersOf(c).includes(state.me)) return
+  log('rejoining the call after the update')
+  join(c).catch(() => {})
+}
+
 export function onState(next: State) {
   const prev = state
   state = next
-  if (!prev) return
+  if (!prev) return rejoinAfterUpdate()
   for (const k of prev.online) {
     if (next.online.includes(k)) continue
     const gone = () => {

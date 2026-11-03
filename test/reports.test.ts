@@ -45,3 +45,11 @@ test('a report reads the same in the preview and the inbox', () => {
   expect(text).toContain('[feedback] Nice')
   expect(text).toContain('00:00:00 app     started')
 })
+
+test("a report keeps the app's memory use only as a plain number", () => {
+  const meta = { version: '0.0.45', build: 'tester', os: 'Windows_NT 10', arch: 'x64', electron: '44', chrome: '152', locale: 'en-US', memoryGb: 16 }
+  const r = (m: object) => cleanReport({ id: '0123456789abcdef', at: 1, kind: 'bug', title: 'Memory', meta: { ...meta, ...m } })?.meta
+  expect(r({ appMemoryMb: 812.4 })?.appMemoryMb).toBe(812)
+  expect(r({ appMemoryMb: 'lots' })).toEqual(meta)
+  expect(r({})).toEqual(meta) // older copies send none
+})
