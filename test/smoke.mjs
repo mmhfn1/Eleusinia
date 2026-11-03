@@ -741,8 +741,21 @@ try {
   // and the reports say so, from the route in use rather than the first one that answered
   await until(`A's diagnostics log the route as ${forced ? 'through the chat link' : 'direct'}`, () =>
     a.ev(`api.diagnostics().then((d) => d.events.some((e) => e.text.includes(${forced ? "'goes through the chat link'" : "'goes direct ('"})))`), 10)
-  // Per-person volume: B turns Ann down; it is saved, and checked again after B restarts below.
   const annKey = await a.ev(`api.call('state').then((s) => s.me)`)
+  if (!forced) {
+    // A chat link that closes mid-call, as in a network blip, leaves the call alone while its own connection still works:
+    // Bob stays in Ann's call and his voice keeps arriving, rather than Ann dropping him at once.
+    const bobKey = await b.ev(`api.call('state').then((s) => s.me)`)
+    await a.ev(`api.call('dropLink', '${bobKey}')`)
+    await until("A's chat link with Bob closes", () => a.ev(`api.diagnostics().then((d) => d.events.some((e) => e.text === 'link closed with …${bobKey.slice(-6)}'))`), 5)
+    const voice = await a.ev(received('voice', 'bytesReceived'))
+    await sleep(5000)
+    if (!(await a.ev(`[...document.querySelectorAll('.caller')].some((c) => c.textContent.includes('Bob'))`))) throw new Error('A dropped Bob from the call when only the chat link closed')
+    if (!((await a.ev(received('voice', 'bytesReceived'))) > voice)) throw new Error("A stopped receiving Bob's voice when only the chat link closed")
+    console.log("ok   with the chat link closed, Bob stays in A's call and his voice keeps arriving")
+    await until('the chat link comes back', () => a.ev(`api.call('state').then((s) => s.online.includes('${bobKey}'))`), 60)
+  }
+  // Per-person volume: B turns Ann down; it is saved, and checked again after B restarts below.
   await b.ev(`(() => { const r = document.querySelector('.caller input[aria-label="Volume for Ann"]'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(r, '40'); r.dispatchEvent(new Event('input', { bubbles: true })) })()`)
   await until('B turns Ann down to 40%, and it is saved', () =>
     b.ev(`api.call('state').then((s) => s.settings.volumes?.['${annKey}'] === 0.4 && document.querySelector('.caller .person-volume-pct').textContent === '40%')`), 10)

@@ -941,6 +941,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     relayOpen: (key: Key) => (known(key) ? relay.open(key) : null),
     relayClose: (key: Key) => relay.close(key),
     ping: () => net.ping(),
+    // Testing only (index.ts allows it on a local test DHT): closes the chat link with a peer, as a network blip does.
+    dropLink: (key: Key) => net.drop(key),
     // Upload speed in kbps: about 1 MB of filler sent to a call member over the chat link, timed until they confirm
     // it all arrived. Bounded by their download too, which is what a stream to them would face. Null if they do not answer.
     async probe(key: Key) {
