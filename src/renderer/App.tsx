@@ -7,6 +7,7 @@ import { Chat } from './Chat'
 import { CameraDialog, Oculus, PersonVolume, RingBar, STATE_WORDS, ShareDialog, Stage, VoiceMark, VoiceSignal } from './Media'
 import { DeleteAccount, ReportDialog, SettingsDialog } from './Settings'
 import { ActivityLine, ProfileActivity } from './Activity'
+import { ProfileBanner, ProfilePop } from './Profile'
 import { type Modal, NOBODY, type People, type Run, api, card, groupName, labelOf } from './common'
 
 export default function App() {
@@ -90,12 +91,13 @@ export default function App() {
     prof,
     name: (k) => labelOf(prof(k), k),
     user: (k) => (
-      <button key={k} className="user" onClick={() => people.show(k)}>
+      <button key={k} className="user" onClick={(e) => people.show(k, e.currentTarget)}>
         {labelOf(prof(k), k)}
       </button>
     ),
     isOnline: (k) => k === st.me || st.online.includes(k),
-    show: (k) => setModal({ kind: 'card', k }),
+    // Clicking the same person again closes their panel.
+    show: (k, from) => setModal((m) => (!from ? { kind: 'card', k } : m?.kind === 'pop' && m.k === k && m.from === from ? null : { kind: 'pop', k, from })),
   }
   // A conversation that no longer exists (friend removed) falls back to Home.
   const open = sel && (st.groups[sel] || st.friends[sel.split('_').find((k) => k !== st.me)!] === 'friend') ? sel : null
@@ -143,6 +145,20 @@ export default function App() {
             <Icon name="close" size={16} />
           </button>
         </div>
+      )}
+      {modal?.kind === 'pop' && (
+        <ProfilePop
+          key={modal.k}
+          k={modal.k}
+          from={modal.from}
+          st={st}
+          people={people}
+          run={run}
+          close={() => setModal(null)}
+          expand={() => setModal({ kind: 'card', k: modal.k })}
+          chat={() => (setModal(null), go(dmId(st.me, modal.k)))}
+          edit={() => setEditing(true)}
+        />
       )}
       {modal?.kind === 'card' && (
         <Card
@@ -759,6 +775,7 @@ function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
   }
   return (
     <Dialog label={`Profile of ${p.name}`} close={close} className="card-dialog">
+      <ProfileBanner st={st} k={k} p={p} />
       <div className="card">
         <div className="card-portrait">
           <Avatar k={k} p={p} size={96} online={k === st.me ? undefined : st.online.includes(k)} />
@@ -960,16 +977,16 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
   // A speaking ring wherever someone in this call appears.
   const ring = (k: Key) => (inCall && call.speaking.has(k) ? ' speaking' : '')
   const member = (k: Key) => (
-    <div className={`member${ring(k)}`} key={k} onContextMenu={card(show, k)}>
+    <button className={`member${ring(k)}`} key={k} onClick={(e) => show(k, e.currentTarget)} onContextMenu={card(show, k)} aria-label={`${name(k)}${k === st.me ? ' (you)' : ''}: open profile`}>
       <Avatar k={k} p={prof(k)} size={32} online={isOnline(k)} />
       <span className="row-text">
         <span className="row-title">
-          {user(k)}
+          <span className="user">{name(k)}</span>
           {k === st.me && <span className="row-sub"> (you)</span>}
         </span>
         <span className="row-sub">{st.activity[k]?.game ? <ActivityLine a={st.activity[k]} /> : prof(k).handle}</span>
       </span>
-    </div>
+    </button>
   )
   // One round, icon-only call button; its name stays readable to screen readers (and to the smoke test).
   const control = (label: string, icon: Parameters<typeof Icon>[0]['name'], onClick: () => void, pressed?: boolean, extra = '') => (
@@ -1030,7 +1047,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
             )}
           </div>
         ) : (
-          <button className="chamber-id person" onClick={() => show(other)} aria-label={`Open ${title}'s profile`}>
+          <button className="chamber-id person" onClick={(e) => show(other, e.currentTarget)} aria-label={`Open ${title}'s profile`}>
             <Avatar k={other} p={prof(other)} size={64} online={isOnline(other)} />
             <h1>{title}</h1>
             <span className="row-sub">{prof(other).handle}</span>
@@ -1043,7 +1060,9 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
               <VoiceSignal name={name} />
               <div className="callers" aria-live="polite">
                 <div className={`caller${ring(st.me)}`}>
-                  <Avatar k={st.me} p={st.profile} size={44} />
+                  <button className="caller-who" onClick={(e) => show(st.me, e.currentTarget)} aria-label="Your profile">
+                    <Avatar k={st.me} p={st.profile} size={44} />
+                  </button>
                   <span className="row-text">
                     <span className="row-title">
                       You <VoiceMark muted={call.muted} deafened={call.deafened} />
@@ -1056,11 +1075,16 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
                   </span>
                 </div>
                 {[...call.peers].map(([k, p]) => (
-                  <div className={`caller state-${p.pc.connectionState}${ring(k)}`} key={k}>
-                    <Avatar k={k} p={prof(k)} size={44} />
+                  <div className={`caller state-${p.pc.connectionState}${ring(k)}`} key={k} onContextMenu={card(show, k)}>
+                    <button className="caller-who" onClick={(e) => show(k, e.currentTarget.closest('.caller') as HTMLElement)} aria-label={`${name(k)}: open profile`}>
+                      <Avatar k={k} p={prof(k)} size={44} />
+                    </button>
                     <span className="row-text">
                       <span className="row-title">
-                        {name(k)} <VoiceMark {...call.voices.get(k)} />
+                        <button className="user" onClick={(e) => show(k, e.currentTarget.closest('.caller') as HTMLElement)}>
+                          {name(k)}
+                        </button>{' '}
+                        <VoiceMark {...call.voices.get(k)} />
                       </span>
                       <span className="row-sub">
                         {STATE_WORDS[p.pc.connectionState] ?? p.pc.connectionState}
@@ -1117,7 +1141,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
         stage={
           inCall ? (
             <>
-              <Oculus st={st} name={name} />
+              <Oculus st={st} name={name} show={show} />
               <Stage name={name} settings={() => setShareDialog(true)} />
             </>
           ) : ringing ? (

@@ -3436,3 +3436,428 @@ img.crest {
   color: inherit;
   background: none;
 }
+
+/* ---------- Profile panel ----------
+   A person's profile beside wherever they were clicked. The one bold thing is its banner: the game they are playing,
+   or their own picture, dissolved into the throne's fog, so every person's panel looks like them and changes as they
+   start a game. The rest stays quiet: their name, the cliff notes of the game, and a message box. */
+.profile-pop {
+  position: fixed;
+  z-index: 40;
+  width: 320px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100vh - 16px);
+  overflow: hidden auto;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: linear-gradient(180deg, var(--obsidian-2), var(--abyss-2));
+  box-shadow:
+    var(--shadow-3),
+    inset 0 1px 0 color-mix(in srgb, var(--silver) 6%, transparent);
+}
+.profile-pop.placed {
+  animation: pop-in 180ms var(--ease);
+}
+.profile-pop.from-right {
+  transform-origin: left top;
+}
+.profile-pop.from-left {
+  transform-origin: right top;
+}
+.profile-pop.from-below {
+  transform-origin: left top;
+}
+.profile-pop.from-above {
+  transform-origin: left bottom;
+}
+@keyframes pop-in {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+.pop-banner {
+  position: relative;
+  height: 96px;
+  overflow: hidden;
+  background:
+    radial-gradient(120% 150% at 25% -20%, color-mix(in srgb, var(--fog) 60%, transparent), transparent 70%),
+    var(--obsidian-3);
+}
+.pop-banner img {
+  position: absolute;
+  inset: -24px;
+  width: calc(100% + 48px);
+  height: calc(100% + 48px);
+  object-fit: cover;
+  filter: blur(18px) saturate(1.15) brightness(0.7);
+  opacity: 0.9;
+}
+/* A game's art stays recognisable: less blur than a face, which only lends its colours. */
+.pop-banner.game img {
+  inset: -8px;
+  width: calc(100% + 16px);
+  height: calc(100% + 16px);
+  filter: blur(3px) brightness(0.62);
+}
+.pop-banner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 35%, var(--obsidian-2));
+}
+.pop-head {
+  position: relative;
+  height: 0;
+}
+.pop-portrait {
+  position: absolute;
+  top: -46px;
+  left: 14px;
+  padding: 4px;
+  border-radius: 50%;
+  background: var(--obsidian-2);
+  transition: box-shadow var(--t);
+}
+.profile-pop.online .pop-portrait {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--cyan) 55%, transparent);
+}
+.profile-pop.speaking .pop-portrait {
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 0 22px var(--accent-glow);
+}
+.pop-expand {
+  position: absolute;
+  top: -88px;
+  right: 8px;
+  background: color-mix(in srgb, var(--void) 55%, transparent);
+  backdrop-filter: blur(6px);
+}
+.pop-body {
+  display: grid;
+  gap: 6px;
+  padding: 40px 16px 16px;
+}
+.pop-name {
+  margin: 0;
+  color: var(--silver);
+  font: 650 22px/1.15 var(--display);
+  letter-spacing: -0.01em;
+  text-transform: none;
+  overflow-wrap: anywhere;
+}
+.pop-handle,
+.pop-quiet {
+  margin: 0;
+  color: var(--mist);
+  font-size: 13px;
+}
+.pop-presence {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  color: var(--mist-2);
+  font-size: 12.5px;
+}
+.pop-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--stone);
+}
+.pop-presence.on {
+  color: var(--silver-2);
+}
+.pop-presence.on .pop-dot {
+  background: var(--cyan);
+  box-shadow: 0 0 8px color-mix(in srgb, var(--cyan) 60%, transparent);
+}
+.pop-about {
+  display: -webkit-box;
+  margin: 4px 0 0;
+  overflow: hidden;
+  color: var(--silver-2);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.pop-glance {
+  width: 100%;
+  margin-top: 6px;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: var(--obsidian);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--t-fast),
+    background var(--t-fast);
+}
+.pop-glance:hover {
+  border-color: color-mix(in srgb, var(--silver) 22%, transparent);
+  background: var(--obsidian-3);
+}
+.pop-volume {
+  padding-top: 2px;
+}
+.pop-note {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px;
+  margin-top: 8px;
+}
+.pop-note input {
+  min-width: 0;
+  height: 38px;
+  padding: 0 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--abyss-2);
+  color: var(--silver);
+  font: inherit;
+  transition:
+    border-color var(--t),
+    box-shadow var(--t);
+}
+.pop-note input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--accent) 60%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
+}
+.pop-send {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border: none;
+  border-radius: var(--r-md);
+  background: var(--accent);
+  color: var(--void);
+  cursor: pointer;
+  transition: opacity var(--t-fast);
+}
+.pop-send:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.pop-send:focus-visible,
+.pop-glance:focus-visible,
+.caller-who:focus-visible,
+.oculus-who:focus-visible,
+button.member:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.pop-sent {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--mist);
+  font-size: 12px;
+  animation: rise var(--t) var(--ease);
+}
+.link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--silver);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--silver) 45%, transparent);
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+/* The cliff notes of a game: its art, where they are in it, and the score, which is the number worth a glance. */
+.glance {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 8px 8px;
+}
+.glance-art {
+  display: block;
+  width: 72px;
+  aspect-ratio: 460 / 215;
+  border-radius: var(--r-sm);
+  object-fit: cover;
+  background: var(--obsidian-4);
+}
+.glance-text {
+  display: grid;
+  min-width: 0;
+}
+.glance-game,
+.glance-place,
+.glance-meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.glance-game {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.glance-place {
+  color: var(--silver-2);
+  font-size: 12.5px;
+}
+.glance-meta {
+  color: var(--mist-2);
+  font-size: 12px;
+}
+.glance-score {
+  display: flex;
+  gap: 2px;
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.02em;
+  color: var(--silver-2);
+}
+.glance-score > span {
+  color: var(--mist-2);
+  font-weight: 400;
+}
+.glance-score.ahead {
+  color: var(--silver);
+  text-shadow: 0 0 14px var(--accent-glow);
+}
+.glance-score.behind {
+  color: var(--mist);
+}
+
+/* The full profile carries the same banner across its top. */
+.card-dialog .pop-banner {
+  height: 120px;
+  margin: -26px -28px -64px;
+}
+.card-dialog .card {
+  position: relative;
+}
+.card-dialog .card-portrait {
+  padding: 5px;
+  border-radius: 50%;
+  background: var(--obsidian-2);
+}
+
+/* People open their panel from the members list, the call and the Oculus: rows and pictures as buttons. */
+button.member {
+  width: 100%;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+button.member:hover .user {
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  text-underline-offset: 3px;
+}
+.caller-who,
+.oculus-who {
+  flex: none;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: none;
+  cursor: pointer;
+}
+.oculus-who .avatar {
+  transition: transform var(--t-fast) var(--ease);
+}
+.oculus-who:hover .avatar {
+  transform: translateY(-2px);
+}
+
+/* Links in messages, and the preview the sender's app made for one. */
+.msg-link {
+  color: var(--silver);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in srgb, var(--silver) 40%, transparent);
+  text-underline-offset: 3px;
+  overflow-wrap: anywhere;
+}
+.msg-link:hover {
+  text-decoration-color: var(--silver);
+}
+.link-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+  max-width: 480px;
+  margin-top: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, var(--obsidian-2), var(--obsidian));
+}
+.link-card.with-image {
+  grid-template-columns: 1fr auto;
+}
+.composer .link-card {
+  flex: 1 0 100%;
+  max-width: none;
+  margin: 0 0 2px;
+  padding-right: 40px;
+}
+.link-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.link-site {
+  color: var(--mist);
+  font-size: 12px;
+}
+.link-title {
+  color: var(--silver);
+  font-weight: 600;
+  text-decoration: none;
+  overflow-wrap: anywhere;
+}
+.link-title:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.link-desc {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--silver-2);
+  font-size: 13px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.link-image {
+  align-self: start;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+.link-image img {
+  display: block;
+  width: 112px;
+  height: 76px;
+  border-radius: var(--r-md);
+  object-fit: cover;
+}
+.link-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+}

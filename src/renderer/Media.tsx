@@ -44,7 +44,7 @@ export function VoiceSignal({ name }: { name: (k: Key) => string }) {
 
 // The call itself, above the chat while nobody shares video: everyone in it under one pool of light, whoever is talking
 // lifted and glowing. It gives way to the stage once a screen or camera is on.
-export function Oculus({ st, name }: { st: State; name: (k: Key) => string }) {
+export function Oculus({ st, name, show }: { st: State; name: (k: Key) => string; show: (k: Key, from: HTMLElement) => void }) {
   if (call.shares.size || call.cameras.size || call.sharing() || call.filming()) return null
   const people = [st.me, ...call.peers.keys()]
   const prof = (k: Key) => (k === st.me ? st.profile : st.profiles[k])
@@ -56,7 +56,9 @@ export function Oculus({ st, name }: { st: State; name: (k: Key) => string }) {
     <section className="oculus" aria-label="People in the call">
       {people.map((k) => (
         <figure key={k} className={`oculus-person ${call.speaking.has(k) ? 'speaking' : ''}`}>
-          <Avatar k={k} p={prof(k) ?? { handle: '', name: '', about: '', avatar: '' }} size={call.speaking.has(k) ? 96 : 80} />
+          <button className="oculus-who" onClick={(e) => show(k, e.currentTarget)} aria-label={`${k === st.me ? 'Your' : `${name(k)}'s`} profile`}>
+            <Avatar k={k} p={prof(k) ?? { handle: '', name: '', about: '', avatar: '' }} size={call.speaking.has(k) ? 96 : 80} />
+          </button>
           <figcaption>
             <span className="row-title">{k === st.me ? 'You' : name(k)}</span>
             <span className={`row-sub ${state(k) === 'Muted' || state(k) === 'Deafened' ? 'held' : state(k) === 'Talking' ? 'live' : ''}`}>{state(k)}</span>

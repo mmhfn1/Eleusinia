@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import crypto from 'hypercore-crypto'
+import { type LinkPreview, cleanLink, linkBody } from './links'
 import { filesBody, validFiles } from './media'
 import { type Add, type Group, type Have, type Key, type Msg, MAX_TEXT, isGroupId, isKey, isPicture } from './protocol'
 
@@ -25,6 +26,15 @@ export function signMsg(m: Omit<Msg, 'sig'>, secretKey: Buffer): Msg {
   return { ...m, sig: crypto.sign(body(m), secretKey).toString('hex') }
 }
 
+// A link preview is signed on its own, over the message's place and the preview, so nobody passing the message on can
+// change what it shows. Older copies do not know it and keep it as it came.
+const previewBody = (m: Pick<Msg, 'conv' | 'author' | 'seq'>, l: LinkPreview) => Buffer.from(JSON.stringify(['link', m.conv, m.author, m.seq, ...linkBody(l)]))
+export const withLink = (m: Msg, l: LinkPreview, secretKey: Buffer): Msg => ({ ...m, link: l, lsig: crypto.sign(previewBody(m, l), secretKey).toString('hex') })
+const validLink = (m: Msg) => {
+  const l = cleanLink(m.link, m.text)
+  return !!l && JSON.stringify(linkBody(l)) === JSON.stringify(linkBody(m.link!)) && isSig(m.lsig) && crypto.verify(previewBody(m, l), Buffer.from(m.lsig, 'hex'), Buffer.from(m.author, 'hex'))
+}
+
 export function verifyMsg(m: Msg): boolean {
   return (
     !!m &&
@@ -36,6 +46,7 @@ export function verifyMsg(m: Msg): boolean {
     typeof m.text === 'string' &&
     m.text.length <= MAX_TEXT &&
     (m.files === undefined || validFiles(m.files)) &&
+    (m.link === undefined || validLink(m)) &&
     isSig(m.sig) &&
     crypto.verify(body(m), Buffer.from(m.sig, 'hex'), Buffer.from(m.author, 'hex'))
   )

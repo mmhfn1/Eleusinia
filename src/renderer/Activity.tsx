@@ -51,10 +51,19 @@ const dotaScore = (d: Dota) => {
 export function ActivityLine({ a }: { a?: Activity }) {
   useTick(30000)
   if (!a?.game) return null
-  const c = a.game.cs2
-  const d = a.game.dota
-  const n = a.game.destiny
-  const live = n
+  const live = liveOf(a.game)
+  return (
+    <span className="activity-line" title={a.game.name}>
+      Playing <b>{a.game.name}</b> · {live || duration(Date.now() - a.game.since)}
+    </span>
+  )
+}
+// What is happening in the game right now, from its live details, or '' without any.
+function liveOf(g: Game) {
+  const c = g.cs2
+  const d = g.dota
+  const n = g.destiny
+  return (n
     ? n.orbit
       ? 'in orbit'
       : n.activity && [n.activity.mode, n.activity.name].filter(Boolean).join(' · ') + (n.score ? ` ${n.score.us}–${n.score.them}` : '')
@@ -62,11 +71,56 @@ export function ActivityLine({ a }: { a?: Activity }) {
     ? c.menu
       ? 'in the menu'
       : [c.map && mapName(c.map), cs2Score(c)].filter(Boolean).join(' ')
-    : d && (d.menu ? 'in the menu' : d.watching ? 'watching a match' : [d.hero && heroName(d.hero), dotaScore(d)].filter(Boolean).join(' '))
+    : d && (d.menu ? 'in the menu' : d.watching ? 'watching a match' : [d.hero && heroName(d.hero), dotaScore(d)].filter(Boolean).join(' '))) || ''
+}
+
+// Where they are, without the score, and the score as our side's then theirs, for the profile popup's glance.
+function placeOf(g: Game) {
+  const c = g.cs2
+  const d = g.dota
+  const n = g.destiny
+  if (n) return n.orbit ? 'In orbit' : [n.activity?.mode, n.activity?.name].filter(Boolean).join(' · ')
+  if (c) return c.menu ? 'In the menu' : [c.map && mapName(c.map), c.mode && modeName(c.mode)].filter(Boolean).join(' · ')
+  if (d) return d.menu ? 'In the menu' : d.watching ? 'Watching a match' : [d.hero && heroName(d.hero), d.level && `level ${d.level}`].filter(Boolean).join(' · ')
+  return ''
+}
+function scoreOf(g: Game): [number, number] | null {
+  const c = g.cs2
+  const d = g.dota
+  const n = g.destiny?.score
+  if (n) return [n.us, n.them]
+  if (c && !c.menu && c.ct !== undefined && c.t !== undefined) return c.team === 'T' ? [c.t, c.ct] : [c.ct, c.t]
+  if (d && !d.menu && !d.watching && d.radiant !== undefined && d.dire !== undefined) return d.team === 'dire' ? [d.dire, d.radiant] : [d.radiant, d.dire]
+  return null
+}
+
+// The cliff notes of someone's game in their profile popup: which game, where in it, the score, for how long. The
+// whole card, with every detail, is one click away (GameCard in the full profile).
+export function GameGlance({ g }: { g: Game }) {
+  useTick(15000)
+  const place = placeOf(g)
+  const score = scoreOf(g)
+  const a = g.achievements
+  const session = Date.now() - g.since
   return (
-    <span className="activity-line" title={a.game.name}>
-      Playing <b>{a.game.name}</b> · {live || duration(Date.now() - a.game.since)}
-    </span>
+    <section className="glance" aria-label={`Playing ${g.name}`}>
+      {g.app ? <img className="glance-art" src={`eleusinia-art://steam/${g.app}/header`} alt="" onError={hide} /> : <span className="glance-art blank" aria-hidden="true" />}
+      <div className="glance-text">
+        <span className="glance-game">{g.name}</span>
+        {place && <span className="glance-place">{place}</span>}
+        <span className="glance-meta">
+          {session < 60000 ? 'Just started' : `For ${duration(session)}`}
+          {a && a.total > 0 && `, ${a.got} of ${a.total} achievements`}
+        </span>
+      </div>
+      {score && (
+        <span className={`glance-score ${score[0] > score[1] ? 'ahead' : score[0] < score[1] ? 'behind' : ''}`} aria-label={`Score ${score[0]} to ${score[1]}`}>
+          {score[0]}
+          <span aria-hidden="true">–</span>
+          {score[1]}
+        </span>
+      )}
+    </section>
   )
 }
 

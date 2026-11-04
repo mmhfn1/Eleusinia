@@ -51,6 +51,8 @@ declare global {
       quit(): Promise<void>
       programs(): Promise<string[]>
       openSteam(app: number, kind: 'store' | 'run'): Promise<void>
+      openLink(url: string): Promise<void>
+      previewLink(url: string): Promise<import('../shared/links').LinkPreview | null>
       gsi(game: 'cs2' | 'dota', action: 'status' | 'install' | 'remove'): Promise<{ found: boolean; installed: boolean; folder: string | null; launch?: boolean | null; heard?: number; problem?: string }>
       bungie(action: 'status' | 'link' | 'cancel' | 'unlink'): Promise<{ configured: boolean; linked: boolean; waiting?: boolean; name?: string; marathon?: boolean; error?: string }>
       win(action: 'minimize' | 'maximize' | 'close' | 'state'): Promise<boolean>

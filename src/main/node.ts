@@ -27,8 +27,9 @@ import {
 import DHT from 'hyperdht'
 import { idSeed, readClaims, signClaim, withClaim, writeClaims } from '../shared/idcard'
 import { type FileRef, validFiles } from '../shared/media'
+import { cleanLink } from '../shared/links'
 import { type Area, type Report, cleanReport } from '../shared/reports'
-import { groupIdOf, heldFrom, mergeGroup, missing, ownerOf, signAdd, signEdit, signLeft, signMsg, signRemoved, validGroup, verifyAdd, verifyMsg } from '../shared/sync'
+import { groupIdOf, heldFrom, mergeGroup, missing, ownerOf, signAdd, signEdit, signLeft, signMsg, signRemoved, validGroup, verifyAdd, verifyMsg, withLink } from '../shared/sync'
 import { openRequest, requestSeed, sealRequest } from '../shared/sealed'
 import { createImpairment, parseNetSim } from '../shared/netsim'
 import { createFiles } from './files'
@@ -902,7 +903,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     },
     // Works with nobody online: the message is logged now and synced whenever a member connects.
     // refs: files added with addFile or addBytes first, so we can hand them to whoever asks.
-    send(conv: string, text: string, refs?: FileRef[]) {
+    // link: a preview of a link in the text (main's previewLink), signed with the message.
+    send(conv: string, text: string, refs?: FileRef[], link?: unknown) {
       const ms = members(conv)
       const withFiles = refs !== undefined && refs.length > 0
       if (withFiles && (!validFiles(refs) || refs.some((f) => files.status(f.h).state !== 'done'))) throw new Error('Cannot send those files')
@@ -915,7 +917,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         appendFileSync(logFile(conv), JSON.stringify({ skip: { [me]: have[me] } }) + '\n')
       }
       const base = { conv, author: me, seq: (have[me] ?? 0) + 1, ts: Date.now(), text }
-      const m = signMsg(withFiles ? { ...base, files: refs.map(({ h, n, s, t, th }) => ({ h, n, s, t, ...(th && { th }) })) } : base, keyPair.secretKey)
+      const signed = signMsg(withFiles ? { ...base, files: refs.map(({ h, n, s, t, th }) => ({ h, n, s, t, ...(th && { th }) })) } : base, keyPair.secretKey)
+      const preview = link === undefined ? null : cleanLink(link, text)
+      const m = preview ? withLink(signed, preview, keyPair.secretKey) : signed
       append(m)
       for (const k of ms) if (k !== me) net.send(k, { t: 'msg', m }), used.set(k, Date.now()), need(k)
     },

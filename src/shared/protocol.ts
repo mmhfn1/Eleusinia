@@ -1,5 +1,6 @@
 import type { Activity, ActivitySettings } from './activity'
 import type { Action, Bindings } from './hotkeys'
+import type { LinkPreview } from './links'
 import type { FileRef } from './media'
 
 export type Key = string // 64 hex chars: ed25519 public key, also the friend code
@@ -24,7 +25,8 @@ export type Group = {
   avatar?: string
 }
 // files: shared files, referenced by hash (shared/media.ts); text may then be empty.
-export type Msg = { conv: string; author: Key; seq: number; ts: number; text: string; files?: FileRef[]; sig: string }
+// link: a preview of a link in the text, signed apart (lsig) so copies from before previews still verify the message.
+export type Msg = { conv: string; author: Key; seq: number; ts: number; text: string; files?: FileRef[]; link?: LinkPreview; lsig?: string; sig: string }
 export type Have = Record<Key, number> // highest seq held, per author
 // handle: the unique-ish ID friends type, username#1234. avatar: small image data URL, or ''.
 export type Profile = { handle: string; name: string; about: string; avatar: string }
