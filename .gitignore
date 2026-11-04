@@ -4,3 +4,4 @@ dist/
 *.log
 build/*.preview.png
 .env*.local
+PATHFINDER-*/
