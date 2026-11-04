@@ -3517,12 +3517,19 @@ img.crest {
   padding: 4px;
   border-radius: 50%;
   background: var(--obsidian-2);
+}
+/* One ring, hugging the picture; the dark padding around it is only the cutout against the banner. */
+.pop-portrait .avatar img,
+.pop-portrait .avatar svg {
+  box-shadow: 0 0 0 1px var(--line-strong);
   transition: box-shadow var(--t);
 }
-.profile-pop.online .pop-portrait {
+.profile-pop.online .pop-portrait .avatar img,
+.profile-pop.online .pop-portrait .avatar svg {
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--cyan) 55%, transparent);
 }
-.profile-pop.speaking .pop-portrait {
+.profile-pop.speaking .pop-portrait .avatar img,
+.profile-pop.speaking .pop-portrait .avatar svg {
   box-shadow:
     0 0 0 2px var(--accent),
     0 0 22px var(--accent-glow);
