@@ -840,7 +840,8 @@ test('two peers that can never link directly chat, sync a group and carry a call
   const a = peer({ strict: true })
   const b = peer({ strict: true })
   const r = peer()
-  await setUp([a, b, r])
+  await setUp([a, b], false) // only the friend in the middle relays: being reached through one needs no setting
+  await setUp([r])
   await befriendUnlinked(a, b)
   const dm = dmId(a.key, b.key)
   a.node.send(dm, 'queued')
@@ -876,6 +877,20 @@ test('two peers that can never link directly chat, sync a group and carry a call
   await until(() => (pa.send('voice', ra.port, ra.ip), got.includes('voice')))
   pa.close()
   pb.close()
+}, 180000)
+
+test('a group member we can never link with is named from their published card, not shown as a key', async () => {
+  const a = peer({ strict: true })
+  const b = peer({ strict: true })
+  const owner = peer()
+  await setUp([a, b, owner], false) // nobody relays, so a and b never link
+  await befriend(a, owner)
+  await befriend(b, owner)
+  const gid = owner.node.createGroup('strangers', [a.key, b.key])
+  await until(() => !!a.node.state().groups[gid]?.members.includes(b.key))
+  const handle = b.node.state().profile.handle
+  await until(() => a.node.state().profiles[b.key]?.handle === handle)
+  expect(linked(a, b)).toBe(false)
 }, 180000)
 
 test('when the relaying friend leaves, the pair moves to another mutual friend', async () => {

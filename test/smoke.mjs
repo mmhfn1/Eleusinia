@@ -210,10 +210,11 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwA
 // Ann and Bob can never link directly; Cy is friends with both and relays. Turned on from Settings, as a person would.
 async function relayedRun(ownTitles) {
   console.log('--- Relayed: Ann and Bob link only through Cy')
-  for (const [p, n] of [[a, 'Ann'], [b, 'Bob'], [c, 'Cy']]) {
+  // Only Cy relays: being reached through a friend needs no setting
+  for (const [p, n] of [[c, 'Cy']]) {
     await p.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
-    await until(`${n} turns on connecting through mutual friends in Settings`, () =>
-      p.ev(`(() => { const l = [...document.querySelectorAll('dialog[open] label')].find((x) => x.textContent.includes('Connect through mutual friends')); if (!l) return false; const i = l.querySelector('input'); if (!i.checked) i.click(); return i.checked })()`), 10)
+    await until(`${n} turns on relaying for friends in Settings`, () =>
+      p.ev(`(() => { const l = [...document.querySelectorAll('dialog[open] label')].find((x) => x.textContent.includes('Relay for friends')); if (!l) return false; const i = l.querySelector('input'); if (!i.checked) i.click(); return i.checked })()`), 10)
     await p.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
   }
   const key = (p) => p.ev(`api.call('state').then((s) => s.me)`)

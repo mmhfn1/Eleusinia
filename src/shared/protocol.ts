@@ -48,7 +48,7 @@ export type Settings = {
   crashReports?: boolean // send crash reports to the developers automatically; on unless turned off
   closeToTray?: boolean // closing the window keeps Eleusinia running in the tray; on unless turned off
   noiseSuppression?: boolean // RNNoise on the microphone; on unless turned off
-  relay?: boolean // connect through mutual friends when no direct link works, and relay for them; off unless turned on
+  relay?: boolean // relay for mutual friends who cannot link directly; off unless turned on (being reached through one is always on)
   cacheMB?: number // how much room downloaded pictures may take before the oldest are deleted (DEFAULT_CACHE_MB)
   suggest?: boolean // be suggested to people typing the start of our username (announced while online); off unless turned on
   activity?: ActivitySettings // what we are playing, shared with friends and group members (shared/activity.ts); off unless turned on
@@ -83,7 +83,8 @@ export type Wire =
   // greet each other too, so a hello alone is not a friend request. Older versions leave it out.
   // app and call: the sender's version and call version (CALL_VERSION); 0.0.1 sent neither.
   // relay: the sender's relay key, only while it relays for its contacts (Settings.relay); older versions never send it.
-  | ({ t: 'hello'; friend?: boolean; app?: string; call?: number; relay?: Key } & Profile)
+  // via: the sender accepts links through a friend's relay (from 0.0.45; older versions only while relaying themselves).
+  | ({ t: 'hello'; friend?: boolean; app?: string; call?: number; relay?: Key; via?: boolean } & Profile)
   | { t: 'reach'; key: Key; ok?: boolean } // asking a contact whether it can relay us to `key`, and its answer
   | { t: 'relayed'; by: Key } // sent by whoever dialed: this link goes through `by`'s relay
   | { t: 'group'; g: Group }

@@ -218,6 +218,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       friend: s.friends[key] === 'friend' || s.friends[key] === 'outgoing',
       app: version,
       call: CALL_VERSION,
+      via: true,
       ...(relayKey && { relay: relayKey }),
     })
   const sendHave = (key: Key, conv: string, re?: boolean) =>
@@ -297,6 +298,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         if (!relayKeys.has(key)) retryAt.clear() // someone new who might relay: waiting peers may try again now
         relayKeys.set(key, w.relay)
       } else relayKeys.delete(key)
+      if (w.via === true) reachable.add(key)
+      else reachable.delete(key)
       s.profiles[key] = cleanProfile(w)
       return changed()
     }
@@ -403,14 +406,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     } else if (w.t === 'reach') {
       if (!isKey(w.key)) return
       if (typeof w.ok === 'boolean') return reaching.get(w.key)?.(key, w.ok)
-      // Yes only for two of our contacts, with the target linked to us and relaying too (so its version can).
+      // Yes only for two of our contacts, with the target linked to us and on a version that accepts relayed links.
       const n = (asked.get(key) ?? 0) + 1
       asked.set(key, n)
-      const ok = !!relayKey && n <= 10 && w.key !== key && known(w.key) && net.linked(w.key) && relayKeys.has(w.key)
-      if (!ok) tell(`cant:${key}:${w.key}`, `can't relay for …${key.slice(-6)} to …${w.key.slice(-6)}: ${!relayKey ? 'relaying off' : !known(w.key) ? 'not a contact' : !net.linked(w.key) ? 'not linked with them' : !relayKeys.has(w.key) ? 'they do not relay' : 'too many asks'}`)
+      const ok = !!relayKey && n <= 10 && w.key !== key && known(w.key) && net.linked(w.key) && (reachable.has(w.key) || relayKeys.has(w.key))
+      if (!ok) tell(`cant:${key}:${w.key}`, `can't relay for …${key.slice(-6)} to …${w.key.slice(-6)}: ${!relayKey ? 'relaying off' : !known(w.key) ? 'not a contact' : !net.linked(w.key) ? 'not linked with them' : !(reachable.has(w.key) || relayKeys.has(w.key)) ? 'their version cannot be reached through a friend' : 'too many asks'}`)
       net.send(key, { t: 'reach', key: w.key, ok })
     } else if (w.t === 'relayed') {
-      if (!isKey(w.by) || !known(w.by) || !relayKey) return
+      if (!isKey(w.by) || !known(w.by)) return
       relayedVia.set(key, { by: w.by, path: net.path(key), at: Date.now() })
       push()
     }
@@ -436,6 +439,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const RETRY = redialMs * 2 // first backoff after a failed attempt: 30 s in use, doubling up to 20 times that
   let relayKey: Key | null = null // ours, while relaying is on
   const relayKeys = new Map<Key, Key>() // contacts that relay, by the relay key their hello gave
+  const reachable = new Set<Key>() // contacts whose version accepts links through a friend (hello.via), relaying or not
   const relayedVia = new Map<Key, { by: Key; path: string; at: number }>() // relayed links and whose relay
   const demand = new Map<Key, number>() // peers we have something for, since when
   const used = new Map<Key, number>() // last message or call signal per peer, for the idle close
@@ -447,7 +451,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const retryAt = new Map<Key, number>()
   const avoid = new Map<string, number>() // relay+peer pairs that just failed, for 10 minutes
   const lastGood = new Map<Key, Key>()
-  const need = (k: Key) => void (relayKey && k !== me && !net.linked(k) && !demand.has(k) && demand.set(k, Date.now()))
+  // Anyone can be reached through a relaying friend; only relaying for others is the setting.
+  const need = (k: Key) => void (k !== me && !net.linked(k) && !demand.has(k) && demand.set(k, Date.now()))
 
   function relayFailed(k: Key, by?: Key) {
     attempting.delete(k)
@@ -489,7 +494,6 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     net.dial(k, relayKeys.get(by))
   }
   function relayTick() {
-    if (!relayKey) return
     const now = Date.now()
     for (const [k, r] of relayedVia) {
       if (!net.linked(k)) relayedVia.delete(k)
@@ -503,7 +507,6 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   }
   async function applyRelay() {
     relayKey = await net.setRelay(!!s.settings.relay, known, relayLimits ?? RELAY_LIMITS)
-    if (!relayKey) for (const k of relayedVia.keys()) net.drop(k)
     for (const k of net.keys()) if (wants(k)) hi(k)
   }
 
@@ -756,6 +759,18 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const ready = Promise.all([applyRelay(), announce().then(checkRequests)])
   const announcer = setInterval(announce, 5 * 60000)
   const watcher = setInterval(checkRequests, redialMs * 2) // every 30 s in use
+  // A group member we have never linked with (two strict routers) would show as their key: their published card
+  // names them. A few at a time, each at most hourly.
+  const carded = new Map<Key, number>()
+  async function nameUnlinked() {
+    const keys = [...new Set(ours().flatMap((g) => g.members))].filter((k) => k !== me && !s.profiles[k]?.name && !net.linked(k) && (carded.get(k) ?? 0) < Date.now() - 3600e3)
+    for (const k of keys.slice(0, 5)) {
+      carded.set(k, Date.now())
+      const card = await fetchCard(k)
+      if (card && known(k) && !s.profiles[k]?.name) (s.profiles[k] = card), changed()
+    }
+  }
+  const namer = setInterval(nameUnlinked, redialMs * 2)
 
   return {
     state,
@@ -1007,6 +1022,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       clearInterval(delivery)
       clearInterval(announcer)
       clearInterval(watcher)
+      clearInterval(namer)
       clearInterval(probeReset)
       clearInterval(receiptTimer)
       relay.closeAll()
