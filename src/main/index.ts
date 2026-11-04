@@ -10,6 +10,7 @@ import { autoUpdater } from 'electron-updater'
 import { UiohookKey, uIOhook } from 'uiohook-napi'
 import { type Bindings, type Hotkey, createMatcher, createRecorder } from '../shared/hotkeys'
 import { type FileRef, inlineKind, mimeOf, safeName } from '../shared/media'
+import { isWebUrl } from '../shared/links'
 import { isKey } from '../shared/protocol'
 import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared/reports'
 import { kindOf, shareable } from '../shared/sources'
@@ -22,6 +23,7 @@ import { programs, watchActivity } from './activity'
 import { type BungieConfig, createBungie } from './bungie'
 import { GSI_GAMES, type GsiGame, createGsi } from './gsi'
 import { createInbox } from './inbox'
+import { previewLink } from './links'
 import { type Staged, canInstall, fetchUpdate, install, tidy } from './selfupdate'
 import { createNode } from './node'
 
@@ -216,6 +218,9 @@ function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (
     return bungie.status()
   })
   ipcMain.handle('programs', () => programs())
+  // Links in messages open in the browser, web addresses only; previews are fetched for links we are about to send.
+  ipcMain.handle('openLink', (_e, url: unknown) => (isWebUrl(url) ? shell.openExternal(url) : undefined))
+  ipcMain.handle('previewLink', (_e, url: unknown) => previewLink(url))
   ipcMain.handle('openSteam', (_e, id: unknown, kind: unknown) => {
     if (Number.isSafeInteger(id) && (id as number) > 0 && (kind === 'store' || kind === 'run')) return shell.openExternal(`steam://${kind}/${id}`)
   })

@@ -3,6 +3,7 @@
 // outside this machine; ELEUSINIA_SMOKE_PUBLIC=1 uses the public DHT instead, for an occasional real-network check.
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
+import { createServer } from 'node:http'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
@@ -192,6 +193,10 @@ const body = (text) => `document.body.innerText.includes('${text}')`
 // Watches the page for up to ms, true as soon as the condition holds: catches a state that comes and goes (a ring
 // that follows the fake microphone's beeps) without depending on when a poll lands.
 const seen = (cond, ms) => `new Promise((r) => { const t0 = Date.now(); const i = setInterval(() => { if (${cond}) (clearInterval(i), r(true)); else if (Date.now() - t0 > ${ms}) (clearInterval(i), r(false)) }, 20) })`
+// The profile panel that opens beside a clicked person, its button to the full profile, and closing it with Escape.
+const pop = (fn) => `(() => { const p = document.querySelector('.profile-pop.placed'); return !!p && (${fn})(p) })()`
+const expandPop = `document.querySelector('.profile-pop .pop-expand').click()`
+const escape = `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`
 const press = (label) => `[...document.querySelectorAll('aside.voice button')].find(x => x.textContent.includes('${label}')).click()`
 // Chromium's fake microphones beep the same tone at the same moments, so with both ends live Ann's echo canceller
 // can take her beep for an echo of Bob's and remove it. Bob stays muted while a check needs to hear Ann.
@@ -210,10 +215,11 @@ const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwA
 // Ann and Bob can never link directly; Cy is friends with both and relays. Turned on from Settings, as a person would.
 async function relayedRun(ownTitles) {
   console.log('--- Relayed: Ann and Bob link only through Cy')
-  for (const [p, n] of [[a, 'Ann'], [b, 'Bob'], [c, 'Cy']]) {
+  // Only Cy relays: being reached through a friend needs no setting
+  for (const [p, n] of [[c, 'Cy']]) {
     await p.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
-    await until(`${n} turns on connecting through mutual friends in Settings`, () =>
-      p.ev(`(() => { const l = [...document.querySelectorAll('dialog[open] label')].find((x) => x.textContent.includes('Connect through mutual friends')); if (!l) return false; const i = l.querySelector('input'); if (!i.checked) i.click(); return i.checked })()`), 10)
+    await until(`${n} turns on relaying for friends in Settings`, () =>
+      p.ev(`(() => { const l = [...document.querySelectorAll('dialog[open] label')].find((x) => x.textContent.includes('Relay for friends')); if (!l) return false; const i = l.querySelector('input'); if (!i.checked) i.click(); return i.checked })()`), 10)
     await p.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
   }
   const key = (p) => p.ev(`api.call('state').then((s) => s.me)`)
@@ -241,7 +247,9 @@ async function relayedRun(ownTitles) {
   await b.ev(fetchBig(ka, join(mkdtempSync(join(tmpdir(), 'eleusinia-smoke-dl-')), 'big.bin')))
   await until('B says the big file waits for a direct connection', () => b.ev(body('waiting for a direct connection')), 10)
   await a.ev(`document.querySelector('.chat-person').click()`)
-  await until("Bob's card says online through a friend, voice and text only", () => a.ev(`!!document.querySelector('dialog[open]')?.textContent.includes('Online through a friend')`), 10)
+  await until("Bob's panel says he is online through a friend", () => a.ev(pop((p) => p.textContent.includes('Online through a friend'))), 10)
+  await a.ev(expandPop)
+  await until("Bob's full card says online through a friend, voice and text only", () => a.ev(`!!document.querySelector('dialog[open]')?.textContent.includes('Online through a friend: voice and text only')`), 10)
   await a.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
 
   console.log('--- Relayed: a voice call, and no screen share')
@@ -370,6 +378,9 @@ try {
   await a.ev(`api.call('setSettings', { activity: { games: true, details: true } })`)
   await until('B lists Ann as playing Counter-Strike 2', () => b.ev(`${annRow}?.querySelector('.activity-line')?.textContent.includes('Counter-Strike 2')`))
   await b.ev(`${annRow}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+  await until("Ann's panel shows only the cliff notes of her game, with its art in the banner", () =>
+    b.ev(pop((p) => p.querySelector('.glance-game')?.textContent === 'Counter-Strike 2' && p.textContent.includes('1 of 50 achievements') && !p.querySelector('.activity-card') && p.querySelector('.pop-banner.game img')?.getAttribute('src') === 'eleusinia-art://steam/730/header')), 10)
+  await b.ev(expandPop)
   await until("Ann's card shows the game: art, playtime, genres, achievements with rarity, Steam buttons", () =>
     b.ev(`(() => { const c = document.querySelector('dialog[open] .activity-card'); return !!c && c.querySelector('.activity-art')?.getAttribute('src') === 'eleusinia-art://steam/730/header' && c.textContent.includes('100 h in total') && c.textContent.includes('Action, Free To Play') && c.textContent.includes('1 of 50') && c.textContent.includes('A New Beginning') && c.textContent.includes('61% of players') && c.textContent.includes('Play on Steam') })()`), 10)
   // Fetched from Steam by B's own app through eleusinia-art:, built from the app id and icon name alone
@@ -420,6 +431,10 @@ try {
   try {
     await until('B lists Ann on Mirage, her side 7–4', () => b.ev(`${annRow}?.querySelector('.activity-line')?.textContent.includes('Mirage 7–4')`), 20)
     await b.ev(`${annRow}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+    await until("Ann's panel glances at the match: map, mode and her side's score", () => b.ev(pop((p) => p.querySelector('.glance-place')?.textContent === 'Mirage · Competitive' && p.querySelector('.glance-score.ahead')?.textContent === '7–4')), 10)
+    await sleep(400) // its opening is over
+    await b.shot('profile-panel')
+    await b.ev(expandPop)
     const cs2Card = `document.querySelector('dialog[open] .cs2')`
     await until("Ann's card shows the match: map, mode, round, score, round strip, clock, her K/A/D", () =>
       b.ev(`(() => { const c = ${cs2Card}; return !!c && c.querySelector('.cs2-map').textContent === 'Mirage' && c.textContent.includes('Competitive · Round 12') && c.querySelector('.cs2-team.ct b').textContent === '7' && c.querySelector('.cs2-team.ct.ours') && c.querySelectorAll('.cs2-rounds li').length === 3 && c.querySelectorAll('.cs2-rounds li.t').length === 1 && /1:2\\d|1:1\\d/.test(c.querySelector('.cs2-clock').textContent) && c.textContent.includes('12 / 3 / 6') })()`), 10)
@@ -473,6 +488,8 @@ try {
     // The game sending its details is running, so it replaces the one the watcher saw
     await until('B lists Ann as Anti-Mage, her side (Dire) first: 14–21', () => b.ev(`${annRow}?.querySelector('.activity-line')?.textContent.includes('Dota 2 · Anti-Mage 14–21')`), 20)
     await b.ev(`${annRow}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+    await until("Ann's panel glances at the match: hero, level and her side behind", () => b.ev(pop((p) => p.querySelector('.glance-place')?.textContent === 'Anti-Mage · level 19' && p.querySelector('.glance-score.behind')?.textContent === '14–21')), 10)
+    await b.ev(expandPop)
     const dotaCard = `document.querySelector('dialog[open] .dota')`
     await until("Ann's card shows the match: hero, level, night, the kills per side, the clock, her numbers", () =>
       b.ev(`(() => { const c = ${dotaCard}; return !!c && c.querySelector('.cs2-map').textContent === 'Anti-Mage' && c.textContent.includes('Level 19 · Playing · Night') && c.querySelector('.cs2-team.radiant b').textContent === '21' && c.querySelector('.cs2-team.dire.ours') && /^20:[34]\\d/.test(c.querySelector('.cs2-clock').textContent) && c.textContent.includes('9 / 2 / 11') && c.textContent.includes('212 / 14') && c.textContent.includes('612 / 701') })()`), 10)
@@ -506,6 +523,8 @@ try {
   await b.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
   await until('A lists Bob in the raid', () => a.ev(`${bobRowA}?.querySelector('.activity-line')?.textContent.includes("Destiny 2 · Raid · Salvation's Edge")`), 20)
   await a.ev(`${bobRowA}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+  await until("Bob's panel glances at the raid", () => a.ev(pop((p) => p.querySelector('.glance-game')?.textContent === 'Destiny 2' && p.querySelector('.glance-place')?.textContent === "Raid · Salvation's Edge")), 10)
+  await a.ev(expandPop)
   const destinyCard = `document.querySelector('dialog[open] .destiny')`
   await until("Bob's card shows the activity, his guardian, the fireteam and the loadout", () =>
     a.ev(`(() => { const c = ${destinyCard}; return !!c && c.querySelector('.destiny-activity-name').textContent === "Salvation's Edge" && c.querySelector('.destiny-activity-mode').textContent === 'Raid' && c.querySelector('.destiny-activity-light').textContent === '1990' && c.querySelector('.destiny-where').textContent.startsWith('The Pale Heart') && !document.querySelector('dialog[open] .activity-art') && c.textContent.includes('Warlock Rivensbane') && c.querySelector('.destiny-light').textContent === '2010' && c.querySelector('.destiny-clan')?.textContent.trim() === '[LW] The Last Wardens' && c.textContent.includes('Guardian Rank 7') && c.textContent.includes('Fireteam 3/6 · 3 open') && ['Ann', 'Osiris', 'Saint'].every((n) => c.querySelector('.destiny-fireteam').textContent.includes(n)) && c.querySelectorAll('.destiny-loadout li').length === 5 && c.querySelectorAll('.destiny-loadout li.exotic').length === 4 })()`), 10)
@@ -544,25 +563,60 @@ try {
   if (createHash('sha256').update(readFileSync(saved)).digest('hex') !== bigHash) throw new Error('the saved file does not match')
   console.log('ok   the saved file matches what Ann sent, byte for byte')
 
-  console.log('--- Profile card')
+  console.log('--- Links')
+  // A page on this machine stands in for a site. B's own app reads it while B types the link; Ann's app fetches nothing.
+  const jpeg = Buffer.from(await b.ev(`(() => { const c = document.createElement('canvas'); c.width = 400; c.height = 200; const x = c.getContext('2d'); x.fillStyle = '#425a6b'; x.fillRect(0, 0, 400, 200); return c.toDataURL('image/jpeg').split(',')[1] })()`), 'base64')
+  const hits = []
+  const site = createServer((req, res) => {
+    hits.push(req.url)
+    if (req.url === '/pic.jpg') return res.writeHead(200, { 'Content-Type': 'image/jpeg' }).end(jpeg)
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }).end('<html><head><title>fallback</title><meta property="og:title" content="A page about fog"><meta property="og:description" content="Mist over stone, all day."><meta property="og:image" content="/pic.jpg"></head><body></body></html>')
+  })
+  await new Promise((r) => site.listen(0, '127.0.0.1', r))
+  const page = `http://127.0.0.1:${site.address().port}/fog`
+  await b.ev(`(() => { const t = document.querySelector('form.send textarea'); t.value = 'have a look: ${page}, it is good'; t.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+  await until('while B types, the composer shows the preview its own app made', () => b.ev(`(() => { const c = document.querySelector('.composer .link-card'); return !!c && c.querySelector('.link-title')?.textContent === 'A page about fog' && c.textContent.includes('Mist over stone') && !!c.querySelector('.link-image img') })()`), 15)
+  await b.ev(`document.querySelector('form.send').requestSubmit()`)
+  const linkShown = `(() => { const m = [...document.querySelectorAll('.msg')].find((x) => x.textContent.includes('have a look')); const a = m?.querySelector('.msg-link'); return !!a && a.getAttribute('href') === '${page}' && a.textContent === '${page}' && m.querySelector('.link-card .link-title')?.textContent === 'A page about fog' && !!m.querySelector('.link-card img') })()`
+  await until('Ann gets the message with its link clickable and the preview, signed by B', () => a.ev(linkShown), 15)
+  if (!(await b.ev(linkShown))) throw new Error("B's own copy lacks the link or its preview")
+  await a.shot('link-preview')
+  if (hits.length !== 2) throw new Error(`the page was fetched ${hits.length} times, not once by B for the page and once for its picture: ${hits}`)
+  console.log("ok   only B's app fetched the page and its picture; Ann's showed the preview it was sent")
+  await new Promise((r) => site.close(r))
+
+  console.log('--- Profile panel')
+  // Clicking a person opens their panel beside them: picture over a banner of their own picture, name, friend ID and
+  // about, and a box to message them; the full card, with the Unique Key and their version, opens from it.
+  const annPop = pop((p) => p.textContent.includes('I am Ann') && p.textContent.includes('anntester#') && !!p.querySelector('.pop-portrait .avatar img') && !!p.querySelector('.pop-banner img') && !!p.querySelector('.pop-note input'))
+  const beside = (sel) => `(() => { const p = document.querySelector('.profile-pop').getBoundingClientRect(); const r = document.querySelector('${sel}').getBoundingClientRect(); return p.left >= r.right || p.right <= r.left })()`
   await b.ev(`document.querySelector('.msg .user').click()`)
-  await until('B clicking the name opens Ann card with picture, about, ID and Unique Key', () =>
-    b.ev(`(() => { const d = document.querySelector('dialog[open]'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('anntester#') && d.textContent.includes('Unique Key') && !!d.querySelector('.avatar img') })()`))
-  await b.ev(`[...document.querySelectorAll('dialog button')].find(x => x.textContent === 'Close').click()`)
-  // The same card from the DM header (picture, name and friend ID) and from a right-click in the friends list.
-  const annCard = `(() => { const d = document.querySelector('dialog[open].card-dialog'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('anntester#') && !!d.querySelector('.avatar img') && /Eleusinia \\d+\\.\\d+\\.\\d+/.test(d.textContent) })()`
-  const closeCard = `[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`
+  await until("B clicking Ann's name in the chat opens her panel beside it", async () => (await b.ev(annPop)) && b.ev(beside('.msg .user')), 5)
+  await b.ev(`document.querySelector('.msg .user').click()`)
+  await until('clicking her name again closes it', () => b.ev(`!document.querySelector('.profile-pop')`), 5)
+  await b.ev(`document.querySelector('.msg .user').click()`)
+  await until('and again opens it', () => b.ev(annPop), 5)
+  await b.ev(expandPop)
+  await until('its expand button opens the full card, with the Unique Key and her version', () =>
+    b.ev(`(() => { const d = document.querySelector('dialog[open].card-dialog'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('Unique Key') && /Eleusinia \\d+\\.\\d+\\.\\d+/.test(d.textContent) && !!d.querySelector('.pop-banner') })()`), 5)
+  await b.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
   if (!(await b.ev(`(() => { const h = document.querySelector('.chat-person'); return !!h?.querySelector('.avatar') && h.textContent.includes('Ann') && h.textContent.includes('anntester#') })()`))) throw new Error('the DM header lacks the picture, name or friend ID')
+  // Messaging from the panel: it lands in the DM, and the panel says so
   await b.ev(`document.querySelector('.chat-person').click()`)
-  await until('clicking the DM header opens the same card', () => b.ev(annCard), 5)
-  await b.ev(closeCard)
+  await until('clicking the DM header opens the same panel', () => b.ev(annPop), 5)
+  await b.ev(`(() => { const i = document.querySelector('.pop-note input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'from the panel'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
+  await b.ev(`document.querySelector('.pop-note').requestSubmit()`)
+  await until('a message sent from the panel reaches Ann, and the panel says it was sent', async () => (await a.ev(shows('from the panel'))) && b.ev(pop((p) => !!p.querySelector('.pop-sent'))), 15)
+  await b.ev(escape)
+  await until('Escape closes the panel', () => b.ev(`!document.querySelector('.profile-pop')`), 5)
   await b.ev(`document.querySelector('aside.voice .chamber-id.person').click()`)
-  await until('clicking her in the voice sidebar opens the same card', () => b.ev(annCard), 5)
-  await b.ev(closeCard)
+  await until('clicking her in the voice sidebar opens the same panel', () => b.ev(annPop), 5)
+  await b.ev(`document.querySelector('.msgs').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`)
+  await until('a click elsewhere closes it', () => b.ev(`!document.querySelector('.profile-pop')`), 5)
   await b.ev(`document.querySelector('.rail-item[aria-label^="Home"]').click()`)
   await b.ev(`[...document.querySelectorAll('.online .row-button')].find((x) => x.textContent.includes('Ann')).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
-  await until('right-clicking Ann in the friends list opens the same card', () => b.ev(annCard), 5)
-  await b.ev(closeCard)
+  await until('right-clicking Ann in the friends list opens the same panel', () => b.ev(annPop), 5)
+  await b.ev(escape)
   // Mouse 4 and 5 (back and forward) move through where you have been.
   const mouse = (button) => `window.dispatchEvent(new MouseEvent('mouseup', { button: ${button}, bubbles: true }))`
   await b.ev(open('Ann'))
@@ -589,6 +643,14 @@ try {
   await until('A sends voice ahead of video when the link is short of room', () =>
     a.ev(`(() => { const pc = window.__pcs.find((p) => p.connectionState === 'connected'); const e = pc?.getTransceivers().find((t) => t.receiver.track.kind === 'audio')?.sender.getParameters().encodings?.[0]; return e?.priority === 'high' && e?.networkPriority === 'high' })()`), 10)
   await until('B connected to Ann', () => b.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Ann')`))
+  await b.ev(`document.querySelector('.caller.state-connected .caller-who').click()`)
+  await until('clicking Ann in the call opens her panel beside it: in your call, her volume, a message box', () => b.ev(pop((p) => p.textContent.includes('In your call') && !!p.querySelector('.pop-volume input[type=range]') && !!p.querySelector('.pop-note input'))), 5)
+  await sleep(400)
+  await b.shot('profile-panel-call')
+  await b.ev(escape)
+  await b.ev(`[...document.querySelectorAll('.oculus-who')].find((x) => x.getAttribute('aria-label').includes('Ann')).click()`)
+  await until('so does her picture above the chat', () => b.ev(pop((p) => p.textContent.includes('In your call'))), 5)
+  await b.ev(escape)
   const both = await until('A sign now measures the link to Bob', async () => {
     const s = await sign(a)
     return graded(s) && /Bob: \d+ ms(steady|(varies|unstable) ±\d+ ms)/.test(s[2]) && s
@@ -911,9 +973,13 @@ try {
   await until('B members sidebar lists Ann, Bob and Cy as online', () => b.ev(`(() => { const m = document.querySelector('aside.members'); return !!m && m.querySelector('h2').textContent === 'Online (3)' && ['Ann','Bob','Cy'].every(n => m.textContent.includes(n)) })()`))
   await a.ev(open('Trio'))
   await until('A shows it', () => a.ev(shows('group online from cy')))
-  await b.ev(`[...document.querySelectorAll('aside.members .member')].find((x) => x.textContent.includes('Ann')).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
-  await until('right-clicking Ann in the members list opens the same card', () => b.ev(annCard), 5)
-  await b.ev(closeCard)
+  await b.ev(`[...document.querySelectorAll('aside.members .member')].find((x) => x.textContent.includes('Ann')).click()`)
+  await until('clicking anywhere on Ann in the members list opens her panel beside her row', async () => (await b.ev(pop((p) => p.textContent.includes('I am Ann')))) && b.ev(beside('aside.members .member')), 5)
+  await b.ev(escape)
+  await until('Escape closes it', () => b.ev(`!document.querySelector('.profile-pop')`), 5)
+  await b.ev(`[...document.querySelectorAll('aside.members .member')].find((x) => x.textContent.includes('Cy')).click()`)
+  await until("Cy, not B's friend, gets a panel offering to add him instead of a message box", () => b.ev(pop((p) => p.textContent.includes('Add friend') && !p.querySelector('.pop-note'))), 5)
+  await b.ev(escape)
 
   console.log('--- Resizable sidebars')
   const widths = await a.ev(`(() => {

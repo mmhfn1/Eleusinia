@@ -52,7 +52,6 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
   const dht = new DHT({ ...dhtOpts, ...(strict && STRICT.dht), keyPair })
   const links = new Map<Key, { sock: any; initiator: Key; at: number }>()
   const dialing = new Set<string>()
-  let usesRelays = false
 
   function adopt(sock: any, initiator: Key) {
     const key: Key = sock.remotePublicKey.toString('hex')
@@ -95,9 +94,8 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
     on.open(key, !!old) // also after a replacement: greeting twice is harmless, a lost greeting is not
   }
 
-  // A peer asking to link through a relay is turned away unless we use relays ourselves, and anyone not admitted is.
-  const firewall = (key: Buffer, payload: any) => {
-    if (payload?.relayThrough && !usesRelays) return true
+  // Anyone not admitted is turned away, directly or through a relay.
+  const firewall = (key: Buffer) => {
     const k = key.toString('hex')
     if (on.admit?.(k) ?? true) return false
     on.knock?.(k)
@@ -213,7 +211,6 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
     },
     // Relaying for our contacts (and accepting relayed links ourselves) on or off. Resolves to our relay key, or null.
     async setRelay(on: boolean, accept: (key: Key) => boolean, limits = RELAY_LIMITS) {
-      usesRelays = on
       if (on) await serveRelay(accept, limits)
       else if (relay) await relay.stop().finally(() => (relay = null))
       return on ? relayKeyPair(keyPair.secretKey).publicKey.toString('hex') : null

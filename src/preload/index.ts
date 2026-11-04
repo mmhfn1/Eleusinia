@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('api', {
   quit: () => ipcRenderer.invoke('quit'),
   programs: () => ipcRenderer.invoke('programs'), // running programs, for Settings → Activity → Add a game
   openSteam: (app: number, kind: 'store' | 'run') => ipcRenderer.invoke('openSteam', app, kind),
+  openLink: (url: string) => ipcRenderer.invoke('openLink', url),
+  previewLink: (url: string) => ipcRenderer.invoke('previewLink', url), // made by our own app, for a link we are sending
   gsi: (game: 'cs2' | 'dota', action: 'status' | 'install' | 'remove') => ipcRenderer.invoke('gsi', game, action), // live game details (main/gsi.ts)
   bungie: (action: 'status' | 'link' | 'cancel' | 'unlink') => ipcRenderer.invoke('bungie', action), // the linked Bungie.net account (main/bungie.ts)
   platform: process.platform, // macOS keeps its own window buttons (style.css)

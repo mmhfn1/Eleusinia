@@ -1,5 +1,6 @@
 // A conversation's messages: history, live updates, delivery marks and the message box.
 import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type LinkPreview, firstLink, splitLinks } from '../shared/links'
 import { type FileRef, MAX_FILES, inlineKind, sizeLabel } from '../shared/media'
 import { type FileState, type Key, type Msg, type State, MAX_TEXT, stack } from '../shared/protocol'
 import * as call from './call'
@@ -36,6 +37,7 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   const [files, setFiles] = useState<Record<string, FileState>>({})
   const asked = useRef(new Set<string>())
   const [viewing, setViewing] = useState<FileRef | null>(null)
+  const link = useLinkDraft()
 
   useEffect(() => {
     api.call('history', conv, limit).then((h) => {
@@ -108,7 +110,8 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
     e.preventDefault()
     const input = e.currentTarget.elements.namedItem('text') as HTMLTextAreaElement
     if ((!input.value.trim() && !attached.length) || preparing) return
-    run(api.call('send', conv, input.value.trim() ? input.value : '', attached))
+    const text = input.value.trim() ? input.value : ''
+    run(api.call('send', conv, text, attached, link.for(text)))
     input.value = ''
     setAttached([])
     grow()
@@ -120,6 +123,7 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
     el.style.height = 'auto'
     el.style.height = Math.min(el.scrollHeight, 200) + 'px'
     setLength(el.value.length)
+    link.watch(el.value)
   }
   function keys(e: KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -149,7 +153,12 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
               </time>
             </div>
           )}
-          {m.text && <p className="msg-text">{m.text}</p>}
+          {m.text && (
+            <p className="msg-text">
+              <MsgText text={m.text} />
+            </p>
+          )}
+          {m.link && <LinkCard l={m.link} />}
           {m.files && (
             <div className="msg-files">
               {m.files.map((f) => (
@@ -184,7 +193,7 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
             </div>
           </>
         ) : (
-          <button className="chat-person" onClick={() => show(other)} aria-label={`Open ${title}'s profile`}>
+          <button className="chat-person" onClick={(e) => show(other, e.currentTarget)} aria-label={`Open ${title}'s profile`}>
             <Avatar k={other} p={prof(other)} size={32} online={isOnline(other)} />
             <span className="row-text">
               <span className="chat-title">{title}</span>
@@ -298,6 +307,7 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
       </div>
 
       <form className="send composer" onSubmit={submit}>
+        {link.draft && <LinkCard l={link.draft} draft remove={link.drop} />}
         {(attached.length > 0 || preparing > 0) && (
           <ul className="attach-list" aria-label="Attached files">
             {attached.map((f, i) => (
@@ -425,4 +435,81 @@ function DayRule({ ts }: { ts: number }) {
       <span />
     </div>
   )
+}
+
+// A message's text with its web links clickable; they open in the browser, the full address shown on hover.
+export function MsgText({ text }: { text: string }) {
+  return (
+    <>
+      {splitLinks(text).map((p, i) =>
+        p.url ? (
+          <a key={i} className="msg-link" href={p.url} title={p.url} onClick={(e) => (e.preventDefault(), window.api.openLink(p.url!))}>
+            {p.text}
+          </a>
+        ) : (
+          p.text
+        ),
+      )}
+    </>
+  )
+}
+
+const hostOf = (u: string) => new URL(u).hostname.replace(/^www\./, '')
+// The preview a message carries for its link: made by the sender's app, so showing it fetches nothing. draft: the
+// one being written, with a button to send the message without it.
+export function LinkCard({ l, draft, remove }: { l: LinkPreview; draft?: boolean; remove?: () => void }) {
+  const open = () => window.api.openLink(l.u)
+  return (
+    <div className={`link-card ${draft ? 'draft' : ''} ${l.i ? 'with-image' : ''}`}>
+      <div className="link-text">
+        <span className="link-site">{l.s ?? hostOf(l.u)}</span>
+        {l.t && (
+          <a className="link-title" href={l.u} title={l.u} onClick={(e) => (e.preventDefault(), open())}>
+            {l.t}
+          </a>
+        )}
+        {l.d && <p className="link-desc">{l.d}</p>}
+      </div>
+      {l.i && (
+        <button type="button" className="link-image" onClick={open} aria-label={`Open ${l.t ?? hostOf(l.u)}`} tabIndex={-1}>
+          <img src={l.i} alt="" />
+        </button>
+      )}
+      {remove && (
+        <button type="button" className="icon-button link-remove" aria-label="Send without the preview" title="Send without the preview" onClick={remove}>
+          <Icon name="close" size={14} />
+        </button>
+      )}
+    </div>
+  )
+}
+
+// The preview for the first link in a message being written: asked for once the typing pauses, and dropped when the
+// link leaves the text or the writer removes it.
+export function useLinkDraft() {
+  const [draft, setDraft] = useState<LinkPreview | null>(null)
+  const dropped = useRef<string | null>(null)
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  const wanted = useRef<string | undefined>(undefined)
+  useEffect(() => () => clearTimeout(timer.current), [])
+  return {
+    draft,
+    watch(text: string) {
+      const url = firstLink(text)
+      wanted.current = url
+      clearTimeout(timer.current)
+      if (!url || url === dropped.current) return setDraft(null)
+      if (draft?.u === url) return
+      timer.current = setTimeout(() => window.api.previewLink(url).then((p) => wanted.current === url && setDraft(p)), 400)
+    },
+    drop: () => ((dropped.current = draft?.u ?? null), setDraft(null)),
+    // The preview to send with this text, then cleared for the next message.
+    for(text: string) {
+      const p = draft && firstLink(text) === draft.u ? draft : undefined
+      setDraft(null)
+      wanted.current = undefined
+      dropped.current = null
+      return p
+    },
+  }
 }
