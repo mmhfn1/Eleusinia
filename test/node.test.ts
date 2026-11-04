@@ -590,6 +590,12 @@ test('call packets cross the peer link through the relay, both small and large',
     return got.some((g) => g.text === 'ping') && got.some((g) => g.text === big)
   })
   expect(got.every((g) => g.from === rb.port)).toBe(true) // seen as coming from the relay port, like a relay candidate
+  // The chat link blips: once it is back, the same ports carry the call again, with no new candidate needed
+  a.node.dropLink(b.key)
+  await until(() => !a.node.state().online.includes(b.key))
+  await until(() => a.node.state().online.includes(b.key))
+  got.length = 0
+  await until(() => (pa.send('after', ra.port, ra.ip), got.some((g) => g.text === 'after')))
   pa.close()
   pb.close()
   a.node.relayClose(b.key)

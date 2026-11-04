@@ -544,7 +544,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         diag('network', `link closed with …${key.slice(-6)}`)
         theirs.delete(key)
         sentActivity.delete(key)
-        relay.close(key)
+        // The call's relay port stays: the link comes back within seconds and WebRTC keeps using that candidate.
+        // call.ts closes it with the call (relayClose), destroy with the app.
         relayedVia.delete(key)
         files.closed(key)
         // A relay went away: everyone linked through it is dropped now and retried through someone else.
@@ -1018,6 +1019,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       deliver()
       return clean.id
     },
+    // Writes pending changes now, for when the app is ended without destroy (Windows shutting down).
+    flush: () => saving && (clearTimeout(saving), (saving = null), save()),
     async destroy() {
       if (saving) clearTimeout(saving), save()
       if (sharing) clearTimeout(sharing)
