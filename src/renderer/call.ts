@@ -940,22 +940,36 @@ export function notices() {
   return out
 }
 
+// Bumped by every join and leave: a join whose number is no longer current was overtaken (double click, a quick
+// switch, a leave) and must give back what it opened instead of touching the call.
+let joinSeq = 0
 export async function join(c: string) {
   leave()
-  unjoined.delete(c)
+  const my = ++joinSeq
+  const stale = () => my !== joinSeq
   log(`joining a ${state.groups[c] ? 'group' : 'direct'} call, ${active.get(c)?.size ?? 0} already in it`)
   const list = await navigator.mediaDevices.enumerateDevices()
-  micId = usable(state.settings.mic, 'audioinput', list, state.settings.micLabel)
-  outId = usable(state.settings.out, 'audiooutput', list, state.settings.outLabel)
-  const fresh = await mic(micId).catch(() => mic((micId = '')))
-  cleaned = await cleanOrNot(fresh)
+  if (stale()) return
+  const out = usable(state.settings.out, 'audiooutput', list, state.settings.outLabel)
+  let id = usable(state.settings.mic, 'audioinput', list, state.settings.micLabel)
+  const fresh = await mic(id).catch(() => mic((id = '')))
+  if (stale()) return fresh.getTracks().forEach((t) => t.stop())
+  const fresher = await cleanOrNot(fresh)
+  if (stale()) return fresh.getTracks().forEach((t) => t.stop()), fresher?.stop()
+  micId = id
+  outId = out
+  cleaned = fresher
   stream = fresh
   fresh.getAudioTracks().forEach((t) => ((t.onended = () => followDevices(true)), noteHandsFree(t)))
   conv = c
+  unjoined.delete(c) // only once the join takes effect: an overtaken one must not clear a missed call
   muted = deafened = false
   relayMissing = false
+  // From here a newer join or leave has already run leave(), which released this attempt's mic and suppression
   await context().resume()
+  if (stale()) return
   await sinkTo(outId)
+  if (stale()) return
   applyDeafen()
   gateOpen = state.settings.micGate === undefined
   gateAt = null
@@ -974,6 +988,7 @@ export async function join(c: string) {
 }
 
 export function leave() {
+  joinSeq++ // also cancels a join still opening the microphone
   if (!conv) return
   log(`left the call (${peers.size} connected)`)
   stopShare()

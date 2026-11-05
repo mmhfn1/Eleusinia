@@ -510,8 +510,12 @@ function startApp() {
   writeFileSync(running, '')
   // Windows ends the app at shutdown, restart or logoff without will-quit, which would read as a crash next start
   win.on('session-end', () => (node.flush(), rmSync(running, { force: true })))
+  // Node methods the page must never reach: they read or reveal local files, or end the node
+  const MAIN_ONLY = new Set(['addFile', 'addBytes', 'filePath', 'destroy', 'flush', 'setActivity'])
   ipcMain.handle('call', async (_e, method: string, ...args: unknown[]) => {
-    if (!Object.hasOwn(node, method) || (method === 'dropLink' && !process.env.ELEUSINIA_BOOTSTRAP)) throw new Error('Unknown method')
+    if (!Object.hasOwn(node, method) || MAIN_ONLY.has(method) || (method === 'dropLink' && !process.env.ELEUSINIA_BOOTSTRAP)) throw new Error('Unknown method')
+    // The page picks no save path (that is saveFile's dialog); the smoke run on a local test DHT still passes one
+    if (method === 'download' && !process.env.ELEUSINIA_BOOTSTRAP) args = args.slice(0, 1)
     const result = await (node as any)[method](...args)
     if (method === 'setSettings') hook(), activityChanged()
     if (method === 'deleteAccount') {

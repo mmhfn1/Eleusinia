@@ -243,6 +243,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   // `confirmed`), and one that missed a message asks for it. To every member, a big group would send members² a round.
   const receipts = new Set<string>()
   const askedFor = new Map<string, number>()
+  const sentUpTo = new Map<string, Have>() // per link and conversation: what catch-up already sent, until the link closes
   const few = (ks: Key[], n = forwardTo) => ks.sort(() => Math.random() - 0.5).slice(0, n)
   const sendReceipts = () => {
     for (const conv of receipts) for (const k of few(members(conv).filter((k) => k !== me && net.linked(k)), 3)) sendHave(k, conv, true)
@@ -359,7 +360,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       }
       // We are told we confirmed holding more than we have (our messages were lost): carry on after them. Logged as a
       // skip line, so the gap stays known after a restart.
-      const held = heldFrom(w.held, key, me, w.have, have)
+      const held = heldFrom(w.held, key, me, w.have, have, s.acked[w.conv] ?? 0)
       if (held.length) {
         const skip = Object.fromEntries(held)
         for (const [a, n] of held) have[a] = n
@@ -367,9 +368,13 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         diag('network', `…${key.slice(-6)} says we already had ${held.length === 1 ? 'some messages' : 'messages'} we no longer hold; carrying on after them`)
         sendHave(key, w.conv, true)
       }
-      // Read the log only when they lack something; a receipt for what they already hold costs nothing.
-      if (Object.entries(have).some(([a, n]) => n > (now[a] ?? 0))) {
-        for (const m of missing(msgsOf(w.conv), now)) net.send(key, { t: 'msg', m })
+      // Read the log only when they lack something; a receipt for what they already hold costs nothing. What this link
+      // already carried is not sent again: receipts come per message, so a long catch-up would resend its tail each time.
+      const from: Have = { ...now }
+      for (const [a, n] of Object.entries(sentUpTo.get(key + w.conv) ?? {})) from[a] = Math.max(from[a] ?? 0, n)
+      if (Object.entries(have).some(([a, n]) => n > (from[a] ?? 0))) {
+        for (const m of missing(msgsOf(w.conv), from)) net.send(key, { t: 'msg', m })
+        sentUpTo.set(key + w.conv, { ...have })
       }
       if (!w.re) sendHave(key, w.conv, true)
       // Their receipt shows messages we lack (passing on missed us): ask, and they send them. At most every 5 s per
@@ -466,8 +471,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const retryAt = new Map<Key, number>()
   const avoid = new Map<string, number>() // relay+peer pairs that just failed, for 10 minutes
   const lastGood = new Map<Key, Key>()
-  // Anyone can be reached through a relaying friend; only relaying for others is the setting.
-  const need = (k: Key) => void (k !== me && !net.linked(k) && !demand.has(k) && demand.set(k, Date.now()))
+  // Anyone can be reached through a relaying friend; only relaying for others is the setting. Only friends are sought
+  // out this way: in a big group, every unlinked member would cost relay asks each tick. Group members link through them.
+  const need = (k: Key) => void (k !== me && s.friends[k] === 'friend' && !net.linked(k) && !demand.has(k) && demand.set(k, Date.now()))
 
   // A signed change to a group's name or picture, merged here and spread to every member.
   function editGroup(id: string, next: (g: Group) => { name: string; avatar: string }) {
@@ -513,9 +519,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     })
     reaching.delete(k)
     if (net.linked(k)) return void attempting.delete(k)
-    // Nobody to ask, or nobody able yet (often a mutual friend still linking with them): asked again on the next tick,
-    // without backing off, since asking costs a few small messages. Only a relayed dial that fails backs off.
-    if (!by || !relayKeys.has(by)) return tell(`none:${k}`, `no contact could relay for …${k.slice(-6)} yet`), void attempting.delete(k)
+    // Nobody to ask, or nobody able yet (often a mutual friend still linking with them): backs off like a failed relayed
+    // dial, as asking every tick adds up over many unreachable people. A contact who starts relaying resets the waits.
+    if (!by || !relayKeys.has(by)) return tell(`none:${k}`, `no contact could relay for …${k.slice(-6)} yet`), relayFailed(k)
     told.delete(`none:${k}`)
     diag('network', `linking with …${k.slice(-6)} through …${by.slice(-6)}`)
     pendingVia.set(k, by)
@@ -569,6 +575,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       },
       close(key) {
         diag('network', `link closed with …${key.slice(-6)}`)
+        for (const k of sentUpTo.keys()) if (k.startsWith(key)) sentUpTo.delete(k)
         theirs.delete(key)
         sentActivity.delete(key)
         // The call's relay port stays: the link comes back within seconds and WebRTC keeps using that candidate.
@@ -618,8 +625,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const retries = new Map<Key, { n: number; next: number }>()
   let joined = false
   net.listening.then(() => (joined = true), () => {})
-  // Not while relaying is on: a relay needs its contacts linked as soon as they can be, or pairs wait minutes.
-  const due = (k: Key) => !!relayKey || (retries.get(k)?.next ?? 0) <= Date.now()
+  // While relaying, the first few retries skip the wait (a relay needs its contacts linked as soon as they can be, or
+  // pairs wait minutes); after that it backs off too, or with relaying on by default nobody offline ever would.
+  const due = (k: Key) => (retries.get(k)?.next ?? 0) <= Date.now() || (!!relayKey && (retries.get(k)?.n ?? 0) < 3)
   function backOff(k: Key) {
     const n = (retries.get(k)?.n ?? 0) + 1
     retries.set(k, { n, next: later(n, redialMs) })
@@ -895,6 +903,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const nonce = randomBytes(16).toString('hex')
       const id = groupIdOf(me, nonce)
       const members = [...new Set(others.filter((k) => s.friends[k] === 'friend'))]
+      if (members.length >= 100) throw new Error('A group can have at most 100 members') // every peer rejects a bigger one (validGroup)
       const adds = Object.fromEntries(members.map((k) => [k, signAdd(id, k, keyPair)]))
       const look = { id, name: String(name).slice(0, 100), updatedAt: Date.now() }
       const g = mergeGroup(undefined, { ...look, members: [me, ...members], adds, owner: me, nonce, edit: signEdit(look, keyPair) })
@@ -917,6 +926,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     addToGroup(id: string, key: Key) {
       const g = Object.hasOwn(s.groups, id) ? s.groups[id] : undefined
       if (!g || s.friends[key] !== 'friend' || g.members.includes(key) || g.removed?.[key]) return
+      if (g.members.length >= 100) throw new Error('A group can have at most 100 members')
       const adds = { ...g.adds, [key]: signAdd(id, key, keyPair) }
       s.groups[id] = mergeGroup(g, { ...g, members: [...g.members, key], adds })
       changed()
@@ -1014,6 +1024,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     signal(conv: string, to: Key | null, data: unknown) {
       if (noDirect && (data as { k?: string })?.k === 'ice') return
       for (const k of members(conv)) if (k !== me && (!to || to === k)) net.send(k, { t: 'call', conv, data }), used.set(k, Date.now()), need(k)
+      // Whoever a signal is addressed to is in the call with us: sought out even when not a friend.
+      if (to && to !== me && members(conv).includes(to) && !net.linked(to)) demand.set(to, demand.get(to) ?? Date.now())
     },
     // A UDP port on this machine that carries a call with `key` over the peer link (see relay.ts).
     relayOpen: (key: Key) => (known(key) ? relay.open(key) : null),

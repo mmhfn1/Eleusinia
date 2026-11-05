@@ -8,6 +8,8 @@ test('scrub keeps only what cannot identify anyone', () => {
   expect(scrub('group 0123456789abcdef0123456789abcdef left')).toBe('group group…CDEF left')
   expect(scrub('candidate 192.168.1.20:51234 and [2001:db8::1]:443 and fe80:0:0:0:1:2:3:4')).toBe('candidate [address] and [address] and [address]')
   expect(scrub('at C:\\Users\\Giri\\AppData\\x.js and /home/giri/app and /Users/giri/app')).toBe('at C:\\Users\\…\\AppData\\x.js and /home/…/app and /Users/…/app')
+  // a surname after a space is part of the folder name, but the rest of the path stays
+  expect(scrub('at foo (C:\\Users\\John Smith\\app.asar\\main.js:1:2) and /home/john smith/x')).toBe('at foo (C:\\Users\\…\\app.asar\\main.js:1:2) and /home/…/x')
   expect(scrub('mail me at someone@example.com')).toBe('mail me at [email]')
   expect(scrub('x'.repeat(1000))).toHaveLength(LIMITS.event)
   expect(scrub('call joined with 3 people at 12:34:56, 720p 30 fps, 16:9')).toBe('call joined with 3 people at 12:34:56, 720p 30 fps, 16:9') // ordinary text is untouched
