@@ -54,13 +54,13 @@ export function verifyMsg(m: Msg): boolean {
 
 // Which "you already had these" claims (`held`) a peer may make, as [author, seq] to carry on after: only about its
 // own messages (up to what it says it holds) and ours (lost with our log). About anyone else's it could make us
-// discard that person's messages for good.
-export const MAX_SEQ = 1e9
-export function heldFrom(held: unknown, from: string, me: string, theirs: Have, ours: Have): [string, number][] {
+// discard that person's messages for good. Ours only up to `acked`, what a peer confirmed while we still had them:
+// any member could otherwise push our numbering past what everyone else holds, and they would drop all we send.
+export function heldFrom(held: unknown, from: string, me: string, theirs: Have, ours: Have, acked: number): [string, number][] {
   if (!held || typeof held !== 'object') return []
   return Object.entries(held as Record<string, unknown>).filter(
     (e): e is [string, number] =>
-      (e[0] === from || e[0] === me) && Number.isSafeInteger(e[1]) && (e[1] as number) > (ours[e[0]] ?? 0) && (e[1] as number) <= (e[0] === from ? Number(theirs?.[from]) || 0 : MAX_SEQ),
+      (e[0] === from || e[0] === me) && Number.isSafeInteger(e[1]) && (e[1] as number) > (ours[e[0]] ?? 0) && (e[1] as number) <= (e[0] === from ? Number(theirs?.[from]) || 0 : acked),
   )
 }
 
@@ -97,10 +97,11 @@ export function validGroup(g: Group): boolean {
     g.members.length <= 100 &&
     g.members.every(isKey) &&
     (g.avatar === undefined || g.avatar === '' || isPicture(g.avatar)) &&
-    isMap(g.adds) &&
-    isMap(g.left) &&
+    // Leavers' adds and notices stay (mergeGroup), so these outgrow the 100 members over the group's life.
+    isMap(g.adds, 400) &&
+    isMap(g.left, 400) &&
     Object.entries(g.left ?? {}).every(([k, sig]) => verifyLeft(g.id, k, sig)) &&
-    isMap(g.removed) &&
+    isMap(g.removed, 400) &&
     (g.owner === undefined || isKey(g.owner)) &&
     (g.nonce === undefined || (typeof g.nonce === 'string' && /^[0-9a-f]{32}$/.test(g.nonce))) &&
     (g.edit === undefined || (!!g.edit && isKey(g.edit.by) && isSig(g.edit.sig)))

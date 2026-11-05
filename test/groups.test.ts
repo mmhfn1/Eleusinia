@@ -93,3 +93,15 @@ test('a group from before owners: the one member nobody added owns it, and unsig
   expect(mergeGroup(kept, forged).members).toEqual(old.members)
   expect(mergeGroup(kept, forged).owner).toBe(hex(o))
 })
+
+// Leavers' adds stay in the doc, so adds and left can outgrow the 100 members.
+test('a full group whose members came and went still validates', () => {
+  const [o, ...rest] = people(103)
+  const g = made(o, rest.slice(0, 101))
+  const leavers = rest.slice(94, 101)
+  const left = Object.fromEntries(leavers.map((k) => [hex(k), signLeft(g.id, k)]))
+  const after = mergeGroup(g, { ...g, left })
+  expect(after.members).toHaveLength(95)
+  expect(Object.keys(after.adds ?? {})).toHaveLength(101)
+  expect(validGroup(after)).toBe(true)
+})

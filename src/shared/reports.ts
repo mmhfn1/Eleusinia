@@ -45,7 +45,7 @@ export function clean(text: string) {
     .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, '[email]')
     .replace(/\b(\d{1,3}\.){3}\d{1,3}(:\d+)?\b/g, '[address]')
     .replace(/\[?[0-9a-f:]*::[0-9a-f:]*\]?(:\d+)?|\[?\b(?:[0-9a-f]{1,4}:){4,7}[0-9a-f]{1,4}\b\]?(:\d+)?/gi, '[address]')
-    .replace(/([a-z]:[\\/]+users[\\/]+|\/(?:home|Users)\/)[^\\/\s'"]+/gi, '$1…')
+    .replace(/([a-z]:[\\/]+users[\\/]+|\/(?:home|Users)\/)[^\\/'"\n]+/gi, '$1…') // spaces allowed: "John Smith" is one folder
 }
 // One diagnostic line: cleaned and capped.
 export const scrub = (text: string) => clean(text).slice(0, LIMITS.event)

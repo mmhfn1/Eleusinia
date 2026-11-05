@@ -8,7 +8,7 @@ import { afterAll, beforeAll, expect, onTestFailed, test } from 'vitest'
 import { createNode } from '../src/main/node'
 import { type RelayLimits, createNet, relayKeyPair } from '../src/main/network'
 import { CALL_VERSION, type Group, type Msg, cleanProfile, dmId, identicon, isHandle, keyTail, normHandle, stack, versionOf } from '../src/shared/protocol'
-import { MAX_SEQ, heldFrom, mergeGroup, missing, signAdd, signLeft, signMsg, validGroup, verifyAdd, verifyMsg } from '../src/shared/sync'
+import { heldFrom, mergeGroup, missing, signAdd, signLeft, signMsg, validGroup, verifyAdd, verifyMsg } from '../src/shared/sync'
 
 test('a tampered or re-attributed message fails verification', () => {
   const a = DHT.keyPair()
@@ -29,11 +29,11 @@ test('a peer may only say we already had its own messages or ours, never those o
   const [me, peer, other] = ['a'.repeat(64), 'b'.repeat(64), 'c'.repeat(64)]
   const ours = { [peer]: 2, [other]: 1 }
   const theirs = { [peer]: 9 }
-  expect(heldFrom({ [peer]: 5, [me]: 4, [other]: 900 }, peer, me, theirs, ours)).toEqual([[peer, 5], [me, 4]])
-  expect(heldFrom({ [peer]: 10 }, peer, me, theirs, ours)).toEqual([]) // more than they say they hold
-  expect(heldFrom({ [peer]: 1 }, peer, me, theirs, ours)).toEqual([]) // we already have that much
-  expect(heldFrom({ [me]: MAX_SEQ + 1 }, peer, me, theirs, ours)).toEqual([]) // would push our numbering past use
-  expect(heldFrom('nonsense', peer, me, theirs, ours)).toEqual([])
+  expect(heldFrom({ [peer]: 5, [me]: 4, [other]: 900 }, peer, me, theirs, ours, 4)).toEqual([[peer, 5], [me, 4]])
+  expect(heldFrom({ [peer]: 10 }, peer, me, theirs, ours, 4)).toEqual([]) // more than they say they hold
+  expect(heldFrom({ [peer]: 1 }, peer, me, theirs, ours, 4)).toEqual([]) // we already have that much
+  expect(heldFrom({ [me]: 5 }, peer, me, theirs, ours, 4)).toEqual([]) // more of ours than any peer ever confirmed
+  expect(heldFrom('nonsense', peer, me, theirs, ours, 4)).toEqual([])
 })
 
 test('group merge converges whichever side merges first', () => {
@@ -686,6 +686,58 @@ test('a stolen key gets no old history: what a peer confirmed is never sent to i
   await until(() => texts(a, dm).includes('from b after'))
 }, 120000)
 
+test('a member claiming we already sent a billion messages cannot push our numbering past what others hold', async () => {
+  const a = start()
+  const v = start()
+  const m = start()
+  await befriend(a, v)
+  await befriend(a, m)
+  const gid = a.node.createGroup('trio', [v.key, m.key])
+  await until(() => !!v.node.state().groups[gid]?.members.includes(m.key) && !!m.node.state().groups[gid])
+  await m.node.destroy()
+  // M's key, speaking raw: tells V it already confirmed holding a billion of V's messages
+  const quiet = { open() {}, close() {}, msg() {} }
+  const raw = createNet(m.keyPair, { ...quiet, open: (k) => raw.send(k, { t: 'have', conv: gid, have: {}, re: true, held: { [v.key]: 1e9 } }) }, { bootstrap: testnet.bootstrap })
+  raw.dial(v.key)
+  await until(() => raw.linked(v.key))
+  await wait(1000)
+  await raw.destroy()
+  v.node.send(gid, 'still heard')
+  expect(v.node.history(gid).msgs[0].seq).toBe(1)
+  await until(() => texts(a, gid).includes('still heard'))
+}, 120000)
+
+test('catching up on a long backlog sends each message about once, though a receipt follows every one', async () => {
+  const a = start()
+  const b = start()
+  await befriend(a, b)
+  await b.node.destroy()
+  const dm = dmId(a.key, b.key)
+  for (let i = 0; i < 200; i++) a.node.send(dm, 'm' + i)
+  // B's key, speaking raw: asks once, then sends a receipt for each message as a real node does
+  let got = 0
+  const seqs = new Set<number>()
+  const raw = createNet(
+    b.keyPair,
+    {
+      open: (k) => raw.send(k, { t: 'have', conv: dm, have: {} }),
+      close() {},
+      msg(k, w: any) {
+        if (w.t !== 'msg') return
+        got++
+        seqs.add(w.m.seq)
+        raw.send(k, { t: 'have', conv: dm, have: { [a.key]: Math.max(...seqs) }, re: true })
+      },
+    },
+    { bootstrap: testnet.bootstrap },
+  )
+  raw.dial(a.key)
+  await until(() => seqs.size === 200)
+  await wait(1000)
+  await raw.destroy()
+  expect(got).toBeLessThanOrEqual(240)
+}, 120000)
+
 test('the owner removes a member: everyone learns it, the removed member loses the group and is heard no more', async () => {
   const a = start()
   const b = start()
@@ -941,6 +993,22 @@ test('nobody relays for strangers or with relaying off', async () => {
   expect(await toRelay(half, b.keyPair)).toBeNull() // b is not half's contact
 }, 180000)
 
+test('a group member who is not a friend is not sought out through relays', async () => {
+  const asks: string[] = []
+  const a = start(undefined, undefined, { strict: true, diag: (_area, text) => asks.push(text) })
+  const b = peer({ strict: true })
+  const owner = peer()
+  await setUp([a, b, owner])
+  await befriend(a, owner)
+  await befriend(b, owner)
+  const gid = owner.node.createGroup('strangers', [a.key, b.key])
+  await until(() => !!a.node.state().groups[gid]?.members.includes(b.key))
+  a.node.send(gid, 'hi')
+  a.node.history(gid)
+  await wait(6000)
+  expect(asks.filter((t) => t.includes('relay for …' + b.key.slice(-6)))).toEqual([])
+}, 180000)
+
 test('a relay holds to its caps: pairs, per contact, and bytes', async () => {
   const a = peer({ strict: true })
   const b = peer({ strict: true })
@@ -1133,3 +1201,14 @@ test('unread counts messages from others and missed calls until read; blocking s
   b.node.unblock(a.key)
   expect(b.node.state().blocked).toEqual([])
 }, 60000)
+
+test('a group can have at most 100 members, whether made with them or added one by one', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'eleusinia-'))
+  const friends = Array.from({ length: 101 }, () => randomBytes(32).toString('hex'))
+  writeFileSync(join(dir, 'state.json'), JSON.stringify({ friends: Object.fromEntries(friends.map((k) => [k, 'friend'])) }))
+  const a = start(dir)
+  expect(() => a.node.createGroup('crowd', friends.slice(0, 100))).toThrow('A group can have at most 100 members')
+  const gid = a.node.createGroup('crowd', friends.slice(0, 99))
+  expect(a.node.state().groups[gid].members).toHaveLength(100)
+  expect(() => a.node.addToGroup(gid, friends[100])).toThrow('A group can have at most 100 members')
+})
