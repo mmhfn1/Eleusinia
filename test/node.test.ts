@@ -8,7 +8,7 @@ import { afterAll, beforeAll, expect, onTestFailed, test } from 'vitest'
 import { createNode } from '../src/main/node'
 import { type RelayLimits, createNet, relayKeyPair } from '../src/main/network'
 import { CALL_VERSION, type Group, type Msg, cleanProfile, dmId, identicon, isHandle, keyTail, normHandle, stack, versionOf } from '../src/shared/protocol'
-import { heldFrom, mergeGroup, missing, signAdd, signLeft, signMsg, validGroup, verifyAdd, verifyMsg } from '../src/shared/sync'
+import { heldFrom, mergeGroup, missing, signAdd, signLeft, signMsg, signPresence, validGroup, verifyAdd, verifyMsg, verifyPresence } from '../src/shared/sync'
 
 test('a tampered or re-attributed message fails verification', () => {
   const a = DHT.keyPair()
@@ -17,6 +17,17 @@ test('a tampered or re-attributed message fails verification', () => {
   expect(verifyMsg(m)).toBe(true)
   expect(verifyMsg({ ...m, text: 'bye' })).toBe(false)
   expect(verifyMsg({ ...m, author: b.publicKey.toString('hex') })).toBe(false)
+})
+
+test('a presence note verifies only as signed, by its author, and not dated far ahead', () => {
+  const kp = DHT.keyPair()
+  const gid = 'ab'.repeat(16)
+  const p = signPresence(1000, gid, kp)
+  expect(verifyPresence(p, 1000)).toBe(true)
+  expect(verifyPresence({ ...p, call: null }, 1000)).toBe(false) // the call is signed too
+  expect(verifyPresence({ ...p, key: DHT.keyPair().publicKey.toString('hex') }, 1000)).toBe(false)
+  expect(verifyPresence(signPresence(1000 + 61000, null, kp), 1000)).toBe(false)
+  expect(verifyPresence(signPresence(1000, 'not a group', kp), 1000)).toBe(false)
 })
 
 test('missing returns only what the peer lacks', () => {
@@ -242,6 +253,70 @@ test('a group member that passing on missed asks for the message once a receipt 
   expect(c.node.state().online).not.toContain(a.key)
 }, 120000)
 
+// B and D never link (as with most pairs in a big group, where each member dials only a few others), yet B sees D
+// online and in the group's call, from D's signed presence note passed along by A.
+test('a group member not linked with us shows online and in a call through presence notes passed between members', async () => {
+  const [kb, kd] = [DHT.keyPair(), DHT.keyPair()]
+  const hex = (k: typeof kb) => k.publicKey.toString('hex')
+  const heard: any[] = []
+  const a = start()
+  const b = start(undefined, kb, { links: (k) => k !== hex(kd), emit: (e: any) => e.type === 'call' && heard.push(e) })
+  const d = start(undefined, kd, { links: (k) => k !== hex(kb) })
+  await befriend(a, b)
+  await befriend(a, d)
+  const gid = a.node.createGroup('presence', [b.key, d.key])
+  await until(() => !!b.node.state().groups[gid] && !!d.node.state().groups[gid])
+  d.node.signal(gid, null, { k: 'join' })
+  await until(() => b.node.state().present.includes(d.key))
+  await until(() => heard.some((e) => e.from === d.key && e.conv === gid && e.data.k === 'join'))
+  expect(b.node.state().online).not.toContain(d.key)
+  await new Promise((r) => setTimeout(r, 1100)) // call changes count at most once a second
+  d.node.signal(gid, null, { k: 'leave' })
+  await until(() => heard.some((e) => e.from === d.key && e.conv === gid && e.data.k === 'leave'))
+  expect(heard.filter((e) => e.data.k === 'join').length).toBe(1)
+}, 120000)
+
+test('pictures stay out of state.json and state pushes, and come back after a restart', async () => {
+  const a = start()
+  let b = start()
+  await befriend(a, b)
+  const png = 'data:image/png;base64,' + 'A'.repeat(2000)
+  await a.node.setProfile({ username: a.node.state().profile.handle.split('#')[0], name: 'Ann', about: '', avatar: png })
+  await until(() => b.node.state().profiles[a.key]?.avatar.startsWith('eleusinia-pic://'))
+  const id = b.node.state().profiles[a.key].avatar.slice('eleusinia-pic://'.length)
+  expect(b.node.picture(id)).toBe(png)
+  await b.node.destroy()
+  expect(readFileSync(join(b.dir, 'state.json'), 'utf8')).not.toContain('A'.repeat(2000))
+  b = restart(b)
+  expect(b.node.picture(id)).toBe(png)
+  expect(b.node.state().profiles[a.key].avatar).toBe('eleusinia-pic://' + id)
+  expect(b.node.picture('../state.json')).toBeNull()
+}, 120000)
+
+// 450 is past both a catch-up page (200) and the flood bucket's burst (400): it still all arrives, a page at a time,
+// with whatever was turned away sent again when asked.
+test('a long backlog arrives whole, in pages; group history from before joining is not unread', async () => {
+  const a = start()
+  let b = start()
+  const c = start()
+  await befriend(a, b)
+  await befriend(a, c)
+  const dm = dmId(a.key, b.key)
+  await b.node.destroy()
+  for (let i = 0; i < 450; i++) a.node.send(dm, 'm' + i)
+  b = restart(b)
+  await expect.poll(() => texts(b, dm).length, { timeout: 90000, interval: 200 }).toBe(450)
+  expect(b.node.state().chats[dm].unread).toBe(450) // sent to us while we were away: unread
+  const gid = a.node.createGroup('history', [c.key])
+  for (let i = 0; i < 5; i++) a.node.send(gid, 'old ' + i)
+  await until(() => texts(c, gid).length === 5)
+  a.node.addToGroup(gid, b.key)
+  await until(() => texts(b, gid).length === 5)
+  expect(b.node.state().chats[gid]?.unread ?? 0).toBe(0)
+  a.node.send(gid, 'new')
+  await until(() => b.node.state().chats[gid]?.unread === 1)
+}, 150000)
+
 test('activity reaches friends only while shared, with only the details chosen, and never someone hidden', async () => {
   const a = start()
   const b = start()
@@ -368,7 +443,9 @@ test('a stranger sees our picture in search and requests, as a small thumbnail, 
   expect(found[0].profile.avatar).toBe('data:image/jpeg;base64,' + jpeg.toString('base64'))
   b.node.addFriend(a.key)
   await until(() => a.node.state().friends[b.key] === 'incoming')
-  expect(a.node.state().profiles[b.key].avatar).toBe('data:image/jpeg;base64,' + jpeg.toString('base64'))
+  // The state carries a link to the picture, not the picture
+  const link = a.node.state().profiles[b.key].avatar
+  expect(a.node.picture(link.slice('eleusinia-pic://'.length))).toBe('data:image/jpeg;base64,' + jpeg.toString('base64'))
 }, 120000)
 
 test('someone watching the request topic of a person sees one-off keys, never who is asking', async () => {
@@ -774,7 +851,7 @@ test('deleting an account erases it from this computer, leaves its groups and te
   writeFileSync(join(a.dir, 'identity.json'), '{}') // stands in for the identity file Electron's main process writes
 
   await a.node.deleteAccount()
-  for (const f of ['state.json', 'identity.json', 'msgs']) expect(existsSync(join(a.dir, f))).toBe(false)
+  for (const f of ['state.json', 'identity.json', 'msgs', 'pictures']) expect(existsSync(join(a.dir, f))).toBe(false)
   await until(() => !b.node.state().friends[a.key] && !b.node.state().groups[gid]?.members.includes(a.key))
 }, 120000)
 

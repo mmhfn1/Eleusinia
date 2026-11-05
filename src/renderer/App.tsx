@@ -4,7 +4,7 @@ import { type Group, type Key, type Profile, type State, dmId, keyTail } from '.
 import * as call from './call'
 import { Avatar, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Splitter, Wordmark, useWidth } from './ui'
 import { Chat } from './Chat'
-import { CameraDialog, Oculus, PersonVolume, RingBar, STATE_WORDS, ShareDialog, Stage, VoiceMark, VoiceSignal } from './Media'
+import { CameraDialog, Oculus, PersonVolume, RingBar, STATE_WORDS, ShareDialog, Stage, VoiceMark, VoiceSignal, useSpeaking } from './Media'
 import { DeleteAccount, ReportDialog, SettingsDialog } from './Settings'
 import { ActivityLine, ProfileActivity } from './Activity'
 import { ProfileBanner, ProfilePop } from './Profile'
@@ -29,16 +29,6 @@ export default function App() {
     t.forward = []
     setSel(c)
   }
-  // The open conversation counts as read while the window shows, including what arrives while it is open.
-  const [, seen] = useReducer((n: number) => n + 1, 0)
-  useEffect(() => {
-    document.addEventListener('visibilitychange', seen)
-    return () => document.removeEventListener('visibilitychange', seen)
-  }, [])
-  const unreadHere = sel ? (st?.chats[sel]?.unread ?? 0) : 0
-  useEffect(() => {
-    if (sel && unreadHere && !document.hidden) api.call('markRead', sel)
-  })
   useEffect(() => {
     const step = (e: MouseEvent) => {
       if (e.button !== 3 && e.button !== 4) return
@@ -106,7 +96,8 @@ export default function App() {
         {people.name(k)}
       </button>
     ),
-    isOnline: (k) => k === st.me || st.online.includes(k),
+    // Linked, or a group member known online from their presence note
+    isOnline: (k) => k === st.me || st.online.includes(k) || st.present.includes(k),
     // Clicking the same person again closes their panel.
     show: (k, from) => setModal((m) => (!from ? { kind: 'card', k } : m?.kind === 'pop' && m.k === k && m.from === from ? null : { kind: 'pop', k, from })),
   }
@@ -959,6 +950,12 @@ function GroupName({ g, run }: { g: Group; run: Run }) {
   )
 }
 
+// What shows speaking rings redraws by itself when someone starts or stops speaking, not the conversation around it.
+function Speaking({ children }: { children: () => ReactNode }) {
+  useSpeaking()
+  return <>{children()}</>
+}
+
 function Conversation({ st, conv, people, run, home }: ConvProps) {
   const [shareDialog, setShareDialog] = useState(false)
   const [picking, setPicking] = useState<File | null>(null)
@@ -1056,41 +1053,47 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
             <>
               <VoiceSignal name={name} />
               <div className="callers" aria-live="polite">
-                <div className={`caller${ring(st.me)}`}>
-                  <button className="caller-who" onClick={(e) => show(st.me, e.currentTarget)} aria-label="Your profile">
-                    <Avatar k={st.me} p={st.profile} size={44} />
-                  </button>
-                  <span className="row-text">
-                    <span className="row-title">
-                      You <VoiceMark muted={call.muted} deafened={call.deafened} />
-                    </span>
-                    {call.pushToTalk() && !call.muted && !call.deafened && (
-                      <span className={`row-sub ptt ${call.talking ? 'on' : ''}`}>
-                        {call.talking ? 'Talking' : `Push to talk: hold ${call.pushToTalk()!.label}`}
+                <Speaking>
+                  {() => (
+                    <>
+                    <div className={`caller${ring(st.me)}`}>
+                      <button className="caller-who" onClick={(e) => show(st.me, e.currentTarget)} aria-label="Your profile">
+                        <Avatar k={st.me} p={st.profile} size={44} />
+                      </button>
+                      <span className="row-text">
+                        <span className="row-title">
+                          You <VoiceMark muted={call.muted} deafened={call.deafened} />
+                        </span>
+                        {call.pushToTalk() && !call.muted && !call.deafened && (
+                          <span className={`row-sub ptt ${call.talking ? 'on' : ''}`}>
+                            {call.talking ? 'Talking' : `Push to talk: hold ${call.pushToTalk()!.label}`}
+                          </span>
+                        )}
                       </span>
-                    )}
-                  </span>
-                </div>
-                {[...call.peers].map(([k, p]) => (
-                  <div className={`caller state-${p.pc.connectionState}${ring(k)}`} key={k} onContextMenu={card(show, k)}>
-                    <button className="caller-who" onClick={(e) => show(k, e.currentTarget.closest('.caller') as HTMLElement)} aria-label={`${name(k)}: open profile`}>
-                      <Avatar k={k} p={prof(k)} size={44} />
-                    </button>
-                    <span className="row-text">
-                      <span className="row-title">
-                        <button className="user" onClick={(e) => show(k, e.currentTarget.closest('.caller') as HTMLElement)}>
-                          {name(k)}
-                        </button>{' '}
-                        <VoiceMark {...call.voices.get(k)} />
-                      </span>
-                      <span className="row-sub">
-                        {STATE_WORDS[p.pc.connectionState] ?? p.pc.connectionState}
-                        {p.relayed && p.pc.connectionState === 'connected' && ' · relayed through the chat link'}
-                      </span>
-                      <PersonVolume st={st} k={k} name={name(k)} />
-                    </span>
-                  </div>
-                ))}
+                    </div>
+                    {[...call.peers].map(([k, p]) => (
+                      <div className={`caller state-${p.pc.connectionState}${ring(k)}`} key={k} onContextMenu={card(show, k)}>
+                        <button className="caller-who" onClick={(e) => show(k, e.currentTarget.closest('.caller') as HTMLElement)} aria-label={`${name(k)}: open profile`}>
+                          <Avatar k={k} p={prof(k)} size={44} />
+                        </button>
+                        <span className="row-text">
+                          <span className="row-title">
+                            <button className="user" onClick={(e) => show(k, e.currentTarget.closest('.caller') as HTMLElement)}>
+                              {name(k)}
+                            </button>{' '}
+                            <VoiceMark {...call.voices.get(k)} />
+                          </span>
+                          <span className="row-sub">
+                            {STATE_WORDS[p.pc.connectionState] ?? p.pc.connectionState}
+                            {p.relayed && p.pc.connectionState === 'connected' && ' · relayed through the chat link'}
+                          </span>
+                          <PersonVolume st={st} k={k} name={name(k)} />
+                        </span>
+                      </div>
+                    ))}
+                    </>
+                  )}
+                </Speaking>
                 {!call.peers.size && <p className="quiet">Waiting for others to join…</p>}
               </div>
               {call.notices().map((n) => (
@@ -1150,10 +1153,10 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
       <Splitter label="Resize members sidebar" width={right} set={setRight} dir={-1} />
       <aside className="members" style={{ width: right }} aria-label={group ? 'Group members' : 'People in this chat'}>
         <h2>Online ({onlineMembers.length})</h2>
-        {onlineMembers.map(member)}
+        <Speaking>{() => onlineMembers.map(member)}</Speaking>
         <hr />
         <h2>Offline ({offlineMembers.length})</h2>
-        {offlineMembers.map(member)}
+        <Speaking>{() => offlineMembers.map(member)}</Speaking>
       </aside>
     </>
   )

@@ -101,6 +101,10 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
     await new Promise((r) => spawn('powershell', ['-NoProfile', '-Command', ps], { stdio: 'ignore' }).on('exit', r))
     return true
   }
+  // A conversation counts as read only in a focused window, and three windows cannot all have focus: each acts as if
+  // it had, unless a step turns it off to see an unfocused window.
+  const focused = (on) => ws.send(JSON.stringify({ id: ++id, method: 'Emulation.setFocusEmulationEnabled', params: { enabled: on } }))
+  focused(true)
   // Lets the test read what each call connection actually receives (getStats), without the app exposing anything.
   // Crashes the page as a real renderer crash would (Chromium's own command for it).
   const crash = () => ws.send(JSON.stringify({ id: ++id, method: 'Page.crash' }))
@@ -112,7 +116,7 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
       ws.send(JSON.stringify({ id, method: 'Page.captureScreenshot' }))
     })
   await ev(`(() => { window.__pcs = []; const P = RTCPeerConnection; window.RTCPeerConnection = class extends P { constructor(...a) { super(...a); window.__pcs.push(this) } } })()`)
-  return { child, ev, dir, title, windowState, crash, shot }
+  return { child, ev, dir, title, windowState, crash, shot, focused }
 }
 
 // What one of the live connection's slots has received (see slotsOf in call.ts): 'sound' is the second audio.
@@ -360,7 +364,8 @@ try {
     await until(`typing "${typed}" suggests ${n}: ${n === 'Cy' ? 'generated' : 'uploaded'} picture, ID, Unique Key ${tail}`, () =>
       a.ev(`(() => { const r = document.querySelectorAll('.result'); return r.length === 1 && !!r[0].querySelector('${pic}') && r[0].textContent.includes('${ids[n]}') && r[0].querySelector('.tail').textContent === '${tail}' })()`))
     await a.ev(`document.querySelector('.result .add-friend').click()`)
-    await until(`${n} sees the request with Ann's picture`, () => p.ev(`[...document.querySelectorAll('.request')].some(r => r.textContent.includes('Ann') && r.querySelector('.avatar img'))`))
+    // Served as eleusinia-pic:// (node.ts keeps pictures out of the state), and it must actually load
+    await until(`${n} sees the request with Ann's picture`, () => p.ev(`[...document.querySelectorAll('.request')].some(r => { const i = r.querySelector('.avatar img'); return r.textContent.includes('Ann') && i?.src.startsWith('eleusinia-pic://') && i.complete && i.naturalWidth > 0 })`))
     await p.ev(`[...document.querySelectorAll('.request button')].find(x => x.textContent === 'Accept').click()`)
   }
 
@@ -680,6 +685,13 @@ try {
   await until('unmuting shows it again', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '3'`), 5)
   await b.ev(`${railDm}.click()`)
   await until('opening the DM reads it: the count is gone', () => b.ev(`!!document.querySelector('.chat-person') && !${railDm}.querySelector('.rail-count')`), 5)
+  // Shown but not focused (on a second screen during a game) is not read
+  b.focused(false)
+  await a.ev(say('still there?'))
+  await until('in an unfocused window, the open DM still counts a new message', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '1'`), 15)
+  b.focused(true)
+  await b.ev(`window.dispatchEvent(new Event('focus'))`)
+  await until('focusing the window reads it', () => b.ev(`!${railDm}.querySelector('.rail-count')`), 5)
 
   console.log('--- Voice call from the left sidebar')
   const joinsBefore = (await sounds(a)).filter((x) => x === 'join').length // the missed call above played one
@@ -945,6 +957,7 @@ try {
     a.ev(`document.querySelector('.hotkeys [role=alert]')?.textContent.includes('F23 is already the hotkey for Mute') && ${row('Deafen')}.querySelector('kbd').textContent === 'Not set'`), 5)
   await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
   await until('A shows push to talk with its key', async () => (await you()).includes('Push to talk: hold F24'), 5)
+  a.focused(false) // emulated focus would also keep the page visible
   if (await a.windowState('minimized')) await until('A is minimised', () => a.ev('document.hidden'), 10)
   // B must actually receive A's voice only while the key is held, not just see the label change. Bytes, not audio
   // energy, since a remote voice plays through Web Audio and its receiver reports no energy; a disabled microphone
@@ -972,6 +985,7 @@ try {
   await key(UiohookKey.F23, false)
   await until('F23 again unmutes', () => a.ev(`!document.querySelector('.callers .voice-mark')`), 5)
   await a.windowState('normal')
+  a.focused(true)
   await a.ev(`api.call('setSettings', { hotkeys: {} })`)
   await key(UiohookKey.F23, true)
   await key(UiohookKey.F23, false)

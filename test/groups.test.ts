@@ -80,6 +80,9 @@ test('names and pictures follow signed changes by members, and a far-future date
   const now = 10_000
   expect(mergeGroup(g, rename(m, 'pinned', now + EDIT_AHEAD_MS + 1), now).name).toBe('g')
   expect(mergeGroup(mergeGroup(g, rename(m, 'by m', 2000)), rename(o, 'later', 3000)).name).toBe('later')
+  // Someone who left can no longer rename it
+  const gone = mergeGroup(g, { ...g, left: { [hex(m)]: signLeft(g.id, m) } })
+  expect(mergeGroup(gone, { ...rename(m, 'by a leaver', 4000), left: gone.left }).name).toBe('g')
 })
 
 test('a group from before owners: the one member nobody added owns it, and unsigned additions stop counting', () => {

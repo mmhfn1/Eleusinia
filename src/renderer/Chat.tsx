@@ -1,8 +1,8 @@
 // A conversation's messages: history, live updates, delivery marks and the message box.
-import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode, memo, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react'
 import { type LinkPreview, firstLink, splitLinks } from '../shared/links'
 import { type FileRef, MAX_FILES, inlineKind, sizeLabel } from '../shared/media'
-import { type FileState, type Key, type Msg, type State, MAX_TEXT, stack } from '../shared/protocol'
+import { type FileState, type Key, type Msg, type Profile, type State, MAX_TEXT, stack } from '../shared/protocol'
 import * as call from './call'
 import { Avatar, Dialog, Emblem, GroupEmblem, Icon } from './ui'
 import { type People, type Run, api } from './common'
@@ -38,6 +38,18 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   const asked = useRef(new Set<string>())
   const [viewing, setViewing] = useState<FileRef | null>(null)
   const link = useLinkDraft()
+  // Read only while really being read: the window focused (not just visible on a second screen during a game) and the
+  // newest messages in view. Checked again when the window gains focus or the list reaches the bottom.
+  const [, seen] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => {
+    window.addEventListener('focus', seen)
+    document.addEventListener('visibilitychange', seen)
+    return () => (window.removeEventListener('focus', seen), document.removeEventListener('visibilitychange', seen))
+  }, [])
+  const unread = st.chats[conv]?.unread ?? 0
+  useEffect(() => {
+    if (unread && !document.hidden && document.hasFocus() && atBottom.current) api.call('markRead', conv)
+  })
 
   useEffect(() => {
     api.call('history', conv, limit).then((h) => {
@@ -143,42 +155,19 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
     const mine = m.author === st.me
     const pending = mine && m.seq > acked
     rows.push(
-      <div key={m.author + m.seq} className={`msg ${mine ? 'mine' : ''} ${continued ? 'continued' : ''}`}>
-        <div className="msg-gutter">{continued ? <time className="msg-hover-time">{clock(m.ts)}</time> : <Avatar k={m.author} p={prof(m.author)} size={36} />}</div>
-        <div className="msg-main">
-          {!continued && (
-            <div className="msg-head">
-              {user(m.author)}
-              <time dateTime={new Date(m.ts).toISOString()} title={new Date(m.ts).toLocaleString()}>
-                {clock(m.ts)}
-              </time>
-            </div>
-          )}
-          {m.text && (
-            <p className="msg-text">
-              <MsgText text={m.text} />
-            </p>
-          )}
-          {m.link && <LinkCard l={m.link} />}
-          {m.files && (
-            <div className="msg-files">
-              {m.files.map((f) => (
-                <Attachment key={f.h} f={f} st={files[f.h]} view={() => setViewing(f)} />
-              ))}
-            </div>
-          )}
-          {pending && (
-            <span className="msg-status pending" title="Not delivered yet. It will be sent automatically when they are online.">
-              <Icon name="clock" size={12} /> pending, sends when they are online
-            </span>
-          )}
-          {m === lastDelivered && (
-            <span className="msg-status delivered">
-              <Icon name="check" size={12} /> Delivered
-            </span>
-          )}
-        </div>
-      </div>,
+      <MsgRow
+        key={m.author + m.seq}
+        m={m}
+        continued={continued}
+        mine={mine}
+        pending={pending}
+        delivered={m === lastDelivered}
+        p={prof(m.author)}
+        name={name(m.author)}
+        files={m.files?.map((f) => files[f.h]) ?? []}
+        show={show}
+        view={setViewing}
+      />,
     )
   })
 
@@ -281,7 +270,11 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
         </Dialog>
       )}
       {stage}
-      <div className="msgs" ref={list} onScroll={(e) => (atBottom.current = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 40)}>
+      <div className="msgs" ref={list} onScroll={(e) => {
+          const was = atBottom.current
+          atBottom.current = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 40
+          if (atBottom.current && !was) seen()
+        }}>
         {loaded && !sorted.length && (
           <div className="empty-state">
             <Emblem size={84} className="faint" />
@@ -365,6 +358,76 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
 
 // One shared file in a message. Pictures show inline (a tiny preview until they arrive); videos and sounds play
 // inline once downloaded; anything else is a card to download and then find in its folder.
+type RowProps = {
+  m: Msg
+  continued: boolean
+  mine: boolean
+  pending: boolean
+  delivered: boolean
+  p: Profile
+  name: string
+  files: (FileState | undefined)[]
+  show: People['show']
+  view: (f: FileRef) => void
+}
+// One message. Kept from redrawing unless it changed: every state push (someone coming online) would otherwise redraw
+// the whole history. show and view are left out of the comparison: they only open things and never change what shows.
+const MsgRow = memo(
+  function MsgRow({ m, continued, mine, pending, delivered, p, name, files, show, view }: RowProps) {
+    return (
+      <div className={`msg ${mine ? 'mine' : ''} ${continued ? 'continued' : ''}`}>
+        <div className="msg-gutter">{continued ? <time className="msg-hover-time">{clock(m.ts)}</time> : <Avatar k={m.author} p={p} size={36} />}</div>
+        <div className="msg-main">
+          {!continued && (
+            <div className="msg-head">
+              <button className="user" onClick={(e) => show(m.author, e.currentTarget)}>
+                {name}
+              </button>
+              <time dateTime={new Date(m.ts).toISOString()} title={new Date(m.ts).toLocaleString()}>
+                {clock(m.ts)}
+              </time>
+            </div>
+          )}
+          {m.text && (
+            <p className="msg-text">
+              <MsgText text={m.text} />
+            </p>
+          )}
+          {m.link && <LinkCard l={m.link} />}
+          {m.files && (
+            <div className="msg-files">
+              {m.files.map((f, i) => (
+                <Attachment key={f.h} f={f} st={files[i]} view={() => view(f)} />
+              ))}
+            </div>
+          )}
+          {pending && (
+            <span className="msg-status pending" title="Not delivered yet. It will be sent automatically when they are online.">
+              <Icon name="clock" size={12} /> pending, sends when they are online
+            </span>
+          )}
+          {delivered && (
+            <span className="msg-status delivered">
+              <Icon name="check" size={12} /> Delivered
+            </span>
+          )}
+        </div>
+      </div>
+    )
+  },
+  (a, b) =>
+    a.m === b.m &&
+    a.continued === b.continued &&
+    a.mine === b.mine &&
+    a.pending === b.pending &&
+    a.delivered === b.delivered &&
+    a.name === b.name &&
+    a.p.name === b.p.name &&
+    a.p.avatar === b.p.avatar &&
+    a.files.length === b.files.length &&
+    a.files.every((f, i) => f === b.files[i]),
+)
+
 function Attachment({ f, st, view }: { f: FileRef; st?: FileState; view: () => void }) {
   const kind = inlineKind(f.t)
   const done = st?.state === 'done'

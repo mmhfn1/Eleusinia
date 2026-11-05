@@ -45,6 +45,7 @@ if (!firstCopy) {
 protocol.registerSchemesAsPrivileged([
   { scheme: 'eleusinia-file', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
   { scheme: 'eleusinia-art', privileges: { standard: true, secure: true } },
+  { scheme: 'eleusinia-pic', privileges: { standard: true, secure: true } },
 ])
 
 // Testing only: join this DHT instead of the public one, as "host:port,host:port" (test/smoke.mjs runs a local
@@ -565,6 +566,12 @@ function startApp() {
 
   // Shared files. Only checked, complete files of a type shown inline (never SVG or HTML) are served to the page, with
   // their stored type and no sniffing; ranges pass through so long videos can seek.
+  // People's pictures, which the state gives as eleusinia-pic://<id> (node.ts picture) instead of the data itself.
+  protocol.handle('eleusinia-pic', (req) => {
+    const m = /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/.exec(node.picture(new URL(req.url).hostname) ?? '')
+    if (!m) return new Response(null, { status: 404 })
+    return new Response(Buffer.from(m[2], 'base64'), { headers: { 'content-type': m[1], 'x-content-type-options': 'nosniff', 'cache-control': 'max-age=31536000, immutable' } })
+  })
   protocol.handle('eleusinia-file', async (req) => {
     const f = node.filePath(new URL(req.url).hostname)
     if (!f || !inlineKind(f.type)) return new Response(null, { status: 404 })

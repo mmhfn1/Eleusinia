@@ -3561,6 +3561,22 @@ img.crest {
   color: var(--mist);
   font-size: 13px;
 }
+.pop-block {
+  align-self: flex-start;
+  margin-top: 4px;
+  color: var(--stone);
+  font-size: 12px;
+}
+.pop-block:hover,
+.pop-block:focus-visible {
+  color: var(--danger);
+}
+.pop-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
 .pop-presence {
   display: flex;
   align-items: center;

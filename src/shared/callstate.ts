@@ -61,7 +61,11 @@ export function createCandidates(pc: CandidateTarget) {
 export type Recovery = {
   restart(): void // ICE restart on the existing connection, with a fresh offer
   rebuild(): void // drop the connection and offer a new one, as on join
+  ask?(): void // the answering side: ask the offering side to offer again (it may have reloaded and lost the connection)
+  giveUp?(): void // the answering side: nobody offered after all the asks; they are not in the call any more
 }
+// How often the answering side asks before giving up on a failed connection (about a minute in all)
+export const ASKS = 6
 
 // Watches one peer across rebuilt connections, so the backoff keeps counting until a connection holds.
 // Only the offering side acts; the other side answers whatever offer arrives.
@@ -97,6 +101,9 @@ export function createWatchdog(me: string, them: string, act: Recovery, timers: 
   // While audio still arrives, nothing is torn down: the same step is checked again later.
   const rebuild = () => (flowing() ? arm('rebuild', backoff(attempt), rebuild) : (act.rebuild(), rebuildLater()))
   const rebuildLater = () => arm('rebuild', backoff(attempt++), rebuild)
+  // The answering side cannot rebuild, but can ask: a little after the offering side's own rebuild would have run
+  const askLater = () =>
+    arm('rebuild', backoff(attempt + 1), () => (attempt++ < ASKS ? (act.ask?.(), askLater()) : act.giveUp?.()))
   const restartSoon = () => arm('restart', restartAfter(), () => (flowing() ? restartSoon() : (act.restart(), arm('rebuild', RESTART_GRACE, rebuild))))
 
   return {
@@ -106,8 +113,9 @@ export function createWatchdog(me: string, them: string, act: Recovery, timers: 
       if (next === 'connected') {
         clear()
         attempt = 0
-      } else if (!leader) return
-      else if (next === 'disconnected' && !pending) restartSoon()
+      } else if (!leader) {
+        if (next === 'failed' && !pending) askLater()
+      } else if (next === 'disconnected' && !pending) restartSoon()
       else if (next === 'failed' && pending !== 'rebuild') rebuildLater()
     },
     // The peer went offline: drop them unless they are back within the grace period. A call that is still

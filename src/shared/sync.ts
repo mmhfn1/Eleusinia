@@ -4,6 +4,26 @@ import { type LinkPreview, cleanLink, linkBody } from './links'
 import { filesBody, validFiles } from './media'
 import { type Add, type Group, type Have, type Key, type Msg, MAX_TEXT, isGroupId, isKey, isPicture } from './protocol'
 
+// A signed "online" note, passed along between group members so they know who is online without a link to everyone.
+// call: the group whose call the author is in, if any, so members not linked with them still see the call.
+export type Presence = { key: Key; at: number; call: string | null; sig: string }
+const presenceBody = (key: string, at: number, call: string | null) => Buffer.from(`presence:${key}:${at}:${call ?? ''}`)
+export const signPresence = (at: number, call: string | null, kp: { publicKey: Buffer; secretKey: Buffer }): Presence => {
+  const key = kp.publicKey.toString('hex')
+  return { key, at, call, sig: crypto.sign(presenceBody(key, at, call), kp.secretKey).toString('hex') }
+}
+export function verifyPresence(p: any, now = Date.now()): p is Presence {
+  return (
+    !!p &&
+    isKey(p.key) &&
+    Number.isSafeInteger(p.at) &&
+    p.at <= now + 60000 && // a note dated ahead cannot keep someone online for long after they left
+    (p.call === null || isGroupId(p.call)) &&
+    isSig(p.sig) &&
+    crypto.verify(presenceBody(p.key, p.at, p.call), Buffer.from(p.sig, 'hex'), Buffer.from(p.key, 'hex'))
+  )
+}
+
 // Files are signed only when present, so messages from before files existed still verify.
 const body = (m: Omit<Msg, 'sig'>) => Buffer.from(JSON.stringify([m.conv, m.author, m.seq, m.ts, m.text, ...(m.files ? [filesBody(m.files)] : [])]))
 
@@ -124,7 +144,7 @@ export function ownerOf(local: Group | undefined, ...others: Group[]): Key | nul
 // The same result on every peer in any order. Members are everyone reachable from the owner through signed adds,
 // minus those who left (signed by themselves) or were removed (signed by the owner); someone added only by a removed
 // member is out too, until a member adds them again. Leavers' adds still count, so leaving drops nobody else. The
-// name and picture follow the newest change a member signed; without a signed one, the first copy seen here stands.
+// name and picture follow the newest change a current member signed (not someone who left or was removed); without a signed one, the first copy seen here stands.
 export function mergeGroup(a: Group | undefined, b: Group, now = Date.now()): Group {
   const sides = a ? [a, b] : [b]
   const id = sides[0].id
@@ -159,7 +179,7 @@ export function mergeGroup(a: Group | undefined, b: Group, now = Date.now()): Gr
     if (pick && (owner || members.includes(k))) adds[k] = { by: pick.by, sig: pick.sig }
   }
   const signed = (g: Group) =>
-    !!owner && !!g.edit && valid.has(g.edit.by) && !removed[g.edit.by] && g.updatedAt <= now + EDIT_AHEAD_MS && crypto.verify(editBody(g), Buffer.from(g.edit.sig, 'hex'), Buffer.from(g.edit.by, 'hex'))
+    !!owner && !!g.edit && valid.has(g.edit.by) && !removed[g.edit.by] && !left[g.edit.by] && g.updatedAt <= now + EDIT_AHEAD_MS && crypto.verify(editBody(g), Buffer.from(g.edit.sig, 'hex'), Buffer.from(g.edit.by, 'hex'))
   const later = (x: Group, y: Group) => x.updatedAt > y.updatedAt || (x.updatedAt === y.updatedAt && (x.name > y.name || (x.name === y.name && (x.avatar ?? '') > (y.avatar ?? ''))))
   let look: Group
   if (!owner) look = a && !later(b, a) ? a : b // the old rules

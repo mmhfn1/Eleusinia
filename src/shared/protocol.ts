@@ -71,6 +71,7 @@ export type State = {
   reports: number // problem and crash reports waiting to reach the developers' inbox
   versions: Record<Key, Version> // what each person we have greeted runs; memory only
   relayed: Key[] // online people whose link goes through a mutual friend's relay: voice and text only
+  present: Key[] // group members online but not linked with us, known from their presence notes
   activity: Record<Key, Activity> // what contacts are doing now, memory only; ours as they see it, under our own key
   chats: Record<string, { unread: number; at: number }> // conversations with at least one message: unread messages and missed calls, last activity
   blocked: Key[]
@@ -109,6 +110,7 @@ export type Wire =
   | { t: 'part'; h: string; off: number; d: string } // that piece, base64
   | { t: 'nope'; h: string } // the sender does not have that file, or not for us
   | { t: 'activity'; a: unknown } // what the sender is doing (shared/activity.ts), checked by cleanActivity
+  | { t: 'presence'; p: unknown } // someone's signed "I am online" note, passed along between group members (sync.ts)
 
 export type Event =
   | { type: 'state'; state: State }
