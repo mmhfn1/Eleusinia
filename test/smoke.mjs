@@ -636,14 +636,53 @@ try {
   await b.ev(`document.querySelector('.rail-mark').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
   await until('right-clicking the emblem opens its menu, with no shortcut advertised', () => b.ev(`!!document.querySelector('dialog[open].menu-dialog') && !document.querySelector('dialog[open].menu-dialog kbd') && !document.querySelector('.rail-tip')?.textContent.includes('Ctrl')`), 5)
   await b.ev(`document.querySelector('dialog[open].menu-dialog').close()`)
-  await b.ev(`${railDm}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
-  await until('right-clicking the DM on the rail removes it', () => b.ev(`!${railDm}`), 5)
-  await b.ev(open('Ann'))
-  await until('opening the DM again puts it back', () => b.ev(`!!${railDm}`), 5)
+  // Right-click: a menu in sections, read and pin first, the person next, calls, closing, and the drastic ones last
+  const menuOf = `[...document.querySelectorAll('.context-menu .context-section')].map((s) => [...s.querySelectorAll('[role=menuitem]')].map((i) => i.textContent))`
+  const item = (label) => `[...document.querySelectorAll('.context-menu [role=menuitem]')].find((i) => i.textContent.startsWith('${label}')).click()`
+  const rightClick = (sel) => `${sel}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 60, clientY: 140 }))`
+  await b.ev(rightClick(railDm))
+  const sections = await until("right-clicking Ann on the rail opens her menu, in sections", () => b.ev(`(() => { const m = ${menuOf}; return m.length === 5 && m })()`), 5)
+  console.log('     ', JSON.stringify(sections))
+  // No groups yet at this point of the run, so no Invite to group
+  const want = [['Mute', 'Pin'], ['Profile', 'Copy friend ID', 'Add nickname'], ['Start a call'], ['Close DM'], ['Remove friend', 'Block']]
+  if (JSON.stringify(sections) !== JSON.stringify(want)) throw new Error('the DM menu is not as expected')
+  await b.ev(`document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`)
+  await until('a click elsewhere closes it', () => b.ev(`!document.querySelector('.context-menu')`), 5)
+  // A nickname, seen only here
+  await b.ev(rightClick(railDm))
+  await b.ev(item('Add nickname'))
+  await b.ev(`(() => { const i = document.querySelector('dialog[open] input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'Annie'); i.dispatchEvent(new Event('input', { bubbles: true })); i.form.requestSubmit() })()`)
+  await until('a nickname replaces her name on the rail and in the chat', () => b.ev(`!!document.querySelector('.rail-dm[aria-label^="Annie"]') && [...document.querySelectorAll('.msg .user')].some((u) => u.textContent === 'Annie')`), 5)
+  await b.ev(rightClick(`document.querySelector('.rail-dm[aria-label^="Annie"]')`))
+  await b.ev(item('Change nickname'))
+  await b.ev(`(() => { const i = document.querySelector('dialog[open] input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ''); i.dispatchEvent(new Event('input', { bubbles: true })); i.form.requestSubmit() })()`)
+  await until('an empty nickname gives her own name back', () => b.ev(`!!${railDm}`), 5)
+  // Close DM takes it off the rail until something new arrives, which then counts as unread
+  await b.ev(rightClick(railDm))
+  await b.ev(item('Close DM'))
+  await until('Close DM takes Ann off the rail and goes Home', () => b.ev(`!${railDm} && !!document.querySelector('main.home')`), 5)
+  await a.ev(say('are you there'))
+  await until("Ann's new message brings her back, with a count of 1", () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '1'`), 15)
+  await a.ev(say('hello?'))
+  await until('a second message makes it 2', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '2'`), 15)
   await sleep(400) // past the rail's and the page's transitions
   await b.shot('rail')
+  // A call that comes and goes while B is elsewhere counts too
+  await a.ev(press('Start call'))
+  await until('B sees Ann calling', () => b.ev(`!!${railDm}?.querySelector('.rail-badge')`), 15)
+  await a.ev(press('Leave call'))
+  await until('the missed call makes it 3', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '3'`), 15)
+  await b.ev(rightClick(railDm))
+  await b.ev(item('Mute'))
+  await until('muting hides the count', () => b.ev(`!!${railDm} && !${railDm}.querySelector('.rail-count')`), 5)
+  await b.ev(rightClick(railDm))
+  await b.ev(item('Unmute'))
+  await until('unmuting shows it again', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '3'`), 5)
+  await b.ev(`${railDm}.click()`)
+  await until('opening the DM reads it: the count is gone', () => b.ev(`!!document.querySelector('.chat-person') && !${railDm}.querySelector('.rail-count')`), 5)
 
   console.log('--- Voice call from the left sidebar')
+  const joinsBefore = (await sounds(a)).filter((x) => x === 'join').length // the missed call above played one
   await a.ev(press('Start call'))
   const sign = (p) => p.ev(`(() => { const s = document.querySelector('.signal'); const tip = document.getElementById('ping-tip'); document.querySelector('.signal-icon').focus(); return s ? [s.className, s.textContent.includes('Voice Connected'), tip.textContent, getComputedStyle(tip).display] : null })()`)
   const graded = (s) => !!s && /\b(good|fair|poor)\b/.test(s[0]) && s[1] && s[3] === 'block'
@@ -656,17 +695,17 @@ try {
   await until('A plays the caller tune while waiting, and B rings', async () => (await sounds(a)).includes('calling') && (await sounds(b)).includes('ring'), 10)
   await b.ev(press('Join call'))
   await until('A connected to Bob', () => a.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Bob')`))
-  await until('A hears Bob join (its own join, then his)', async () => (await sounds(a)).filter((x) => x === 'join').length === 2, 10)
+  await until('A hears Bob join (its own join, then his)', async () => (await sounds(a)).filter((x) => x === 'join').length === joinsBefore + 2, 10)
   await until('A sends voice ahead of video when the link is short of room', () =>
     a.ev(`(() => { const pc = window.__pcs.find((p) => p.connectionState === 'connected'); const e = pc?.getTransceivers().find((t) => t.receiver.track.kind === 'audio')?.sender.getParameters().encodings?.[0]; return e?.priority === 'high' && e?.networkPriority === 'high' })()`), 10)
   await until('B connected to Ann', () => b.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Ann')`))
   await b.ev(`document.querySelector('.caller.state-connected .caller-who').click()`)
-  await until('clicking Ann in the call opens her panel beside it: in your call, her volume, a message box', () => b.ev(pop((p) => p.textContent.includes('In your call') && !!p.querySelector('.pop-volume input[type=range]') && !!p.querySelector('.pop-note input'))), 5)
+  await until('clicking Ann in the call opens her panel beside it: in your call, her volume, a message box', () => b.ev(pop((p) => /in your call/i.test(p.textContent) && !!p.querySelector('.pop-volume input[type=range]') && !!p.querySelector('.pop-note input'))), 5)
   await sleep(400)
   await b.shot('profile-panel-call')
   await b.ev(escape)
   await b.ev(`[...document.querySelectorAll('.oculus-who')].find((x) => x.getAttribute('aria-label').includes('Ann')).click()`)
-  await until('so does her picture above the chat', () => b.ev(pop((p) => p.textContent.includes('In your call'))), 5)
+  await until('so does her picture above the chat', () => b.ev(pop((p) => /in your call/i.test(p.textContent))), 5)
   await b.ev(escape)
   const both = await until('A sign now measures the link to Bob', async () => {
     const s = await sign(a)

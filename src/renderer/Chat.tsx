@@ -138,6 +138,7 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
     const prev = all[i - 1]?.m
     const newDay = !prev || !sameDay(prev.ts, m.ts)
     if (newDay) rows.push(<DayRule key={'d' + m.ts} ts={m.ts} />)
+    if (st.blocked.includes(m.author)) return void rows.push(<p key={m.author + m.seq} className="msg-blocked">A message from someone you blocked</p>)
     const continued = !first && !newDay
     const mine = m.author === st.me
     const pending = mine && m.seq > acked
