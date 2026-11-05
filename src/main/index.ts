@@ -162,7 +162,7 @@ function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (
   const bungie = createBungie({
     dir,
     config: bungieConfig,
-    fetch: (url, init) => net.fetch(url, init),
+    fetch: (url, init) => net.fetch(url, { ...init, signal: AbortSignal.timeout(15000) }),
     open: testBungie ? (url) => fetch(url) : (url) => shell.openExternal(url),
     seal: (t) => (safeStorage.isEncryptionAvailable() ? `safe:${safeStorage.encryptString(t).toString('base64')}` : t),
     unseal: (t) => (t.startsWith('safe:') ? safeStorage.decryptString(Buffer.from(t.slice(5), 'base64')) : t),
@@ -190,7 +190,7 @@ function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (
     if (on() && !running) {
       running = true
       if (fake) (game = { ...JSON.parse(fake), since: Date.now() - 60000 }), send(), watchDestiny()
-      else watcher = watchActivity({ settings: () => node.state().settings.activity, onGame: (g) => ((game = g), send(), watchDestiny()), fetch: (url) => net.fetch(url), diag })
+      else watcher = watchActivity({ settings: () => node.state().settings.activity, onGame: (g) => ((game = g), send(), watchDestiny()), fetch: (url) => net.fetch(url, { signal: AbortSignal.timeout(10000) }), diag })
       gsi.update().catch(() => {})
     } else if (!on() && running) {
       running = false
@@ -234,7 +234,7 @@ function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (
     const file = join(cache, createHash('sha256').update(url).digest('hex').slice(0, 32))
     const type = url.endsWith('.png') ? 'image/png' : 'image/jpeg'
     if (existsSync(file)) return new Response(readFileSync(file), { headers: { 'content-type': type } })
-    const res = await net.fetch(url).catch(() => null)
+    const res = await net.fetch(url, { signal: AbortSignal.timeout(15000) }).catch(() => null)
     const ct = res?.headers.get('content-type') ?? ''
     if (!res?.ok || !/^image\/(jpeg|png|webp)/.test(ct)) return new Response(null, { status: 404 })
     const body = Buffer.from(await res.arrayBuffer())

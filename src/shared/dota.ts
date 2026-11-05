@@ -1,6 +1,7 @@
 // Dota 2's Game State Integration (docs/roadmap-activity.md, step 3): like CS2's, the game POSTs JSON to our local
 // server (src/main/gsi.ts). While we play it describes only us and our hero; while spectating it describes everyone,
 // and then only the match itself is taken, since none of those heroes is ours.
+import { num } from './clean'
 
 type Side = 'radiant' | 'dire'
 export type Dota = {
@@ -47,7 +48,6 @@ export function shareableDota(d: Dota, set: DotaSettings | undefined): Dota {
   return out
 }
 
-const num = (v: unknown, max = 1e6) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= max ? Math.round(v) : undefined)
 const name = (v: unknown) => (typeof v === 'string' && /^[a-z0-9_]{1,60}$/.test(v) ? v : undefined)
 const side = (v: unknown) => (v === 'radiant' || v === 'dire' ? v : undefined)
 const second = (t: number) => Math.round(t / 1000) * 1000

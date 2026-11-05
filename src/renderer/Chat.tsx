@@ -48,7 +48,7 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
     })
     return api.on((e) => {
       if (e.type === 'msg' && e.m.conv === conv) {
-        setMsgs((m) => [...m, e.m])
+        setMsgs((m) => [...m, e.m].slice(-(limit + PAGE))) // a chat left open in a busy group keeps a bounded window
         setTotal((t) => t + 1)
       }
       if (e.type === 'acked' && e.conv === conv) setAcked(e.seq)

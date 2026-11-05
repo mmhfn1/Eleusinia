@@ -2,6 +2,7 @@ import type { Key } from './protocol'
 import { type Cs2, type Cs2Settings, cleanCs2, shareableCs2 } from './cs2'
 import { BUNGIE_PATH, type Destiny, type DestinySettings, cleanDestiny, shareableDestiny } from './destiny'
 import { type Dota, type DotaSettings, cleanDota, shareableDota } from './dota'
+import { str } from './clean'
 
 // What someone is doing, shared with friends and group members only (docs/roadmap-activity.md). Pictures are never
 // sent as links: a card names a Steam app id or an achievement's icon file, and the receiving app builds the address
@@ -64,7 +65,6 @@ export function shareable(a: Activity, set: ActivitySettings | undefined): Activ
   return { now: a.now, game: g }
 }
 
-const str = (v: unknown, max: number) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined)
 const int = (v: unknown, min: number, max: number) => (Number.isSafeInteger(v) && (v as number) >= min && (v as number) <= max ? (v as number) : undefined)
 const DAY = 864e5
 

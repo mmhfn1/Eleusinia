@@ -2,6 +2,7 @@
 // server (src/main/cs2.ts) as things change. This turns one payload into what a friend's card shows, and checks what a
 // friend sends. While we play, the game only describes us (and, when we are dead, whoever we are watching: those
 // numbers are not ours, so they are left out); the whole scoreboard only comes while spectating.
+import { num } from './clean'
 
 export type Cs2 = {
   menu?: boolean // in the main menu, not in a match
@@ -36,7 +37,6 @@ export function shareableCs2(c: Cs2, set: Cs2Settings | undefined): Cs2 {
   return out
 }
 
-const num = (v: unknown, max = 1e6) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= max ? Math.round(v) : undefined)
 const word = (v: unknown, max = 40) => (typeof v === 'string' && /^[\w-]{1,40}$/.test(v) ? v.slice(0, max) : undefined)
 const team = (v: unknown) => (v === 'CT' || v === 'T' ? v : undefined)
 

@@ -238,9 +238,9 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
           </span>
         </label>
         <label className="check-row">
-          <input type="checkbox" role="switch" checked={!!st.settings.relay} onChange={(e) => api.call('setSettings', { relay: e.target.checked })} />
+          <input type="checkbox" role="switch" checked={st.settings.relay !== false} onChange={(e) => api.call('setSettings', { relay: e.target.checked })} />
           <span>
-            Relay for friends who cannot connect to each other directly (experimental). Uses some of your bandwidth; you can
+            Relay for friends who cannot connect to each other directly. Uses a little of your bandwidth; you can
             see when they talk, never what they say. Voice, text and pictures only
           </span>
         </label>

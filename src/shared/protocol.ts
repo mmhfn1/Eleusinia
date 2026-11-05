@@ -50,7 +50,7 @@ export type Settings = {
   crashReports?: boolean // send crash reports to the developers automatically; on unless turned off
   closeToTray?: boolean // closing the window keeps Eleusinia running in the tray; on unless turned off
   noiseSuppression?: boolean // RNNoise on the microphone; on unless turned off
-  relay?: boolean // relay for mutual friends who cannot link directly; off unless turned on (being reached through one is always on)
+  relay?: boolean // relay for mutual friends who cannot link directly; on unless turned off (being reached through one is always on)
   cacheMB?: number // how much room downloaded pictures may take before the oldest are deleted (DEFAULT_CACHE_MB)
   suggest?: boolean // be suggested to people typing the start of our username (announced while online); off unless turned on
   activity?: ActivitySettings // what we are playing, shared with friends and group members (shared/activity.ts); off unless turned on

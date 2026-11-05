@@ -1,6 +1,7 @@
 // Destiny 2 through the Bungie.net API (docs/roadmap-activity.md, step 7): with the user's account linked
 // (src/main/bungie.ts), their profile is read while the game runs and turned here into what a friend's card shows.
 // Names and pictures come from Bungie's Manifest, one definition at a time (`neededDefs`, then `destinyOf`).
+import { num, str } from './clean'
 
 export type DestinyItem = { name: string; icon: string; kind: string; exotic: boolean }
 export type Destiny = {
@@ -40,8 +41,7 @@ export function shareableDestiny(d: Destiny, set: DestinySettings | undefined): 
 // Pictures are bungie.net paths, only from Destiny's icon and activity picture folders (shared/activity.ts artUrl).
 export const BUNGIE_PATH = /^\/(?:common\/destiny2_content\/icons|img\/destiny_content\/pgcr)\/[\w-]{1,120}\.(?:jpg|png)$/
 const path = (v: unknown) => (typeof v === 'string' && BUNGIE_PATH.test(v) ? v : undefined)
-const text = (v: unknown, max = 100) => (typeof v === 'string' && v.trim() ? v.trim().slice(0, max) : undefined)
-const num = (v: unknown, max = 1e6) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= max ? Math.round(v) : undefined)
+const text = (v: unknown, max = 100) => str(v, max)
 
 // Where equipped items sit (DestinyInventoryBucketDefinition hashes, stable across versions).
 const SUBCLASS = 3284755031
