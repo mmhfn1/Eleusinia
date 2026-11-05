@@ -4,4 +4,10 @@ dist/
 *.log
 build/*.preview.png
 .env*.local
+# claude-mem skill output
 PATHFINDER-*/
+DESIGN-IS-*/
+PLAN-*.md
+HANDOFF.md
+STANDUP.md
+.scratch/

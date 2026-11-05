@@ -64,6 +64,7 @@ const ICONS: Record<string, ReactNode> = {
     </>
   ),
   expand: <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />,
+  chevron: <path d="m6 9 6 6 6-6" />,
   collapse: <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" />,
   volume: (
     <>
@@ -81,6 +82,18 @@ const ICONS: Record<string, ReactNode> = {
     <>
       <rect x="2.5" y="6" width="13" height="12" rx="2" />
       <path d="M15.5 10.5 21.5 7v10l-6-3.5" />
+    </>
+  ),
+  cameraOff: (
+    <>
+      <path d="M15.5 13v3a2 2 0 0 1-2 2h-9a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h1.5M9.5 6h4a2 2 0 0 1 2 2v2.5L21.5 7v10" />
+      <path d="M3 3l18 18" />
+    </>
+  ),
+  screenOff: (
+    <>
+      <path d="M8 4h11.5A1.5 1.5 0 0 1 21 5.5V15M17 16H4.5A1.5 1.5 0 0 1 3 14.5v-9A1.5 1.5 0 0 1 4 4" />
+      <path d="M8 20h8M12 16v4M3 3l18 18" />
     </>
   ),
   info: (

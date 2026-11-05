@@ -455,12 +455,25 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   // Anyone can be reached through a relaying friend; only relaying for others is the setting.
   const need = (k: Key) => void (k !== me && !net.linked(k) && !demand.has(k) && demand.set(k, Date.now()))
 
+  // A signed change to a group's name or picture, merged here and spread to every member.
+  function editGroup(id: string, next: (g: Group) => { name: string; avatar: string }) {
+    const g = Object.hasOwn(s.groups, id) ? s.groups[id] : undefined
+    if (!g || !g.members.includes(me)) throw new Error('You are not in that group')
+    const { name, avatar } = next(g)
+    const { avatar: _old, ...rest } = g
+    const look = { id, name, ...(avatar && { avatar }), updatedAt: Math.max(Date.now(), g.updatedAt + 1) }
+    s.groups[id] = mergeGroup(g, { ...rest, ...look, edit: signEdit(look, keyPair) })
+    changed()
+    spread(s.groups[id])
+  }
+  // Doubling waits after each failure, capped at 20 times the first.
+  const later = (n: number, base: number) => Date.now() + base * Math.min(2 ** (n - 1), 20)
   function relayFailed(k: Key, by?: Key) {
     attempting.delete(k)
     pendingVia.delete(k)
     const n = (fails.get(k) ?? 0) + 1
     fails.set(k, n)
-    retryAt.set(k, Date.now() + RETRY * Math.min(2 ** (n - 1), 20))
+    retryAt.set(k, later(n, RETRY))
     if (by) avoid.set(by + k, Date.now() + 600000)
   }
   // Ask up to 3 relaying contacts, the last one that worked first; dial through the first that says yes.
@@ -507,7 +520,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     }
   }
   async function applyRelay() {
-    relayKey = await net.setRelay(!!s.settings.relay, known, relayLimits ?? RELAY_LIMITS)
+    relayKey = await net.setRelay(s.settings.relay !== false, known, relayLimits ?? RELAY_LIMITS)
     for (const k of net.keys()) if (wants(k)) hi(k)
   }
 
@@ -595,7 +608,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const due = (k: Key) => !!relayKey || (retries.get(k)?.next ?? 0) <= Date.now()
   function backOff(k: Key) {
     const n = (retries.get(k)?.n ?? 0) + 1
-    retries.set(k, { n, next: Date.now() + Math.min(redialMs * 2 ** (n - 1), redialMs * 20) })
+    retries.set(k, { n, next: later(n, redialMs) })
   }
   const redial = () => {
     relayTick()
@@ -877,14 +890,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     },
     // A new picture for a group (or '' to go back to its letter), told to every member like any other change.
     setGroupPicture(id: string, avatar: string) {
-      const g = Object.hasOwn(s.groups, id) ? s.groups[id] : undefined
-      if (!g || !g.members.includes(me)) throw new Error('You are not in that group')
       if (avatar !== '' && !isPicture(avatar)) throw new Error('That picture cannot be used')
-      const { avatar: _old, ...rest } = g
-      const look = { id, name: g.name, ...(avatar && { avatar }), updatedAt: Math.max(Date.now(), g.updatedAt + 1) }
-      s.groups[id] = mergeGroup(g, { ...rest, ...look, edit: signEdit(look, keyPair) })
-      changed()
-      spread(s.groups[id])
+      editGroup(id, (g) => ({ name: g.name, avatar }))
+    },
+    // A new name, signed and spread like a picture change; any member may rename, as any may change the picture.
+    renameGroup(id: string, name: string) {
+      const n = typeof name === 'string' ? name.trim().slice(0, 100) : ''
+      if (!n) throw new Error('A group needs a name')
+      editGroup(id, (g) => ({ name: n, avatar: g.avatar ?? '' }))
     },
     addToGroup(id: string, key: Key) {
       const g = Object.hasOwn(s.groups, id) ? s.groups[id] : undefined
@@ -999,12 +1012,12 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       pushSoon()
     },
     async setSettings(p: Partial<Settings>) {
-      const was = !!s.settings.relay
+      const was = s.settings.relay !== false
       Object.assign(s.settings, p)
       changed()
       if (p.activity) shareActivity()
       if (p.cacheMB !== undefined) files.trim()
-      if (was !== !!s.settings.relay) await applyRelay(), push()
+      if (was !== (s.settings.relay !== false)) await applyRelay(), push()
       if (p.suggest) announce().catch(() => {}) // turned off, the announcements lapse within about 20 minutes
     },
     // Queues a problem or crash report for the developers. It is checked and scrubbed here (shared/reports.ts) as

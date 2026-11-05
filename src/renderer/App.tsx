@@ -28,6 +28,25 @@ export default function App() {
     t.forward = []
     setSel(c)
   }
+  // Direct conversations go on the rail when opened, newest on top, and stay there (per computer) until removed.
+  const [dms, setDms] = useState<string[]>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem(RAIL_DMS) ?? '[]')
+      return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []
+    } catch {
+      return []
+    }
+  })
+  const keepDms = (next: string[]) => {
+    setDms(next)
+    try {
+      localStorage.setItem(RAIL_DMS, JSON.stringify(next))
+    } catch {}
+  }
+  useEffect(() => {
+    if (st && sel?.includes('_') && !st.groups[sel] && !dms.includes(sel)) keepDms([sel, ...dms].slice(0, 30))
+  }, [sel, !!st])
+  const dropDm = (c: string) => keepDms(dms.filter((x) => x !== c))
   useEffect(() => {
     const step = (e: MouseEvent) => {
       if (e.button !== 3 && e.button !== 4) return
@@ -42,7 +61,7 @@ export default function App() {
     return () => window.removeEventListener('mouseup', step)
   }, [])
 
-  // Ctrl K opens the Eleusinia menu from anywhere, ready to type where to go.
+  // Ctrl K (Cmd K) also opens the Eleusinia menu from anywhere: an unadvertised shortcut, kept for those who find it.
   useEffect(() => {
     const key = (e: globalThis.KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') e.preventDefault(), setModal((m) => (m?.kind === 'menu' ? null : { kind: 'menu' }))
@@ -101,6 +120,7 @@ export default function App() {
   }
   // A conversation that no longer exists (friend removed) falls back to Home.
   const open = sel && (st.groups[sel] || st.friends[sel.split('_').find((k) => k !== st.me)!] === 'friend') ? sel : null
+  const railDms = dms.filter((c) => st.friends[c.split('_').find((k) => k !== st.me)!] === 'friend')
 
   const place = open ? (st.groups[open] ? groupName(st.groups[open]) : people.name(open.split('_').find((k) => k !== st.me)!)) : 'Friends'
   const callAway = call.conv && call.conv !== open ? call.conv : null
@@ -112,7 +132,7 @@ export default function App() {
     <>
     <TitleBar place={place} call={callAway ? { name: callName!, back: () => go(callAway) } : undefined} />
     <div className="app">
-      <Rail st={st} open={open} go={go} show={setModal} />
+      <Rail st={st} people={people} open={open} go={go} show={setModal} dms={railDms} drop={dropDm} />
       {open ? (
         <Conversation key={open} st={st} conv={open} people={people} run={run} home={() => go(null)} />
       ) : (
@@ -184,6 +204,8 @@ export default function App() {
 
 // The window's own title bar: where you are, a way back to a call you are in elsewhere, and the window buttons. The
 // strip itself drags the window (and double-click maximizes, as Windows does); the buttons opt out of dragging.
+const RAIL_DMS = 'rail-dms'
+
 function TitleBar({ place, call: live }: { place: string; call?: { name: string; back: () => void } }) {
   const [max, setMax] = useState(false)
   useEffect(() => {
@@ -221,7 +243,9 @@ function TitleBar({ place, call: live }: { place: string; call?: { name: string;
 }
 
 // The narrow rail on the far left: identity, Home, each group, and the global actions.
-function Rail({ st, open, go, show }: { st: State; open: string | null; go: (c: string | null) => void; show: (m: Modal) => void }) {
+// dms: direct conversations opened before, on the rail until right-clicked away (drop).
+type RailProps = { st: State; people: People; open: string | null; go: (c: string | null) => void; show: (m: Modal) => void; dms: string[]; drop: (c: string) => void }
+function Rail({ st, people, open, go, show, dms, drop }: RailProps) {
   const [tip, setTip] = useState<{ text: string; top: number } | null>(null)
   const homeActive = !open || !st.groups[open]
   // Tooltips are drawn outside the rail so its scrolling list cannot clip them.
@@ -238,11 +262,36 @@ function Rail({ st, open, go, show }: { st: State; open: string | null; go: (c: 
   )
   return (
     <nav className="rail" aria-label="Main">
-      <button className="rail-mark" aria-label="Eleusinia menu" aria-haspopup="dialog" onClick={() => show({ kind: 'menu' })} {...tipFor('Eleusinia menu (Ctrl K)')}>
+      <button
+        className={`rail-mark ${homeActive && !open ? 'active' : ''}`}
+        aria-label="Home: friends and direct messages"
+        aria-current={!open ? 'page' : undefined}
+        onClick={() => go(null)}
+        onContextMenu={(e) => (e.preventDefault(), show({ kind: 'menu' }))}
+        {...tipFor('Home')}
+      >
         <Emblem size={42} />
       </button>
-      {item('Home: friends and direct messages', homeActive, () => go(null), <Icon name="home" size={20} />)}
       <div className="rail-groups">
+        {dms.map((c) => {
+          const k = c.split('_').find((x) => x !== st.me)!
+          const label = `${people.name(k)}${call.active.get(c)?.size || call.conv === c ? ' (call in progress)' : ''}`
+          return (
+            <button
+              key={c}
+              className={`rail-item rail-dm ${open === c ? 'active' : ''}`}
+              aria-label={label}
+              aria-current={open === c ? 'page' : undefined}
+              onClick={() => go(c)}
+              onContextMenu={(e) => (e.preventDefault(), drop(c))}
+              {...tipFor(label)}
+            >
+              <Avatar k={k} p={people.prof(k)} size={34} online={people.isOnline(k)} />
+              {(call.active.get(c)?.size || call.conv === c) && <span className="rail-badge" aria-hidden="true" />}
+            </button>
+          )
+        })}
+        {dms.length > 0 && <span className="rail-sep" aria-hidden="true" />}
         {Object.values(st.groups).map((g) =>
           item(
             `${groupName(g)}${call.active.get(g.id)?.size || call.conv === g.id ? ' (call in progress)' : ''}`,
@@ -914,7 +963,6 @@ function Menu({ st, people, close, go, report }: { st: State; people: People; cl
             aria-label="Go to a friend or group"
             placeholder="Go to a friend or group"
           />
-          <kbd>Ctrl K</kbd>
         </div>
         {hits.map((h) => (
           <button key={h.id} className="menu-item" onClick={() => pick(h.id)}>
@@ -962,6 +1010,41 @@ function Menu({ st, people, close, go, report }: { st: State; people: People; cl
 type ConvProps = { st: State; conv: string; people: People; run: Run; home: () => void }
 
 // A group or direct chat: the voice chamber on the left, text in the middle, group members on the right.
+// A group's name, renamed in place: click it, type, Enter or click away saves, Escape keeps the old name.
+function GroupName({ g, run }: { g: Group; run: Run }) {
+  const [draft, setDraft] = useState<string | null>(null)
+  const done = useRef(false)
+  const finish = (keep: boolean) => {
+    if (done.current || draft === null) return
+    done.current = true
+    const n = draft.trim()
+    setDraft(null)
+    if (keep && n && n !== g.name) run(api.call('renameGroup', g.id, n))
+  }
+  if (draft === null)
+    return (
+      <h1>
+        <button className="group-name" title="Rename the group" onClick={() => ((done.current = false), setDraft(g.name))}>
+          {groupName(g)}
+        </button>
+      </h1>
+    )
+  return (
+    <h1>
+      <input
+        className="group-name-edit"
+        autoFocus
+        value={draft}
+        maxLength={100}
+        aria-label="Group name"
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => (e.key === 'Enter' ? finish(true) : e.key === 'Escape' && (e.stopPropagation(), finish(false)))}
+        onBlur={() => finish(true)}
+      />
+    </h1>
+  )
+}
+
 function Conversation({ st, conv, people, run, home }: ConvProps) {
   const [shareDialog, setShareDialog] = useState(false)
   const [picking, setPicking] = useState<File | null>(null)
@@ -1026,7 +1109,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
                 }}
               />
             </label>
-            <h1>{title}</h1>
+            <GroupName g={group} run={run} />
             {group.avatar && (
               <button className="button subtle" onClick={() => run(api.call('setGroupPicture', conv, ''))}>
                 Remove picture
@@ -1112,9 +1195,9 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
                 {control(call.muted || call.deafened ? 'Unmute' : 'Mute', call.muted || call.deafened ? 'micOff' : 'mic', call.toggleMute, call.muted || call.deafened)}
                 {control(call.deafened ? 'Undeafen' : 'Deafen', call.deafened ? 'headphonesOff' : 'headphones', call.toggleDeafen, call.deafened)}
                 {control(call.sharing() ? 'Stream settings' : 'Share screen', 'screen', () => setShareDialog(true), !!call.sharing())}
-                {call.sharing() && control('Stop sharing', 'close', () => call.stopShare())}
+                {call.sharing() && control('Stop sharing', 'screenOff', () => call.stopShare())}
                 {control(call.filming() ? 'Camera settings' : 'Turn on camera', 'camera', () => setCameraDialog(true), !!call.filming())}
-                {call.filming() && control('Turn off camera', 'close', call.stopCamera)}
+                {call.filming() && control('Turn off camera', 'cameraOff', call.stopCamera)}
                 {control('Leave call', 'phone', call.leave, undefined, 'leave')}
               </div>
               {shareDialog && <ShareDialog close={() => setShareDialog(false)} />}
@@ -1142,7 +1225,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
           inCall ? (
             <>
               <Oculus st={st} name={name} show={show} />
-              <Stage name={name} settings={() => setShareDialog(true)} />
+              <Stage st={st} name={name} settings={() => setShareDialog(true)} />
             </>
           ) : ringing ? (
             <RingBar conv={conv} who={other} st={st} name={name} join={(muted) => run(call.join(conv).then(() => muted && !call.muted && call.toggleMute()))} />

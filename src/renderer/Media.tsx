@@ -1,5 +1,5 @@
 // Calls on screen: the voice panel's pieces, screen sharing and camera dialogs, and the stage that shows videos.
-import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react'
+import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
 import { usable } from '../shared/devices'
 import { type Key, type State } from '../shared/protocol'
 import type { Steadiness } from '../shared/quality'
@@ -154,6 +154,13 @@ export function ShareDialog({ close }: { close: () => void }) {
   }, [])
   const viewers = [...call.peers.values()].filter((p) => p.pc.connectionState === 'connected').length
   const kbps = src && q ? streamKbps(src, q) + (sound ? SOUND_KBPS : 0) : 0
+  // A stream that would strain the call is warned about as it is chosen, so one click still starts it.
+  useEffect(() => {
+    if (current || !src || !q) return
+    let live = true
+    call.checkStream('screen', src, q, sound).then((v) => live && setVerdict(v), () => {})
+    return () => void (live = false)
+  }, [src?.id, q?.height, q?.fps, sound])
   // A new share starts at the default; switching keeps the quality already chosen, as far as the new source allows.
   const pick = (s: call.ScreenSource) => {
     setPicked(s)
@@ -172,12 +179,7 @@ export function ShareDialog({ close }: { close: () => void }) {
     try {
       if (current && (src.id !== current.src.id || sound !== current.sound)) await call.switchShare(src, q, sound)
       else if (current) await call.setQuality(q)
-      else {
-        // A stream that would strain the call is warned about once; pressing again shares anyway.
-        const v = verdict ?? (await call.checkStream('screen', src, q, sound))
-        if (!v.ok && !verdict) return setVerdict(v)
-        await call.startShare(src, q, sound)
-      }
+      else await call.startShare(src, q, sound)
       close()
     } catch (e: any) {
       setErr(`Sharing could not start: ${String(e?.message ?? e)}`)
@@ -288,7 +290,7 @@ export function ShareDialog({ close }: { close: () => void }) {
           Cancel
         </button>
         <button type="button" className="button primary" disabled={!src || !q || busy} onClick={go}>
-          {busy ? (current ? 'Applying…' : 'Checking…') : !current ? (verdict ? 'Share anyway' : 'Share') : src && src.id !== current.src.id ? 'Switch' : 'Apply'}
+          {busy ? (current ? 'Applying…' : 'Starting…') : !current ? (verdict && !verdict.ok ? 'Share anyway' : 'Share') : src && src.id !== current.src.id ? 'Switch' : 'Apply'}
         </button>
       </div>
     </Dialog>
@@ -324,6 +326,12 @@ export function CameraDialog({ st, close }: { st: State; close: () => void }) {
   const preview = useRef<MediaStreamTrack | null>(null)
   const closed = useRef(false)
   const viewers = [...call.peers.values()].filter((p) => p.pc.connectionState === 'connected').length
+  useEffect(() => {
+    if (current || !cam || !q) return
+    let live = true
+    call.checkStream('camera', cam.src, q).then((v) => live && setVerdict(v), () => {})
+    return () => void (live = false)
+  }, [cam?.src.id, q?.height, q?.fps])
 
   // Opens a camera for the preview; the one in use is shown as it is.
   async function open(id: string) {
@@ -363,10 +371,6 @@ export function CameraDialog({ st, close }: { st: State; close: () => void }) {
     setErr('')
     try {
       const switching = !!current && cam.src.id !== current.src.id
-      if (!current) {
-        const v = verdict ?? (await call.checkStream('camera', cam.src, q))
-        if (!v.ok && !verdict) return setVerdict(v) // warned once; pressing again turns it on anyway
-      }
       handed.current = true
       await call.useCamera(cam.track, cam.src, q)
       if (switching) preview.current = null
@@ -435,11 +439,16 @@ export function CameraDialog({ st, close }: { st: State; close: () => void }) {
         </p>
       )}
       <div className="form-actions">
+        {current && (
+          <button type="button" className="button danger" onClick={() => (call.stopCamera(), close())}>
+            Turn off camera
+          </button>
+        )}
         <button type="button" className="button" onClick={close}>
           Cancel
         </button>
         <button type="button" className="button primary" disabled={!cam || !q || busy} onClick={go}>
-          {busy ? (current ? 'Applying…' : 'Checking…') : current ? 'Apply' : verdict ? 'Turn on anyway' : 'Turn on camera'}
+          {busy ? (current ? 'Applying…' : 'Starting…') : current ? 'Apply' : verdict && !verdict.ok ? 'Turn on anyway' : 'Turn on camera'}
         </button>
       </div>
     </Dialog>
@@ -447,9 +456,10 @@ export function CameraDialog({ st, close }: { st: State; close: () => void }) {
 }
 
 // volume: for a share with sound, a slider for how loud it plays here, beside the full screen button.
-type ScreenProps = { stream?: MediaStream; label: string; big?: boolean; mirror?: boolean; volume?: { value: number; set: (v: number) => void; name: string } }
+type ScreenProps = { stream?: MediaStream; label: string; big?: boolean; mirror?: boolean; volume?: { value: number; set: (v: number) => void; name: string }; children?: ReactNode }
 
-function Screen({ stream, label, big, mirror, volume }: ScreenProps) {
+// children: drawn inside the figure, over the bottom of the video (the people row), so they stay in full screen.
+function Screen({ stream, label, big, mirror, volume, children }: ScreenProps) {
   const ref = useRef<HTMLVideoElement>(null)
   const fig = useRef<HTMLElement>(null)
   // Follows the document rather than the button, so leaving full screen any other way (Esc, F11) shows up too.
@@ -488,6 +498,7 @@ function Screen({ stream, label, big, mirror, volume }: ScreenProps) {
     >
       <video ref={ref} autoPlay playsInline muted onDoubleClick={big ? toggle : undefined} />
       <figcaption>{label}</figcaption>
+      {children}
       {big && (
         <div className="screen-controls">
           {volume && (
@@ -545,10 +556,25 @@ type Item = { k: Key; slot: call.Slot }
 const itemId = (i: Item) => `${i.slot}:${i.k}`
 const GRID_FULL = 4 // up to this many cameras in the grid each get full quality; beyond it, thumbnails
 
-export function Stage({ name, settings }: { name: (k: Key) => string; settings: () => void }) {
+const PEOPLE_ROW = 'people-row-hidden' // remembered per computer: whether the people row under a stream is folded away
+
+export function Stage({ st, name, settings }: { st: State; name: (k: Key) => string; settings: () => void }) {
   const [focus, setFocus] = useState<string | null>(null)
   const [joined, setJoined] = useState<Key | null>(null)
   const [hidden, setHidden] = useState(false)
+  const [rowHidden, setRowHidden] = useState(() => {
+    try {
+      return localStorage.getItem(PEOPLE_ROW) === '1'
+    } catch {
+      return false
+    }
+  })
+  const foldRow = (v: boolean) => {
+    setRowHidden(v)
+    try {
+      localStorage.setItem(PEOPLE_ROW, v ? '1' : '0')
+    } catch {}
+  }
   const [away, setAway] = useState(document.hidden)
   const items: Item[] = [
     ...[...call.shares.keys()].map((k) => ({ k, slot: 'screen' as const })),
@@ -574,9 +600,14 @@ export function Stage({ name, settings }: { name: (k: Key) => string; settings: 
   const join = (k: Key) => (setJoined(k), setFocus(null))
   const live = (i: Item) => i.slot === 'camera' || i.k === watching
   const main = items.find((i) => itemId(i) === focus) ?? items.find((i) => i.slot === 'screen' && i.k === watching) ?? items.find((i) => i.slot === 'screen') ?? null
+  // A joined stream, or our own share with nothing else large, fills the stage with the people row along its bottom.
+  const theater = !!main && main.slot === 'screen' && live(main)
+  const ownBig = !main && !!mine
+  const row = theater || ownBig
   const level = (i: Item): Level => {
     if (!live(i)) return 'off'
     if (hidden || away) return i.slot === 'screen' ? 'audio' : 'off'
+    if (row && i.slot === 'camera') return rowHidden ? 'off' : 'thumb' // a folded row sends no cameras
     return !main ? (items.length <= GRID_FULL ? 'full' : 'thumb') : itemId(i) === itemId(main) ? 'full' : 'thumb'
   }
   useEffect(() => {
@@ -614,6 +645,31 @@ export function Stage({ name, settings }: { name: (k: Key) => string; settings: 
       )}
     </>
   )
+  // Everyone in the call, us last: their camera when it is on, otherwise their picture with the speaking ring.
+  const person = (k: Key) => {
+    const own = k === st.me
+    const stream = own ? cam?.stream : call.cameras.has(k) ? media({ k, slot: 'camera' }) : undefined
+    return (
+      <div key={k} className={`person-tile ${call.speaking.has(k) ? 'speaking' : ''}`}>
+        {stream ? <Screen stream={stream} label={own ? 'You' : name(k)} mirror={own} /> : <Avatar k={k} p={(own ? st.profile : st.profiles[k]) ?? { handle: '', name: '', about: '', avatar: '' }} size={34} />}
+        {!stream && <span className="person-name">{own ? 'You' : name(k)}</span>}
+      </div>
+    )
+  }
+  const people = (
+    <div className={`people-row ${rowHidden ? 'folded' : ''}`}>
+      <button className="people-toggle" aria-expanded={!rowHidden} aria-label={rowHidden ? 'Show the people in the call' : 'Hide the people in the call'} onClick={() => foldRow(!rowHidden)}>
+        <Icon name="chevron" size={14} />
+      </button>
+      {!rowHidden && (
+        <div className="people-tiles">
+          {[...call.peers.keys()].map(person)}
+          {person(st.me)}
+        </div>
+      )}
+    </div>
+  )
+  const others = items.filter((i) => i.slot === 'screen' && (!main || itemId(i) !== itemId(main))) // other shares, beside the stage
   const count = items.length
   return (
     <section className={`stage ${hidden ? 'collapsed' : ''}`} aria-label="Shared screens and cameras">
@@ -636,6 +692,11 @@ export function Stage({ name, settings }: { name: (k: Key) => string; settings: 
         {mine && (
           <button className="button danger" onClick={() => call.stopShare()}>
             Stop sharing
+          </button>
+        )}
+        {cam && (
+          <button className="button" onClick={call.stopCamera}>
+            <Icon name="cameraOff" size={16} /> Turn off camera
           </button>
         )}
         {focus && main && !items.some((i) => i.slot === 'screen') && (
@@ -663,15 +724,23 @@ export function Stage({ name, settings }: { name: (k: Key) => string; settings: 
           big
           mirror={false}
           volume={main.slot === 'screen' && info(main).sound ? { value: call.streamVolumeOf(main.k), set: (v) => call.setStreamVolume(main.k, v), name: name(main.k) } : undefined}
-        />
+        >
+          {theater && people}
+        </Screen>
       )}
-      {!hidden && main && (items.length > 1 || mine || cam) && (
+      {!hidden && ownBig && (
+        <Screen stream={mine!.stream} label="Your screen" big>
+          {people}
+        </Screen>
+      )}
+      {!hidden && row && others.length > 0 && <div className="stage-strip">{others.map(tile)}</div>}
+      {!hidden && main && !theater && (items.length > 1 || mine || cam) && (
         <div className="stage-strip">
           {items.filter((i) => itemId(i) !== itemId(main)).map(tile)}
           {ownTiles}
         </div>
       )}
-      {!hidden && !main && (
+      {!hidden && !main && !ownBig && (
         <div className="video-grid">
           {items.map(tile)}
           {mine && <Screen stream={mine.stream} label="Your screen (preview)" />}

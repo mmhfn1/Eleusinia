@@ -151,7 +151,7 @@ async function until(label, fn, secs = 90) {
 // Goes Home first, since friends and groups are only listed there, and waits for the row: the Home list
 // is drawn after the click returns.
 const open = (text) => `(async () => {
-  document.querySelector('.rail-item[aria-label^="Home"]')?.click()
+  document.querySelector('.rail-mark')?.click()
   for (let i = 0; i < 50; i++) {
     const row = [...document.querySelectorAll('.row-button')].find(x => x.textContent.includes('${text}'))
     if (row) return row.click()
@@ -613,7 +613,7 @@ try {
   await until('clicking her in the voice sidebar opens the same panel', () => b.ev(annPop), 5)
   await b.ev(`document.querySelector('.msgs').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`)
   await until('a click elsewhere closes it', () => b.ev(`!document.querySelector('.profile-pop')`), 5)
-  await b.ev(`document.querySelector('.rail-item[aria-label^="Home"]').click()`)
+  await b.ev(`document.querySelector('.rail-mark').click()`)
   await b.ev(`[...document.querySelectorAll('.online .row-button')].find((x) => x.textContent.includes('Ann')).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
   await until('right-clicking Ann in the friends list opens the same panel', () => b.ev(annPop), 5)
   await b.ev(escape)
@@ -625,6 +625,23 @@ try {
   await until('mouse 4 goes back: Home', () => b.ev(`!!document.querySelector('main.home')`), 5)
   await b.ev(mouse(4))
   await until('mouse 5 goes forward: the DM again', () => b.ev(`!!document.querySelector('.chat-person')`), 5)
+
+  console.log('--- Rail: direct conversations and the emblem')
+  const railDm = `document.querySelector('.rail-dm[aria-label^="Ann"]')`
+  await until('the DM with Ann, opened earlier, sits on the rail', () => b.ev(`!!${railDm}`), 5)
+  await b.ev(`document.querySelector('.rail-mark').click()`)
+  await until('clicking the emblem goes Home, and it is marked as where we are', () => b.ev(`!!document.querySelector('main.home') && document.querySelector('.rail-mark').classList.contains('active')`), 5)
+  await b.ev(`${railDm}.click()`)
+  await until("clicking Ann on the rail opens the DM", () => b.ev(`!!document.querySelector('.chat-person') && ${railDm}.classList.contains('active')`), 5)
+  await b.ev(`document.querySelector('.rail-mark').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+  await until('right-clicking the emblem opens its menu, with no shortcut advertised', () => b.ev(`!!document.querySelector('dialog[open].menu-dialog') && !document.querySelector('dialog[open].menu-dialog kbd') && !document.querySelector('.rail-tip')?.textContent.includes('Ctrl')`), 5)
+  await b.ev(`document.querySelector('dialog[open].menu-dialog').close()`)
+  await b.ev(`${railDm}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+  await until('right-clicking the DM on the rail removes it', () => b.ev(`!${railDm}`), 5)
+  await b.ev(open('Ann'))
+  await until('opening the DM again puts it back', () => b.ev(`!!${railDm}`), 5)
+  await sleep(400) // past the rail's and the page's transitions
+  await b.shot('rail')
 
   console.log('--- Voice call from the left sidebar')
   await a.ev(press('Start call'))
@@ -702,6 +719,24 @@ try {
   await b.ev(`${fullBtn}.click()`)
   await until('the same button exits', () => b.ev(`!document.fullscreenElement && ${fullBtn}.getAttribute('aria-label') === 'Full screen'`), 5)
   await until('A sees that it is sharing, with a stop button', () => a.ev(`document.querySelector('.stage .sharing-badge')?.textContent.includes('You are sharing') && !!document.querySelector('.stage .button.danger')`))
+  const peopleRow = `document.querySelector('.stage .screen.big .people-row')`
+  await until("under the stream, B sees a tile for each person in the call: Ann and itself", () => b.ev(`${peopleRow}?.querySelectorAll('.person-tile').length === 2`), 5)
+  await until('A, sharing, sees its own screen large with the same row', () => a.ev(`${peopleRow}?.querySelectorAll('.person-tile').length === 2`), 5)
+  await b.ev(`${peopleRow}.querySelector('.people-toggle').click()`)
+  await until('the button folds the row away', () => b.ev(`${peopleRow}.classList.contains('folded') && !${peopleRow}.querySelector('.person-tile')`), 5)
+  await b.ev(`${peopleRow}.querySelector('.people-toggle').click()`)
+  await until('and brings it back', () => b.ev(`${peopleRow}.querySelectorAll('.person-tile').length === 2`), 5)
+  // A camera on while sharing fills its tile, and can be turned off without stopping the share
+  await a.ev(press('Turn on camera'))
+  await until('the camera dialog is ready', () => a.ev(`document.querySelector('dialog[open] .camera-preview video')?.videoHeight > 0`), 15)
+  await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Turn on camera').click()`)
+  await until("Ann's camera plays in her tile under the stream on B", () => b.ev(`[...${peopleRow}.querySelectorAll('.person-tile')].some((t) => t.querySelector('video')?.videoHeight > 0)`), 30)
+  await b.shot('people-row')
+  await until('sharing with a camera on, A can see its Turn off camera control', () =>
+    a.ev(`(() => { const b = [...document.querySelectorAll('aside.voice .call-controls button')].find((x) => x.textContent.includes('Turn off camera')); if (!b) return false; const r = b.getBoundingClientRect(), p = document.querySelector('aside.voice').getBoundingClientRect(); return r.width > 0 && r.left >= p.left && r.right <= p.right })()`), 5)
+  await a.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent.includes('Turn off camera')).click()`)
+  await until('the stage bar turns the camera off, and the share goes on', async () =>
+    !(await a.ev(`!!${peopleRow}.querySelector('.person-tile video')`)) && (await a.ev(`!!document.querySelector('.stage .sharing-badge')`)) && b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight > 0`), 10)
   if (menu[2].some((t) => t.startsWith('1080p'))) {
     await a.ev(press('Stream settings'))
     await until('the quality menu opens on the current choice', () => a.ev(`document.querySelector('dialog[open] .quality select')?.value === '720'`), 5)
@@ -952,16 +987,16 @@ try {
   await b.ev(press('Leave call'))
 
   console.log('--- Groups')
-  await a.ev(`document.querySelector('.rail-item[aria-label^="Home"]').click()`)
+  await a.ev(`document.querySelector('.rail-mark').click()`)
   for (const g of ['Trio', 'Second']) {
     await a.ev(`document.querySelector('.rail-item[aria-label="Create a group"]').click()`)
     await a.ev(`(() => { const f = document.querySelector('form.new-group'); f.elements.name.value = '${g}'; f.querySelectorAll('[name=member]').forEach(x => x.checked = true); f.requestSubmit() })()`)
     await sleep(500)
-    await a.ev(`document.querySelector('.rail-item[aria-label^="Home"]')?.click()`)
+    await a.ev(`document.querySelector('.rail-mark')?.click()`)
   }
   await until('A, B and C list both groups in the Home sidebar', async () => {
     for (const p of [a, b, c]) {
-      await p.ev(`document.querySelector('.rail-item[aria-label^="Home"]')?.click()`)
+      await p.ev(`document.querySelector('.rail-mark')?.click()`)
       if (!(await p.ev(`['Trio','Second'].every(g => [...document.querySelectorAll('aside .item')].some(x => x.textContent.includes(g)))`))) return false
     }
     return true
@@ -980,6 +1015,14 @@ try {
   await b.ev(`[...document.querySelectorAll('aside.members .member')].find((x) => x.textContent.includes('Cy')).click()`)
   await until("Cy, not B's friend, gets a panel offering to add him instead of a message box", () => b.ev(pop((p) => p.textContent.includes('Add friend') && !p.querySelector('.pop-note'))), 5)
   await b.ev(escape)
+  // Renaming in place: click the name, type, Enter; Escape would keep the old one
+  await b.ev(`document.querySelector('.group-name').click()`)
+  await b.ev(`(() => { const i = document.querySelector('.group-name-edit'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'Trio for now'); i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })) })()`)
+  await until('Escape keeps the old name', () => b.ev(`document.querySelector('.group-name')?.textContent === 'Trio'`), 5)
+  await b.ev(`document.querySelector('.group-name').click()`)
+  await b.ev(`(() => { const i = document.querySelector('.group-name-edit'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'The Trio'); i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })()`)
+  await until('B renames the group, and A and Cy see the new name', async () =>
+    (await b.ev(`document.querySelector('.group-name')?.textContent === 'The Trio'`)) && (await a.ev(`document.querySelector('.group-name')?.textContent === 'The Trio'`)) && c.ev(`document.querySelector('.group-name')?.textContent === 'The Trio'`), 15)
 
   console.log('--- Resizable sidebars')
   const widths = await a.ev(`(() => {
@@ -997,14 +1040,14 @@ try {
   console.log('     ', JSON.stringify(widths), '->', JSON.stringify(after))
   if (!(after[0] === 336 && after[1] === 246 && after[2] === '336' && after[3] === '246')) throw new Error('sidebars did not resize and persist')
   console.log('ok   voice and members sidebars grew by 16px and the widths were saved')
-  await a.ev(`document.querySelector('.rail-item[aria-label^="Home"]').click()`)
+  await a.ev(`document.querySelector('.rail-mark').click()`)
   const home = await a.ev(`(() => { const s = document.querySelector('.splitter'); s.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); return new Promise(r => setTimeout(() => r(document.querySelector('aside').getBoundingClientRect().width), 200)) })()`)
   if (home !== 276) throw new Error('home sidebar did not resize: ' + home)
   console.log('ok   home sidebar resized independently (260 -> 276), narrower than the voice sidebar')
 
   console.log('--- Bob goes offline (process killed)')
   b.child.kill()
-  await until('A lists Bob under Offline after a divider', () => a.ev(`document.querySelector('.rail-item[aria-label^="Home"]').click(); [...document.querySelectorAll('.offline .row-button')].some(x => x.textContent.includes('Bob')) && !!document.querySelector('main.home hr')`), 60)
+  await until('A lists Bob under Offline after a divider', () => a.ev(`document.querySelector('.rail-mark').click(); [...document.querySelectorAll('.offline .row-button')].some(x => x.textContent.includes('Bob')) && !!document.querySelector('main.home hr')`), 60)
   await a.ev(open('Bob'))
   await a.ev(say('dm while offline'))
   await until('A shows the DM as pending', () => a.ev(pendingMark), 5)

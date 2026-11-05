@@ -2341,8 +2341,9 @@ kbd {
   background: #6e2433;
   color: #f5c2ca;
 }
+/* Wraps: with a share and a camera on there are seven, more than a narrow panel holds in one row. */
 .call-controls {
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   justify-content: center;
   gap: 10px;
 }
@@ -3867,4 +3868,183 @@ button.member:hover .user {
   position: absolute;
   top: 6px;
   right: 6px;
+}
+
+/* The people row along the bottom of a large stream (Stage in Media.tsx), as sketched: the stream above, a band of
+   person tiles below, the fold button on the band's top edge. Inside the figure, so full screen keeps it. */
+.screen.big:has(.people-row) {
+  flex-direction: column;
+}
+.screen.big:has(.people-row) video {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.screen.big:has(.people-row:not(.folded)) figcaption,
+.screen.big:has(.people-row:not(.folded)) .screen-controls {
+  bottom: 90px;
+}
+.people-row {
+  position: relative;
+  flex: none;
+  border-top: 1px solid var(--line-strong);
+  background: var(--abyss);
+}
+.people-row.folded {
+  border-top-color: transparent;
+}
+.people-toggle {
+  position: absolute;
+  z-index: 1;
+  top: -13px;
+  left: 50%;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 22px;
+  translate: -50% -50%;
+  padding: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--obsidian-2);
+  color: var(--silver-2);
+  cursor: pointer;
+}
+.people-row.folded .people-toggle {
+  translate: -50% -100%;
+}
+.people-row.folded .people-toggle .icon {
+  rotate: 180deg;
+}
+.people-toggle:hover {
+  color: var(--silver);
+  border-color: var(--accent);
+}
+.people-toggle:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.people-tiles {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  padding: 8px;
+  overflow-x: auto;
+}
+.person-tile {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 116px;
+  height: 66px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--obsidian);
+  overflow: hidden;
+  transition: border-color var(--t-fast), box-shadow var(--t-fast);
+}
+.person-tile .screen {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+.person-tile .screen figcaption {
+  left: 4px;
+  bottom: 4px;
+  font-size: 11px;
+}
+.person-tile .avatar {
+  margin-bottom: 12px;
+}
+.person-name {
+  position: absolute;
+  right: 6px;
+  bottom: 4px;
+  left: 6px;
+  overflow: hidden;
+  color: var(--silver-2);
+  font-size: 11px;
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.person-tile.speaking {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent), 0 0 12px var(--accent-glow);
+}
+
+/* The emblem is Home: lit like an open rail item while Home shows (its menu is on right-click). */
+.rail-mark {
+  position: relative;
+}
+.rail-mark.active {
+  border-color: var(--silver);
+  box-shadow: 0 0 18px var(--accent-glow);
+}
+.rail-mark::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 50%;
+  width: 4px;
+  height: 0;
+  border-radius: 0 4px 4px 0;
+  background: var(--accent);
+  translate: 0 -50%;
+  transition: height var(--t) var(--ease);
+}
+.rail-mark.active::before {
+  height: 30px;
+  box-shadow: 0 0 10px var(--accent-glow);
+}
+/* Direct conversations on the rail: round like a person, above the groups. */
+.rail-dm {
+  border-radius: 50%;
+}
+.rail-dm:hover {
+  border-radius: 50%;
+}
+.rail-sep {
+  flex: none;
+  width: 28px;
+  height: 1px;
+  margin: 2px 0;
+  background: var(--line-strong);
+}
+
+/* A group's name renames in place. */
+.group-name {
+  padding: 0 4px;
+  margin: 0 -4px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: text;
+}
+.group-name:hover {
+  border-color: var(--line-strong);
+}
+.group-name:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+.group-name-edit {
+  width: 100%;
+  padding: 0 4px;
+  margin: 0 -4px;
+  border: 1px solid color-mix(in srgb, var(--accent) 60%, transparent);
+  border-radius: var(--r-sm);
+  background: var(--abyss-2);
+  color: var(--silver);
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+.group-name-edit:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 10%, transparent);
 }

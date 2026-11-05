@@ -1087,3 +1087,21 @@ test('a member changes the group picture and the others get it', async () => {
   a.node.setGroupPicture(gid, '')
   await until(() => b.node.state().groups[gid]?.avatar === undefined)
 }, 60000)
+
+test('a member renames the group, the picture stays, and a name changed without a signature is ignored', async () => {
+  const a = start()
+  const b = start()
+  await befriend(a, b)
+  const gid = a.node.createGroup('old name', [b.key])
+  await until(() => !!b.node.state().groups[gid])
+  const pic = 'data:image/png;base64,AAAA'
+  a.node.setGroupPicture(gid, pic)
+  await until(() => b.node.state().groups[gid]?.avatar === pic) // name and picture are one signed look: the newest whole look wins
+  b.node.renameGroup(gid, '  new name  ')
+  await until(() => a.node.state().groups[gid]?.name === 'new name')
+  expect(a.node.state().groups[gid].avatar).toBe(pic) // renaming keeps the picture
+  expect(() => b.node.renameGroup(gid, '   ')).toThrow()
+  // A copy whose name was changed after signing loses to the signed one
+  const g = a.node.state().groups[gid]
+  expect(mergeGroup(g, { ...g, name: 'forged', updatedAt: g.updatedAt + 1 }).name).toBe('new name')
+}, 60000)
