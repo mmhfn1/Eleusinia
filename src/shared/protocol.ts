@@ -54,6 +54,10 @@ export type Settings = {
   cacheMB?: number // how much room downloaded pictures may take before the oldest are deleted (DEFAULT_CACHE_MB)
   suggest?: boolean // be suggested to people typing the start of our username (announced while online); off unless turned on
   activity?: ActivitySettings // what we are playing, shared with friends and group members (shared/activity.ts); off unless turned on
+  nicknames?: Record<Key, string> // our own names for people, shown instead of theirs; never sent to anyone
+  muted?: Record<string, boolean> // conversations whose unread count and call notices are hidden
+  pinned?: string[] // direct conversations kept at the top of the rail's list
+  closed?: Record<string, number> // direct conversations taken off the rail, and when: one comes back with a newer message
 }
 
 export type State = {
@@ -68,6 +72,8 @@ export type State = {
   versions: Record<Key, Version> // what each person we have greeted runs; memory only
   relayed: Key[] // online people whose link goes through a mutual friend's relay: voice and text only
   activity: Record<Key, Activity> // what contacts are doing now, memory only; ours as they see it, under our own key
+  chats: Record<string, { unread: number; at: number }> // conversations with at least one message: unread messages and missed calls, last activity
+  blocked: Key[]
 }
 
 // How calls are set up (slot order and signals). Raised only by a change older copies cannot follow: copies on

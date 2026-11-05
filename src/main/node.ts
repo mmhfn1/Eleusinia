@@ -1,5 +1,5 @@
 import { createHash, randomBytes, randomInt } from 'node:crypto'
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   CALL_VERSION,
@@ -38,6 +38,9 @@ import { type RelayLimits, RELAY_LIMITS, createNet } from './network'
 import { createRelay } from './relay'
 
 type Saved = {
+  unread?: Record<string, number> // per conversation: messages from others and missed calls since it was last read
+  lastAt?: Record<string, number> // per conversation: when its newest message arrived here
+  blocked?: Record<Key, number> // people we blocked, and when: no friend requests, no links, their messages uncounted
   profile: Profile
   friends: Record<Key, FriendStatus>
   profiles: Record<Key, Profile>
@@ -98,6 +101,11 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   // Groups from before owners: their owner is found once, from the copy on this computer, and kept from then on, so a
   // member's later made-up copies cannot change who it is.
   for (const g of Object.values(s.groups)) if (!g.owner) g.owner = ownerOf(g) ?? undefined
+  if (!s.lastAt) {
+    s.lastAt = {}
+    for (const f of existsSync(join(dir, 'msgs')) ? readdirSync(join(dir, 'msgs')) : [])
+      if (f.endsWith('.jsonl')) s.lastAt[f.slice(0, -6)] = statSync(join(dir, 'msgs', f)).mtimeMs
+  }
 
   // Groups we are in. Groups we left stay stored, so the notice of leaving keeps reaching their members.
   const ours = () => Object.values(s.groups).filter((g) => g.members.includes(me))
@@ -146,6 +154,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     versions: Object.fromEntries([...versions].filter(([k]) => known(k))),
     relayed: net.keys().filter((k) => known(k) && relayedVia.has(k)),
     activity: { ...Object.fromEntries([...theirs].filter(([k]) => known(k) && net.linked(k))), [me]: ourActivity() },
+    chats: Object.fromEntries(Object.entries(s.lastAt ?? {}).filter(([c]) => members(c).length).map(([c, at]) => [c, { unread: s.unread?.[c] ?? 0, at }])),
+    blocked: Object.keys(s.blocked ?? {}),
   })
   const push = () => emit({ type: 'state', state: state() })
   // For frequent small changes (receipts in a busy group): written within 2 s rather than once per message.
@@ -191,6 +201,10 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     delete s.confirmed?.[conv]
   }
   function append(m: Msg) {
+    s.lastAt = { ...s.lastAt, [m.conv]: Date.now() }
+    if (m.author !== me && !s.blocked?.[m.author]) s.unread = { ...s.unread, [m.conv]: (s.unread?.[m.conv] ?? 0) + 1 }
+    saveSoon()
+    pushSoon()
     haveOf(m.conv)[m.author] = m.seq
     logs.get(m.conv)?.push(m)
     appendFileSync(logFile(m.conv), JSON.stringify(m) + '\n')
@@ -253,7 +267,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
 
   // At most 200 waiting requests. New identities cost nothing, so a full list drops its oldest rather than refusing new
   // ones: a flood of made-up requests can never block real ones for good, and Decline all clears it.
-  const declinedRecently = (k: Key) => (s.declined?.[k] ?? 0) > Date.now() - 30 * 864e5
+  const declinedRecently = (k: Key) => !!s.blocked?.[k] || (s.declined?.[k] ?? 0) > Date.now() - 30 * 864e5
   function takeRequest(k: Key) {
     const waiting = Object.keys(s.friends).filter((f) => s.friends[f] === 'incoming')
     if (waiting.length >= maxRequests) {
@@ -532,7 +546,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       // Someone we asked dialing us has most likely accepted: look now, which matters when the link itself cannot form
       // (two strict routers) and the acceptance only travels through the DHT. They dial as they accept, so their
       // announcement may land a moment later: one more look follows in 3 s.
-      admit: (key) => (s.friends[key] === 'outgoing' && ring(key, 3000), known(key) || s.friends[key] === 'outgoing'),
+      admit: (key) => !s.blocked?.[key] && (s.friends[key] === 'outgoing' && ring(key, 3000), known(key) || s.friends[key] === 'outgoing'),
       // A stranger dialing is how a new request rings: they announce it first, then dial, so looking now finds it at
       // once instead of at the next 30 s check.
       knock: (key) => !s.friends[key] && !declinedRecently(key) && ring(key),
@@ -838,6 +852,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     idOwners: (handle: string) => (isHandle(handle) ? idOwners(handle) : Promise.resolve([] as Key[])),
     // Sends a friend request to one exact person, or accepts theirs. `profile` labels the pending request.
     addFriend(key: Key, profile?: Profile) {
+      if (s.blocked?.[key]) delete s.blocked[key]
       if (!isKey(key) || key === me) throw new Error('That is not someone you can add')
       if (profile) s.profiles[key] ??= cleanProfile(profile)
       if (s.declined) delete s.declined[key]
@@ -908,6 +923,36 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       spread(s.groups[id])
     },
     // The newest `limit` messages by time, and how many there are in all, so the window only holds what it shows.
+    // Everything in a conversation counts as read: its messages and missed calls.
+    markRead(conv: string) {
+      if (!s.unread?.[conv]) return
+      delete s.unread[conv]
+      saveSoon()
+      push()
+    },
+    // A call in a conversation that came and went without us (call.ts sees it): counted like an unread message.
+    missedCall(conv: string) {
+      if (!members(conv).length) return
+      s.unread = { ...s.unread, [conv]: (s.unread?.[conv] ?? 0) + 1 }
+      s.lastAt = { ...s.lastAt, [conv]: Date.now() }
+      saveSoon()
+      push()
+    },
+    // Blocking ends a friendship, turns away their requests and links, and leaves their messages uncounted
+    // (the page hides them). In a shared group they stay a member: only the owner can remove them.
+    block(key: Key) {
+      if (!isKey(key) || key === me) throw new Error('Cannot block that')
+      if (s.friends[key]) this.removeFriend(key)
+      s.blocked = { ...s.blocked, [key]: Date.now() }
+      if (!inGroupWith(key)) net.drop(key)
+      changed()
+    },
+    unblock(key: Key) {
+      if (!s.blocked?.[key]) return
+      delete s.blocked[key]
+      delete s.declined?.[key]
+      changed()
+    },
     history(conv: string, limit = Infinity) {
       if (!members(conv).length) return { msgs: [], acked: 0, total: 0 }
       members(conv).forEach(need) // looking at a conversation is a reason to reach its people

@@ -1105,3 +1105,31 @@ test('a member renames the group, the picture stays, and a name changed without 
   const g = a.node.state().groups[gid]
   expect(mergeGroup(g, { ...g, name: 'forged', updatedAt: g.updatedAt + 1 }).name).toBe('new name')
 }, 60000)
+
+test('unread counts messages from others and missed calls until read; blocking stops requests and counting', async () => {
+  const a = start()
+  const b = start()
+  await befriend(a, b)
+  const dm = dmId(a.key, b.key)
+  a.node.send(dm, 'one')
+  a.node.send(dm, 'two')
+  await until(() => b.node.state().chats[dm]?.unread === 2)
+  expect(a.node.state().chats[dm]).toMatchObject({ unread: 0 }) // our own messages are never unread, but date the chat
+  b.node.missedCall(dm)
+  expect(b.node.state().chats[dm].unread).toBe(3)
+  b.node.markRead(dm)
+  expect(b.node.state().chats[dm].unread).toBe(0)
+  b.node.missedCall('not a conversation') // ignored
+  expect(Object.keys(b.node.state().chats)).toEqual([dm])
+  // Blocked: no longer friends, the DM leaves the list, and a new request from them is not taken
+  b.node.block(a.key)
+  expect(b.node.state().blocked).toEqual([a.key])
+  expect(b.node.state().friends[a.key]).toBeUndefined()
+  expect(b.node.state().chats[dm]).toBeUndefined()
+  a.node.removeFriend(b.key)
+  a.node.addFriend(b.key)
+  await wait(4000)
+  expect(b.node.state().friends[a.key]).toBeUndefined()
+  b.node.unblock(a.key)
+  expect(b.node.state().blocked).toEqual([])
+}, 60000)

@@ -85,6 +85,7 @@ type Peer = {
 }
 
 export const active = new Map<string, Set<Key>>() // conversation -> peers we know are in its call
+const unjoined = new Set<string>() // conversations with a call going on that we have not joined since it began
 const announced = new Map<string, number>() // conversation -> when we last showed "started a call"
 export const peers = new Map<Key, Peer>()
 // Outlives a rebuilt connection, so reconnect attempts keep backing off until one holds.
@@ -941,6 +942,7 @@ export function notices() {
 
 export async function join(c: string) {
   leave()
+  unjoined.delete(c)
   log(`joining a ${state.groups[c] ? 'group' : 'direct'} call, ${active.get(c)?.size ?? 0} already in it`)
   const list = await navigator.mediaDevices.enumerateDevices()
   micId = usable(state.settings.mic, 'audioinput', list, state.settings.micLabel)
@@ -1064,7 +1066,8 @@ async function handle(from: Key, c: string, d: any) {
     return
   }
   // At most one a minute per conversation, so leaving and joining over and over cannot flood the notifications
-  if (!set.size && !conv && (announced.get(c) ?? 0) < Date.now() - 60000) {
+  if (c !== conv) unjoined.add(c) // a call we are not in; if it ends before we join, it was missed
+  if (!set.size && !conv && !state.settings.muted?.[c] && (announced.get(c) ?? 0) < Date.now() - 60000) {
     announced.set(c, Date.now())
     new Notification('Eleusinia', { body: `${state.profiles[from]?.name || 'Someone'} started a call` })
   }
@@ -1140,7 +1143,7 @@ export function silence(c: string) {
 function left(c: string, k: Key) {
   const had = active.get(c)?.delete(k)
   if (had && c === conv && !deafened) sound('leave')
-  if (!active.get(c)?.size) ringing.delete(c)
+  if (!active.get(c)?.size) ringing.delete(c), unjoined.delete(c) && window.api.call('missedCall', c).catch(() => {})
   loops()
 }
 

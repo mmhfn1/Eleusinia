@@ -9,6 +9,7 @@ import { DeleteAccount, ReportDialog, SettingsDialog } from './Settings'
 import { ActivityLine, ProfileActivity } from './Activity'
 import { ProfileBanner, ProfilePop } from './Profile'
 import { type Modal, NOBODY, type People, type Run, api, card, groupName, labelOf } from './common'
+import { Rail } from './Rail'
 
 export default function App() {
   const [st, setSt] = useState<State | null>(null)
@@ -28,25 +29,16 @@ export default function App() {
     t.forward = []
     setSel(c)
   }
-  // Direct conversations go on the rail when opened, newest on top, and stay there (per computer) until removed.
-  const [dms, setDms] = useState<string[]>(() => {
-    try {
-      const v = JSON.parse(localStorage.getItem(RAIL_DMS) ?? '[]')
-      return Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []
-    } catch {
-      return []
-    }
-  })
-  const keepDms = (next: string[]) => {
-    setDms(next)
-    try {
-      localStorage.setItem(RAIL_DMS, JSON.stringify(next))
-    } catch {}
-  }
+  // The open conversation counts as read while the window shows, including what arrives while it is open.
+  const [, seen] = useReducer((n: number) => n + 1, 0)
   useEffect(() => {
-    if (st && sel?.includes('_') && !st.groups[sel] && !dms.includes(sel)) keepDms([sel, ...dms].slice(0, 30))
-  }, [sel, !!st])
-  const dropDm = (c: string) => keepDms(dms.filter((x) => x !== c))
+    document.addEventListener('visibilitychange', seen)
+    return () => document.removeEventListener('visibilitychange', seen)
+  }, [])
+  const unreadHere = sel ? (st?.chats[sel]?.unread ?? 0) : 0
+  useEffect(() => {
+    if (sel && unreadHere && !document.hidden) api.call('markRead', sel)
+  })
   useEffect(() => {
     const step = (e: MouseEvent) => {
       if (e.button !== 3 && e.button !== 4) return
@@ -108,10 +100,10 @@ export default function App() {
   const prof = (k: Key) => (k === st.me ? st.profile : (st.profiles[k] ?? NOBODY))
   const people: People = {
     prof,
-    name: (k) => labelOf(prof(k), k),
+    name: (k) => st.settings.nicknames?.[k] || labelOf(prof(k), k),
     user: (k) => (
       <button key={k} className="user" onClick={(e) => people.show(k, e.currentTarget)}>
-        {labelOf(prof(k), k)}
+        {people.name(k)}
       </button>
     ),
     isOnline: (k) => k === st.me || st.online.includes(k),
@@ -120,7 +112,6 @@ export default function App() {
   }
   // A conversation that no longer exists (friend removed) falls back to Home.
   const open = sel && (st.groups[sel] || st.friends[sel.split('_').find((k) => k !== st.me)!] === 'friend') ? sel : null
-  const railDms = dms.filter((c) => st.friends[c.split('_').find((k) => k !== st.me)!] === 'friend')
 
   const place = open ? (st.groups[open] ? groupName(st.groups[open]) : people.name(open.split('_').find((k) => k !== st.me)!)) : 'Friends'
   const callAway = call.conv && call.conv !== open ? call.conv : null
@@ -132,7 +123,7 @@ export default function App() {
     <>
     <TitleBar place={place} call={callAway ? { name: callName!, back: () => go(callAway) } : undefined} />
     <div className="app">
-      <Rail st={st} people={people} open={open} go={go} show={setModal} dms={railDms} drop={dropDm} />
+      <Rail st={st} people={people} open={open} go={go} show={setModal} run={run} />
       {open ? (
         <Conversation key={open} st={st} conv={open} people={people} run={run} home={() => go(null)} />
       ) : (
@@ -204,8 +195,6 @@ export default function App() {
 
 // The window's own title bar: where you are, a way back to a call you are in elsewhere, and the window buttons. The
 // strip itself drags the window (and double-click maximizes, as Windows does); the buttons opt out of dragging.
-const RAIL_DMS = 'rail-dms'
-
 function TitleBar({ place, call: live }: { place: string; call?: { name: string; back: () => void } }) {
   const [max, setMax] = useState(false)
   useEffect(() => {
@@ -243,81 +232,6 @@ function TitleBar({ place, call: live }: { place: string; call?: { name: string;
 }
 
 // The narrow rail on the far left: identity, Home, each group, and the global actions.
-// dms: direct conversations opened before, on the rail until right-clicked away (drop).
-type RailProps = { st: State; people: People; open: string | null; go: (c: string | null) => void; show: (m: Modal) => void; dms: string[]; drop: (c: string) => void }
-function Rail({ st, people, open, go, show, dms, drop }: RailProps) {
-  const [tip, setTip] = useState<{ text: string; top: number } | null>(null)
-  const homeActive = !open || !st.groups[open]
-  // Tooltips are drawn outside the rail so its scrolling list cannot clip them.
-  const tipFor = (text: string) => ({
-    onMouseEnter: (e: { currentTarget: HTMLElement }) => setTip({ text, top: e.currentTarget.getBoundingClientRect().top + 22 }),
-    onFocus: (e: { currentTarget: HTMLElement }) => setTip({ text, top: e.currentTarget.getBoundingClientRect().top + 22 }),
-    onMouseLeave: () => setTip(null),
-    onBlur: () => setTip(null),
-  })
-  const item = (label: string, active: boolean, onClick: () => void, body: ReactNode, extra = '') => (
-    <button className={`rail-item ${active ? 'active' : ''} ${extra}`} aria-label={label} aria-current={active ? 'page' : undefined} onClick={onClick} {...tipFor(label)}>
-      {body}
-    </button>
-  )
-  return (
-    <nav className="rail" aria-label="Main">
-      <button
-        className={`rail-mark ${homeActive && !open ? 'active' : ''}`}
-        aria-label="Home: friends and direct messages"
-        aria-current={!open ? 'page' : undefined}
-        onClick={() => go(null)}
-        onContextMenu={(e) => (e.preventDefault(), show({ kind: 'menu' }))}
-        {...tipFor('Home')}
-      >
-        <Emblem size={42} />
-      </button>
-      <div className="rail-groups">
-        {dms.map((c) => {
-          const k = c.split('_').find((x) => x !== st.me)!
-          const label = `${people.name(k)}${call.active.get(c)?.size || call.conv === c ? ' (call in progress)' : ''}`
-          return (
-            <button
-              key={c}
-              className={`rail-item rail-dm ${open === c ? 'active' : ''}`}
-              aria-label={label}
-              aria-current={open === c ? 'page' : undefined}
-              onClick={() => go(c)}
-              onContextMenu={(e) => (e.preventDefault(), drop(c))}
-              {...tipFor(label)}
-            >
-              <Avatar k={k} p={people.prof(k)} size={34} online={people.isOnline(k)} />
-              {(call.active.get(c)?.size || call.conv === c) && <span className="rail-badge" aria-hidden="true" />}
-            </button>
-          )
-        })}
-        {dms.length > 0 && <span className="rail-sep" aria-hidden="true" />}
-        {Object.values(st.groups).map((g) =>
-          item(
-            `${groupName(g)}${call.active.get(g.id)?.size || call.conv === g.id ? ' (call in progress)' : ''}`,
-            open === g.id,
-            () => go(g.id),
-            <>
-              <GroupEmblem g={g} size={34} />
-              {(call.active.get(g.id)?.size || call.conv === g.id) && <span className="rail-badge" aria-hidden="true" />}
-            </>,
-          ),
-        )}
-        {item('Create a group', false, () => show({ kind: 'group' }), <Icon name="plus" size={20} />, 'rail-add')}
-      </div>
-      <div className="rail-foot">
-        {item('Settings', false, () => show({ kind: 'settings' }), <Icon name="settings" size={20} />)}
-        {item('Your profile', false, () => show({ kind: 'card', k: st.me }), <Avatar k={st.me} p={st.profile} size={34} />)}
-      </div>
-      {tip && (
-        <div className="rail-tip" style={{ top: tip.top }} aria-hidden="true">
-          {tip.text}
-        </div>
-      )}
-    </nav>
-  )
-}
-
 function Home({ st, people, run, open, ring, newGroup }: { st: State; people: People; run: Run; open: (conv: string) => void; ring: (conv: string) => void; newGroup: () => void }) {
   const [width, setWidth] = useWidth('home', 260)
   const { prof, name, user, isOnline, show } = people
