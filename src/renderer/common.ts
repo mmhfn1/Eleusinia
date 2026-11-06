@@ -13,20 +13,6 @@ export const labelOf = (p: Profile, k: Key) => p.name || p.handle || k.slice(0, 
 export const groupName = (g: Group) => g.name || 'Unnamed group'
 
 export type Run = (p: Promise<unknown>) => Promise<void>
-// A question before something that cannot be undone. Each one is worded once, here, wherever it is asked from.
-export type Ask = { title: string; body: string; yes: string; act: () => void }
-export const removeFriendAsk = (name: string, act: () => void): Ask => ({
-  title: `Remove ${name}?`,
-  body: 'You stop being friends and this chat closes. Messages already sent stay on both computers; you can send a new friend request later.',
-  yes: 'Remove friend',
-  act,
-})
-export const leaveGroupAsk = (name: string, act: () => void): Ask => ({
-  title: `Leave ${name}?`,
-  body: 'Its messages are deleted from this computer, and you cannot be added back to this group.',
-  yes: 'Leave group',
-  act,
-})
 // What every screen needs to show people: their profile, their name, and their name as a button opening their card.
 // show opens a person's profile: beside `from` (what was clicked) as a small panel, or without it as the full card.
 export type People = { prof: (k: Key) => Profile; name: (k: Key) => string; user: (k: Key) => ReactNode; isOnline: (k: Key) => boolean; show: (k: Key, from?: HTMLElement) => void }

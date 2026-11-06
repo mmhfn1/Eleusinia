@@ -4,8 +4,8 @@ import { type LinkPreview, firstLink, splitLinks } from '../shared/links'
 import { type FileRef, MAX_FILES, inlineKind, sizeLabel } from '../shared/media'
 import { type FileState, type Key, type Msg, type Profile, type State, MAX_TEXT, stack } from '../shared/protocol'
 import * as call from './call'
-import { Avatar, Confirm, Dialog, Emblem, Icon } from './ui'
-import { type People, type Run, api, leaveGroupAsk } from './common'
+import { Avatar, Dialog, Emblem, GroupEmblem, Icon } from './ui'
+import { type People, type Run, api } from './common'
 
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString()
 const dayLabel = (ts: number) =>
@@ -25,7 +25,6 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [acked, setAcked] = useState(0)
   const [loaded, setLoaded] = useState(false)
-  const [failed, setFailed] = useState('') // the history could not be read
   const [total, setTotal] = useState(0)
   const [earlier, setEarlier] = useState(false) // older history on other members' computers (we joined after it)
   // Asking members for that older history: what the count was when we asked, and whether nobody answered in time
@@ -70,8 +69,7 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
       setTotal(h.total)
       setEarlier(!!h.earlier)
       setLoaded(true)
-      setFailed('')
-    }, (e) => setFailed(String(e?.message ?? e).replace(/^.*Error: /, '')))
+    })
     return api.on((e) => {
       if (e.type === 'msg' && e.m.conv === conv) {
         setMsgs((m) => [...m, e.m].slice(-(limit + PAGE))) // a chat left open in a busy group keeps a bounded window
@@ -189,11 +187,13 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
     <main className="workspace chat" onDragOver={(e) => e.dataTransfer.types.includes('Files') && e.preventDefault()} onDrop={drop}>
       <header className="chat-head">
         {group ? (
-          // The group's name heads the sidebar, as a server's will; this is its one room, as a channel will be
-          <div className="row-text">
-            <span className="chat-title">Chat</span>
-            <span className="row-sub">{`${group.members.length} members, ${group.members.filter(isOnline).length} online`}</span>
-          </div>
+          <>
+            <GroupEmblem g={group} size={32} />
+            <div className="row-text">
+              <h1>{title}</h1>
+              <span className="row-sub">{`${group.members.length} members · ${group.members.filter(isOnline).length} online`}</span>
+            </div>
+          </>
         ) : (
           <button className="chat-person" onClick={(e) => show(other, e.currentTarget)} aria-label={`Open ${title}'s profile`}>
             <Avatar k={other} p={prof(other)} size={32} online={isOnline(other)} />
@@ -238,17 +238,40 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
         )}
       </header>
       {removing && (
-        <Confirm
-          ask={{
-            title: `Remove ${name(removing)}?`,
-            body: "They stop receiving this group's messages and cannot be added back. Anyone only they added leaves with them until someone adds them again.",
-            yes: 'Remove',
-            act: () => run(api.call('removeFromGroup', conv, removing)),
-          }}
-          close={() => setRemoving(null)}
-        />
+        <Dialog label="Remove member" close={() => setRemoving(null)}>
+          <h1>Remove {name(removing)}?</h1>
+          <p>They stop receiving this group's messages and cannot be added back. Anyone only they added leaves with them until someone adds them again.</p>
+          <div className="form-actions">
+            <button className="button" onClick={() => setRemoving(null)}>
+              Cancel
+            </button>
+            <button className="button danger" onClick={() => (run(api.call('removeFromGroup', conv, removing)), setRemoving(null))}>
+              <Icon name="leave" size={16} /> Remove
+            </button>
+          </div>
+        </Dialog>
       )}
-      {leaving && <Confirm ask={leaveGroupAsk(title, () => (call.conv === conv && call.leave(), run(api.call('leaveGroup', conv)), home()))} close={() => setLeaving(false)} />}
+      {leaving && (
+        <Dialog label="Leave group" close={() => setLeaving(false)}>
+          <h1>Leave {title}?</h1>
+          <p>Its messages are deleted from this computer, and you cannot be added back to this group.</p>
+          <div className="form-actions">
+            <button className="button" onClick={() => setLeaving(false)}>
+              Cancel
+            </button>
+            <button
+              className="button danger"
+              onClick={() => {
+                if (call.conv === conv) call.leave()
+                run(api.call('leaveGroup', conv))
+                home()
+              }}
+            >
+              <Icon name="leave" size={16} /> Leave group
+            </button>
+          </div>
+        </Dialog>
+      )}
 
       {viewing && (
         <Dialog label={viewing.n} close={() => setViewing(null)} className="image-view">
@@ -264,12 +287,6 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
           atBottom.current = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 40
           if (atBottom.current && !was) seen()
         }}>
-        {failed && (
-          <div className="empty-state" role="alert">
-            <p className="empty-title">These messages could not be read</p>
-            <p className="quiet">{failed}. Open the chat again to retry; if it keeps failing, send a report from the Eleusinia menu (right-click the emblem).</p>
-          </div>
-        )}
         {loaded && !sorted.length && (
           <div className="empty-state">
             <Emblem size={84} className="faint" />
