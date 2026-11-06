@@ -2,13 +2,13 @@ import { type FormEvent, type KeyboardEvent, type ReactNode, memo, useEffect, us
 import { type Offset, clampOffset, cropRect } from '../shared/crop'
 import { type Group, type Key, type Profile, type State, dmId, keyTail } from '../shared/protocol'
 import * as call from './call'
-import { Avatar, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Splitter, Wordmark, useWidth } from './ui'
+import { Avatar, Confirm, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Splitter, Wordmark, useWidth } from './ui'
 import { Chat } from './Chat'
 import { CameraDialog, Oculus, PersonVolume, RingBar, STATE_WORDS, ShareDialog, Stage, VoiceMark, VoiceSignal, useSpeaking } from './Media'
 import { DeleteAccount, ReportDialog, SettingsDialog } from './Settings'
 import { ActivityLine, ProfileActivity } from './Activity'
 import { ProfileBanner, ProfilePop } from './Profile'
-import { type Modal, NOBODY, type People, type Run, api, card, groupName, labelOf } from './common'
+import { type Modal, NOBODY, type People, type Run, api, card, groupName, labelOf, removeFriendAsk } from './common'
 import { Rail } from './Rail'
 
 export default function App() {
@@ -667,6 +667,7 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
 type CardProps = { k: Key; st: State; p: Profile; close: () => void; message: () => void; edit: () => void; run: Run }
 
 function Card({ k, st, p, close, message, edit, run }: CardProps) {
+  const [removing, setRemoving] = useState(false)
   const status = st.friends[k]
   const shared = k === st.me ? [] : Object.values(st.groups).filter((g) => g.members.includes(k)).map(groupName)
   const then = (fn: () => void) => () => {
@@ -692,7 +693,7 @@ function Card({ k, st, p, close, message, edit, run }: CardProps) {
         <dl className="identity">
           <dt>Friend ID</dt>
           <dd>
-            <b>{p.handle || 'not set up yet'}</b> {p.handle && <CopyButton text={p.handle} label="Copy friend ID" />}
+            <b>{p.handle || 'not set up yet'}</b> {p.handle && k !== st.me && <CopyButton text={p.handle} label="Copy friend ID" />}
           </dd>
           <dt>Key ending</dt>
           <dd>
@@ -717,7 +718,7 @@ function Card({ k, st, p, close, message, edit, run }: CardProps) {
             </button>
           )}
           {status === 'friend' && (
-            <button className="button danger" onClick={then(() => run(api.call('removeFriend', k)))}>
+            <button className="button danger" onClick={() => setRemoving(true)}>
               Remove friend
             </button>
           )}
@@ -732,6 +733,7 @@ function Card({ k, st, p, close, message, edit, run }: CardProps) {
           </button>
         </div>
       </div>
+      {removing && <Confirm ask={removeFriendAsk(p.name, () => (run(api.call('removeFriend', k)), close()))} close={() => setRemoving(false)} />}
     </Dialog>
   )
 }

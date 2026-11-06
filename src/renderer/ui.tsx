@@ -1,6 +1,7 @@
 // Small shared pieces of the Eleusinia interface: icons, portraits, emblems, dialogs and ornaments.
 import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 import { type Group, type Key, type Profile, identicon } from '../shared/protocol'
+import { type Ask } from './common'
 
 const ICONS: Record<string, ReactNode> = {
   home: <path d="M3.5 10.5 12 3.5l8.5 7V20a1 1 0 0 1-1 1h-5v-6h-5v6h-5a1 1 0 0 1-1-1z" />,
@@ -190,6 +191,24 @@ export function Info({ id, children }: { id: string; children: ReactNode }) {
         {children}
       </span>
     </span>
+  )
+}
+
+// The question in an Ask (common.ts): Cancel, or the action named on its button.
+export function Confirm({ ask, close }: { ask: Ask; close: () => void }) {
+  return (
+    <Dialog label={ask.title} close={close}>
+      <h1>{ask.title}</h1>
+      <p>{ask.body}</p>
+      <div className="form-actions">
+        <button className="button" onClick={close}>
+          Cancel
+        </button>
+        <button className="button danger" onClick={() => (ask.act(), close())}>
+          {ask.yes}
+        </button>
+      </div>
+    </Dialog>
   )
 }
 

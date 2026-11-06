@@ -4,8 +4,8 @@ import { type LinkPreview, firstLink, splitLinks } from '../shared/links'
 import { type FileRef, MAX_FILES, inlineKind, sizeLabel } from '../shared/media'
 import { type FileState, type Key, type Msg, type Profile, type State, MAX_TEXT, stack } from '../shared/protocol'
 import * as call from './call'
-import { Avatar, Dialog, Emblem, Icon } from './ui'
-import { type People, type Run, api } from './common'
+import { Avatar, Confirm, Dialog, Emblem, Icon } from './ui'
+import { type People, type Run, api, leaveGroupAsk } from './common'
 
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString()
 const dayLabel = (ts: number) =>
@@ -238,40 +238,17 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
         )}
       </header>
       {removing && (
-        <Dialog label="Remove member" close={() => setRemoving(null)}>
-          <h1>Remove {name(removing)}?</h1>
-          <p>They stop receiving this group's messages and cannot be added back. Anyone only they added leaves with them until someone adds them again.</p>
-          <div className="form-actions">
-            <button className="button" onClick={() => setRemoving(null)}>
-              Cancel
-            </button>
-            <button className="button danger" onClick={() => (run(api.call('removeFromGroup', conv, removing)), setRemoving(null))}>
-              <Icon name="leave" size={16} /> Remove
-            </button>
-          </div>
-        </Dialog>
+        <Confirm
+          ask={{
+            title: `Remove ${name(removing)}?`,
+            body: "They stop receiving this group's messages and cannot be added back. Anyone only they added leaves with them until someone adds them again.",
+            yes: 'Remove',
+            act: () => run(api.call('removeFromGroup', conv, removing)),
+          }}
+          close={() => setRemoving(null)}
+        />
       )}
-      {leaving && (
-        <Dialog label="Leave group" close={() => setLeaving(false)}>
-          <h1>Leave {title}?</h1>
-          <p>Its messages are deleted from this computer, and you cannot be added back to this group.</p>
-          <div className="form-actions">
-            <button className="button" onClick={() => setLeaving(false)}>
-              Cancel
-            </button>
-            <button
-              className="button danger"
-              onClick={() => {
-                if (call.conv === conv) call.leave()
-                run(api.call('leaveGroup', conv))
-                home()
-              }}
-            >
-              <Icon name="leave" size={16} /> Leave group
-            </button>
-          </div>
-        </Dialog>
-      )}
+      {leaving && <Confirm ask={leaveGroupAsk(title, () => (call.conv === conv && call.leave(), run(api.call('leaveGroup', conv)), home()))} close={() => setLeaving(false)} />}
 
       {viewing && (
         <Dialog label={viewing.n} close={() => setViewing(null)} className="image-view">

@@ -4,14 +4,14 @@ import { type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef,
 import { createPortal } from 'react-dom'
 import { type Key, type State } from '../shared/protocol'
 import * as call from './call'
-import { type Modal, type People, type Run, api, groupName } from './common'
-import { Avatar, Dialog, Emblem, GroupEmblem, Icon } from './ui'
+import { type Ask as AskType, type Modal, type People, type Run, api, groupName, leaveGroupAsk, removeFriendAsk } from './common'
+import { Avatar, Confirm, Dialog, Emblem, GroupEmblem, Icon } from './ui'
 
 type Props = { st: State; people: People; open: string | null; go: (c: string | null) => void; show: (m: Modal) => void; run: Run }
 type Item = { label: string; act: () => void; danger?: boolean; sub?: boolean }
 // A menu is sections of items; a divider goes between sections.
 type Menu = { x: number; y: number; for: string }
-type Ask = { title: string; body: string; yes: string; act: () => void } | { nickname: Key } | null
+type Ask = AskType | { nickname: Key } | null
 
 export const otherIn = (c: string, me: Key) => c.split('_').find((k) => k !== me)!
 
@@ -81,7 +81,7 @@ export function Rail({ st, people, open, go, show, run }: Props) {
         {
           label: 'Remove friend',
           danger: true,
-          act: () => setAsk({ title: `Remove ${name}?`, body: 'You stop being friends and this chat closes. Messages already sent stay on both computers; you can send a new friend request later.', yes: 'Remove friend', act: () => (leaveIfOpen(c), run(api.call('removeFriend', k))) }),
+          act: () => setAsk(removeFriendAsk(name, () => (leaveIfOpen(c), run(api.call('removeFriend', k))))),
         },
         {
           label: 'Block',
@@ -106,13 +106,7 @@ export function Rail({ st, people, open, go, show, run }: Props) {
         {
           label: 'Leave group',
           danger: true,
-          act: () =>
-            setAsk({
-              title: `Leave ${groupName(g)}?`,
-              body: 'Its messages are deleted from this computer, and you cannot be added back to this group.',
-              yes: 'Leave group',
-              act: () => (call.conv === c && call.leave(), leaveIfOpen(c), run(api.call('leaveGroup', c))),
-            }),
+          act: () => setAsk(leaveGroupAsk(groupName(g), () => (call.conv === c && call.leave(), leaveIfOpen(c), run(api.call('leaveGroup', c))))),
         },
       ],
     ]
@@ -148,7 +142,7 @@ export function Rail({ st, people, open, go, show, run }: Props) {
     <nav className="rail" aria-label="Main">
       <button
         className={`rail-mark ${!open ? 'active' : ''}`}
-        aria-label="Home: friends and direct messages"
+        aria-label="Home: friends and requests"
         aria-current={!open ? 'page' : undefined}
         onClick={() => go(null)}
         onContextMenu={(e) => (e.preventDefault(), show({ kind: 'menu' }))}
@@ -182,20 +176,7 @@ export function Rail({ st, people, open, go, show, run }: Props) {
       )}
       {menu && sections.length > 0 && <ContextMenu x={menu.x} y={menu.y} sections={sections} close={() => setMenu(null)} />}
       {ask && 'nickname' in ask && <Nickname st={st} k={ask.nickname} name={people.prof(ask.nickname).name || people.name(ask.nickname)} run={run} close={() => setAsk(null)} />}
-      {ask && 'yes' in ask && (
-        <Dialog label={ask.title} close={() => setAsk(null)}>
-          <h1>{ask.title}</h1>
-          <p>{ask.body}</p>
-          <div className="form-actions">
-            <button className="button" onClick={() => setAsk(null)}>
-              Cancel
-            </button>
-            <button className="button danger" onClick={() => (ask.act(), setAsk(null))}>
-              {ask.yes}
-            </button>
-          </div>
-        </Dialog>
-      )}
+      {ask && 'yes' in ask && <Confirm ask={ask} close={() => setAsk(null)} />}
     </nav>
   )
 }

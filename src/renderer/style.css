@@ -45,6 +45,20 @@
   --eggshell: #f1ede3;
   --danger-veil: rgb(236 138 153 / 0.12);
 
+  /* Tints: every translucent colour outside this block is one of these */
+  --veil-strong: rgb(244 245 246 / 0.1);
+  --glow-soft: rgb(220 226 230 / 0.16);
+  --fog-veil: rgb(66 90 107 / 0.1);
+  --fog-haze: rgb(66 90 107 / 0.46);
+  --cyan-veil: rgb(181 195 198 / 0.08);
+  --cyan-glow: rgb(181 195 198 / 0.4);
+  --scrim-soft: rgb(0 0 0 / 0.35);
+  --scrim: rgb(4 5 7 / 0.6);
+  --scrim-strong: rgb(2 3 4 / 0.85);
+  --glass: rgb(10 12 15 / 0.8);
+  --danger-fill: rgb(110 36 51 / 0.6);
+  --game-health: rgb(111 213 152 / 0.45); /* Dota 2 bars, in the game's own colours */
+  --game-mana: rgb(120 150 230 / 0.5);
   --shadow-1: 0 8px 24px rgb(0 0 0 / 0.4);
   --shadow-2: 0 16px 40px rgb(0 0 0 / 0.5);
   --shadow-3: 0 30px 80px rgb(0 0 0 / 0.55);
@@ -54,6 +68,7 @@
   --mono: 'Cascadia Mono', ui-monospace, 'SF Mono', Consolas, monospace;
 
   /* Spacing: paddings, margins and gaps sit on a 4 px grid (4, 8, 12, 16, 20, 24, 28, 32, 40, 48); 1-3 px only for hairlines */
+  /* Type: 11, 12, 13, 14, 16, 20, 24, 28, 40 px, whole pixels only */
   --r-sm: 4px;
   --r-md: 6px;
   --r-lg: 10px;
@@ -78,7 +93,7 @@ body,
 body {
   margin: 0;
   color: var(--silver);
-  background: radial-gradient(90% 60% at 50% -10%, rgb(66 90 107 / 0.5), transparent 62%), var(--void);
+  background: radial-gradient(90% 60% at 50% -10%, var(--fog-haze), transparent 62%), var(--void);
   -webkit-font-smoothing: antialiased;
 }
 h1,
@@ -87,7 +102,7 @@ p {
   margin: 0;
 }
 h1 {
-  font: 600 22px/1.2 var(--display);
+  font: 600 24px/1.2 var(--display);
   letter-spacing: 0.01em;
 }
 h2 {
@@ -379,7 +394,7 @@ input[type='range'] {
   opacity: 0.22;
 }
 .wordmark {
-  font: 600 15px/1 var(--display);
+  font: 600 16px/1 var(--display);
   letter-spacing: 0.42em;
   text-transform: uppercase;
   color: var(--silver);
@@ -420,7 +435,7 @@ b.tail {
   object-fit: cover;
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--silver) 14%, transparent),
-    0 2px 6px rgb(0 0 0 / 0.35);
+    0 2px 6px var(--scrim-soft);
 }
 .presence {
   position: absolute;
@@ -656,7 +671,7 @@ aside {
 .id-plate b {
   flex: 1;
   min-width: 0;
-  font: 600 15px/1.3 var(--mono);
+  font: 600 16px/1.3 var(--mono);
   letter-spacing: 0.02em;
   color: var(--silver);
   overflow-wrap: anywhere;
@@ -790,7 +805,7 @@ aside {
 }
 .search-box input {
   height: 42px !important;
-  font-size: 15px;
+  font-size: 16px;
 }
 #search-status {
   min-height: 1.5em;
@@ -844,7 +859,7 @@ aside {
   animation: settle 400ms var(--ease);
 }
 .empty-title {
-  font: 600 22px/1.2 var(--display);
+  font: 600 24px/1.2 var(--display);
   color: var(--silver);
 }
 
@@ -1229,7 +1244,7 @@ details[open] > summary::before {
   visibility: hidden;
   padding-top: 3px;
   color: var(--mist-2);
-  font-size: 10px;
+  font-size: 11px;
   white-space: nowrap;
 }
 .msg:hover .msg-hover-time {
@@ -1666,7 +1681,7 @@ legend {
 .tagline {
   max-width: 34ch;
   color: var(--silver-2);
-  font: 500 18px/1.4 var(--display);
+  font: 500 16px/1.4 var(--display);
 }
 .panel {
   position: relative;
@@ -1806,7 +1821,7 @@ hr {
   position: absolute;
   inset: 0;
   pointer-events: none;
-  background: radial-gradient(circle, transparent 69.5%, rgb(4 6 10 / 0.6) 70%);
+  background: radial-gradient(circle, transparent 69.5%, var(--scrim) 70%);
   box-shadow: inset 0 0 0 1px var(--line-strong);
   border-radius: inherit;
 }
@@ -1873,7 +1888,7 @@ hr {
   max-width: calc(100% - 56px);
   padding: 2px 8px;
   border-radius: var(--r-sm);
-  background: rgb(0 0 0 / 0.6);
+  background: var(--scrim);
   color: var(--silver);
   font-size: 12px;
   overflow: hidden;
@@ -1889,7 +1904,7 @@ hr {
   gap: 8px;
 }
 .screen-full {
-  background: rgb(0 0 0 / 0.6);
+  background: var(--scrim);
 }
 .screen-volume {
   display: flex;
@@ -1898,7 +1913,7 @@ hr {
   height: 32px;
   padding: 0 8px;
   border-radius: var(--r-md);
-  background: rgb(0 0 0 / 0.6);
+  background: var(--scrim);
   color: var(--silver);
 }
 .screen-volume input {
@@ -2211,7 +2226,7 @@ hr {
    cold white, and everything you press answers with a short ease. Placed last so it settles the look of what is above. */
 .workspace,
 .threshold {
-  background: radial-gradient(90% 55% at 50% -12%, rgb(66 90 107 / 0.42), transparent 62%), transparent;
+  background: radial-gradient(90% 55% at 50% -12%, var(--fog-haze), transparent 62%), transparent;
 }
 .workspace::before,
 .threshold::before {
@@ -2219,17 +2234,17 @@ hr {
 }
 .workspace::after,
 .threshold::after {
-  background: linear-gradient(0deg, rgb(66 90 107 / 0.08), transparent 30%);
+  background: linear-gradient(0deg, var(--fog-veil), transparent 30%);
 }
 aside {
-  background: rgb(10 12 15 / 0.72);
+  background: var(--glass);
 }
 .rail {
-  background: rgb(3 4 6 / 0.9);
+  background: var(--scrim-strong);
 }
 .voice,
 .voice.live {
-  background: rgb(10 12 15 / 0.72);
+  background: var(--glass);
 }
 
 /* The emblem: white on a black disc inside its ring, like the logo, and a button that opens the menu. */
@@ -2256,7 +2271,7 @@ aside {
 }
 .emblem.glow {
   background: var(--silver);
-  filter: drop-shadow(0 0 30px rgb(181 195 198 / 0.35));
+  filter: drop-shadow(0 0 30px var(--cyan-glow));
 }
 
 /* Buttons: white on black for the main action, quiet outlines for the rest. */
@@ -2281,7 +2296,7 @@ aside {
   box-shadow: 0 0 20px -4px var(--accent-glow);
 }
 .button.danger {
-  background: rgb(110 36 51 / 0.6);
+  background: var(--danger-fill);
   color: var(--danger-soft);
 }
 .button.active {
@@ -2318,7 +2333,7 @@ kbd {
   padding: 0;
   border: 1px solid color-mix(in srgb, var(--silver) 22%, transparent);
   border-radius: 50%;
-  background: rgb(5 6 8 / 0.6);
+  background: var(--scrim);
   color: var(--silver);
   transition:
     background var(--t-fast),
@@ -2327,7 +2342,7 @@ kbd {
     transform var(--t-fast) var(--ease);
 }
 .round:hover {
-  background: rgb(244 245 246 / 0.1);
+  background: var(--veil-strong);
   transform: translateY(-1px);
 }
 .round.on {
@@ -2414,7 +2429,7 @@ kbd {
   transition: background var(--t-fast);
 }
 .friend-row:hover {
-  background: rgb(244 245 246 / 0.05);
+  background: var(--accent-veil);
 }
 .friend-row .row-button:hover:not(:disabled) {
   background: none;
@@ -2448,7 +2463,7 @@ kbd {
   min-height: 220px;
   padding: 28px 20px 20px;
   border-bottom: 1px solid var(--line);
-  background: radial-gradient(420px 260px at 50% -10%, rgb(220 226 230 / 0.26), rgb(66 90 107 / 0.1) 45%, transparent 75%);
+  background: radial-gradient(420px 260px at 50% -10%, var(--accent-glow), var(--fog-veil) 45%, transparent 75%);
   animation: settle var(--t) var(--ease);
 }
 .oculus-person {
@@ -2491,8 +2506,8 @@ kbd {
      display's rate (240 per second on a gaming monitor), which cost about a core during a call */
   box-shadow:
     0 0 0 2.5px var(--silver),
-    0 0 0 7px rgb(244 245 246 / 0.08),
-    0 0 34px rgb(220 226 230 / 0.35);
+    0 0 0 7px var(--veil-strong),
+    0 0 34px var(--accent-glow);
 }
 .caller.speaking .avatar img,
 .caller.speaking .avatar svg,
@@ -2512,7 +2527,7 @@ kbd {
   padding: 12px 16px;
   border: 1px solid color-mix(in srgb, var(--silver) 22%, transparent);
   border-radius: 16px;
-  background: radial-gradient(300px 120px at 10% 0%, rgb(220 226 230 / 0.14), transparent 70%), rgb(10 12 15 / 0.85);
+  background: radial-gradient(300px 120px at 10% 0%, var(--glow-soft), transparent 70%), var(--glass);
   animation: settle var(--t) var(--ease);
 }
 /* The same bar, for calls ringing while we are elsewhere (in another call, or another conversation). */
@@ -2538,10 +2553,10 @@ kbd {
 @keyframes ring {
   0%,
   100% {
-    box-shadow: 0 0 0 0 rgb(181 195 198 / 0.5);
+    box-shadow: 0 0 0 0 var(--cyan-glow);
   }
   60% {
-    box-shadow: 0 0 0 12px rgb(181 195 198 / 0);
+    box-shadow: 0 0 0 12px transparent;
   }
 }
 
@@ -2595,7 +2610,7 @@ dialog.menu-dialog .dialog-close {
 }
 .menu-item:hover,
 .menu-item:focus-visible {
-  background: rgb(244 245 246 / 0.08);
+  background: var(--veil-strong);
 }
 .menu-item .row-title {
   flex: 1;
@@ -2636,8 +2651,8 @@ dialog.menu-dialog .dialog-close {
   gap: 12px;
   height: 32px;
   padding-left: 84px; /* the place name lines up past the rail */
-  border-bottom: 1px solid rgb(244 245 246 / 0.06);
-  background: rgb(3 4 6 / 0.55);
+  border-bottom: 1px solid var(--accent-veil);
+  background: var(--scrim);
   color: var(--mist-2);
   font: 500 12px/1 var(--sans);
   letter-spacing: 0.01em;
@@ -2656,7 +2671,7 @@ dialog.menu-dialog .dialog-close {
   gap: 8px;
   height: 22px;
   padding: 0 8px;
-  border: 1px solid rgb(181 195 198 / 0.35);
+  border: 1px solid var(--cyan-glow);
   border-radius: 11px;
   background: none;
   color: var(--cyan);
@@ -2666,7 +2681,7 @@ dialog.menu-dialog .dialog-close {
 }
 .titlebar-call:hover {
   border-color: var(--cyan);
-  background: rgb(181 195 198 / 0.08);
+  background: var(--cyan-veil);
 }
 .titlebar-live {
   width: 6px;
@@ -2698,7 +2713,7 @@ dialog.menu-dialog .dialog-close {
   position: absolute;
   inset: 4px 9px;
   border-radius: 8px;
-  background: rgb(244 245 246 / 0.09);
+  background: var(--veil-strong);
   opacity: 0;
   transform: scale(0.85);
   transition:
@@ -2767,7 +2782,7 @@ img.crest {
   display: grid;
   place-items: center;
   border-radius: 28%;
-  background: rgb(5 6 8 / 0.6);
+  background: var(--scrim);
   color: var(--silver);
   opacity: 0;
   transition: opacity var(--t-fast);
@@ -2818,14 +2833,14 @@ img.crest {
 }
 .activity-body h3 {
   margin: 0;
-  font-size: 17px;
+  font-size: 16px;
   overflow-wrap: anywhere;
 }
 .activity-facts,
 .activity-about {
   margin: 0;
   color: var(--silver-2);
-  font-size: 12.5px;
+  font-size: 13px;
 }
 .activity-about {
   color: var(--mist);
@@ -2946,7 +2961,7 @@ img.crest {
 }
 .cs2-team b {
   font-family: var(--display);
-  font-size: 26px;
+  font-size: 24px;
   font-variant-numeric: tabular-nums;
 }
 .cs2-team.ct b {
@@ -3148,10 +3163,10 @@ img.crest {
   inset: 0 auto 0 0;
 }
 .dota-bar.health span {
-  background: rgb(111 213 152 / 0.45);
+  background: var(--game-health);
 }
 .dota-bar.mana span {
-  background: rgb(120 150 230 / 0.5);
+  background: var(--game-mana);
 }
 .dota-bar b {
   position: relative;
@@ -3220,12 +3235,12 @@ img.crest {
   padding: 8px 12px;
   border-radius: var(--r-md) var(--r-md) 0 0;
   background: var(--obsidian-4) center / cover no-repeat;
-  box-shadow: inset 0 -60px 40px -20px rgb(0 0 0 / 0.75);
-  text-shadow: 0 1px 3px rgb(0 0 0 / 0.9);
+  box-shadow: inset 0 -60px 40px -20px var(--scrim-strong);
+  text-shadow: 0 1px 3px var(--scrim-strong);
 }
 .destiny-activity-name {
   font-family: var(--display);
-  font-size: 17px;
+  font-size: 16px;
   font-weight: 600;
 }
 .destiny-activity-mode {
@@ -3255,7 +3270,7 @@ img.crest {
   padding: 8px 8px 8px 60px;
   border-radius: var(--r-sm);
   background: var(--obsidian-4) left center / cover no-repeat;
-  text-shadow: 0 1px 3px rgb(0 0 0 / 0.8);
+  text-shadow: 0 1px 3px var(--scrim-strong);
 }
 .destiny-title {
   color: var(--gold);
@@ -3264,7 +3279,7 @@ img.crest {
 .destiny-light {
   color: var(--gold);
   font-family: var(--display);
-  font-size: 22px;
+  font-size: 24px;
   font-variant-numeric: tabular-nums;
 }
 .destiny-light::before {
@@ -3511,7 +3526,7 @@ img.crest {
 .pop-name {
   margin: 0;
   color: var(--silver);
-  font: 650 22px/1.15 var(--display);
+  font: 650 24px/1.15 var(--display);
   letter-spacing: -0.01em;
   text-transform: none;
   overflow-wrap: anywhere;
@@ -3544,7 +3559,7 @@ img.crest {
   gap: 8px;
   margin: 0;
   color: var(--mist-2);
-  font-size: 12.5px;
+  font-size: 13px;
 }
 .pop-dot {
   width: 8px;
@@ -3689,12 +3704,12 @@ button.member:focus-visible {
   white-space: nowrap;
 }
 .glance-game {
-  font-size: 13.5px;
+  font-size: 14px;
   font-weight: 600;
 }
 .glance-place {
   color: var(--silver-2);
-  font-size: 12.5px;
+  font-size: 13px;
 }
 .glance-meta {
   color: var(--mist-2);
@@ -3704,7 +3719,7 @@ button.member:focus-visible {
   display: flex;
   gap: 2px;
   font-family: var(--display);
-  font-size: 22px;
+  font-size: 24px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
@@ -4038,7 +4053,7 @@ button.member:hover .user {
   border-radius: 9px;
   background: var(--eggshell); /* eggshell */
   color: var(--obsidian);
-  font-size: 10.5px;
+  font-size: 11px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   line-height: 14px;
@@ -4097,6 +4112,6 @@ button.member:hover .user {
 .msg-blocked {
   margin: 4px 0 4px 52px;
   color: var(--mist-2);
-  font-size: 12.5px;
+  font-size: 13px;
   font-style: italic;
 }

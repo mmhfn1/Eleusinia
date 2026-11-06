@@ -607,6 +607,12 @@ try {
   await b.ev(expandPop)
   await until('its expand button opens the full card, with the key ending and her version', () =>
     b.ev(`(() => { const d = document.querySelector('dialog[open].card-dialog'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('Key ending') && /Eleusinia \\d+\\.\\d+\\.\\d+/.test(d.textContent) && !!d.querySelector('.pop-banner') })()`), 5)
+  // Remove friend on the card asks first, in the rail's words; Cancel keeps her and the card
+  await b.ev(`[...document.querySelectorAll('dialog[open].card-dialog button')].find(x => x.textContent === 'Remove friend').click()`)
+  await until('Remove friend on the card asks first', () => b.ev(`[...document.querySelectorAll('dialog[open] h1')].some(h => h.textContent === 'Remove Ann?')`), 5)
+  await b.ev(`[...document.querySelectorAll('dialog[open]')].pop().querySelector('.form-actions .button:not(.danger)').click()`)
+  await until('Cancel keeps Ann as a friend and the card open', () => b.ev(`!![...document.querySelectorAll('dialog[open] h1')].every(h => h.textContent !== 'Remove Ann?') && !!document.querySelector('dialog[open].card-dialog')`), 5)
+  if (!(await b.ev(`api.call('state').then((s) => Object.entries(s.profiles).some(([k, p]) => p.name === 'Ann' && s.friends[k] === 'friend'))`))) throw new Error('Cancel removed a friend')
   await b.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
   if (!(await b.ev(`(() => { const h = document.querySelector('.chat-person'); return !!h?.querySelector('.avatar') && h.textContent.includes('Ann') && h.textContent.includes('anntester#') })()`))) throw new Error('the DM header lacks the picture, name or friend ID')
   // Messaging from the panel: it lands in the DM, and the panel says so
