@@ -198,9 +198,11 @@ export function Dialog({ label, close, children, className = '' }: { label: stri
   const ref = useRef<HTMLDialogElement>(null)
   useEffect(() => {
     const d = ref.current!
+    const back = document.activeElement as HTMLElement | null // focus goes back there when the dialog closes
     d.showModal()
     // Start in the first text field if there is one, otherwise on the dialog itself rather than its close button.
     ;(d.querySelector<HTMLElement>('input:not([type=checkbox]), textarea') ?? d.querySelector<HTMLElement>('.dialog-body'))?.focus()
+    return () => void (back?.isConnected && back.focus())
   }, [])
   return (
     <dialog ref={ref} className={className} onClose={close} onClick={(e) => e.target === ref.current && close()} aria-label={label}>

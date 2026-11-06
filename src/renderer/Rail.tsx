@@ -81,7 +81,7 @@ export function Rail({ st, people, open, go, show, run }: Props) {
         {
           label: 'Remove friend',
           danger: true,
-          act: () => setAsk({ title: `Remove ${name}?`, body: 'You stop being friends. Your messages stay on both computers.', yes: 'Remove friend', act: () => (leaveIfOpen(c), run(api.call('removeFriend', k))) }),
+          act: () => setAsk({ title: `Remove ${name}?`, body: 'You stop being friends and this chat closes. Messages already sent stay on both computers; you can send a new friend request later.', yes: 'Remove friend', act: () => (leaveIfOpen(c), run(api.call('removeFriend', k))) }),
         },
         {
           label: 'Block',
@@ -89,7 +89,7 @@ export function Rail({ st, people, open, go, show, run }: Props) {
           act: () =>
             setAsk({
               title: `Block ${name}?`,
-              body: 'You stop being friends, they can no longer send you friend requests or connect to you, and their messages in groups you share are hidden.',
+              body: 'You stop being friends, they can no longer send you friend requests or connect to you, and their messages in groups you share are hidden. You can unblock them in Settings, under Blocked people.',
               yes: 'Block',
               act: () => (leaveIfOpen(c), run(api.call('block', k))),
             }),

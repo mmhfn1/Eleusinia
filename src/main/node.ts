@@ -130,7 +130,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     ...(existsSync(file) ? JSON.parse(readFileSync(file, 'utf8'), (k, v) => (k === 'avatar' ? fromRef(v) : v)) : {}),
   }
   const save = () => {
-    writeFileSync(file + '.tmp', JSON.stringify(s, (k, v) => (k === 'avatar' ? toRef(v) : v)))
+    writeFileSync(file + '.tmp', JSON.stringify(s, function (k, v) { return this === s && k === 'confirmed' ? undefined : k === 'avatar' ? toRef(v) : v }))
     renameSync(file + '.tmp', file) // atomic, so a crash mid-write cannot corrupt the state
   }
   // Groups from before owners: their owner is found once, from the copy on this computer, and kept from then on, so a
@@ -143,6 +143,28 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     for (const f of existsSync(join(dir, 'msgs')) ? readdirSync(join(dir, 'msgs')) : [])
       if (f.endsWith('.jsonl')) s.lastAt[f.slice(0, -6)] = statSync(join(dir, 'msgs', f)).mtimeMs
   }
+  // What each member confirmed holding (`confirmed`) is kept apart in confirmed/<conv>.jsonl: it grows to members ×
+  // authors (about 600 KB for a full group) and changes with every receipt, so inside state.json it would rewrite
+  // all of that every 2 s. A receipt appends only the authors it raised; each file is compacted at start.
+  const confDir = join(dir, 'confirmed')
+  mkdirSync(confDir, { recursive: true })
+  const confFile = (conv: string) => join(confDir, conv + '.jsonl')
+  const writeConfirmed = (conv: string) => {
+    const peers = s.confirmed?.[conv] ?? {}
+    writeFileSync(confFile(conv) + '.tmp', Object.entries(peers).map(([k, h]) => JSON.stringify({ k, h }) + '\n').join(''))
+    renameSync(confFile(conv) + '.tmp', confFile(conv))
+  }
+  for (const f of readdirSync(confDir)) {
+    if (!f.endsWith('.jsonl')) continue
+    const peers = ((s.confirmed ??= {})[f.slice(0, -6)] ??= {})
+    for (const line of readFileSync(join(confDir, f), 'utf8').split('\n')) {
+      try {
+        const { k, h } = JSON.parse(line)
+        for (const [a, n] of Object.entries(h as Have)) (peers[k] ??= {})[a] = Math.max(peers[k]?.[a] ?? 0, n)
+      } catch {} // blank or torn last line
+    }
+  }
+  for (const conv of Object.keys(s.confirmed ?? {})) writeConfirmed(conv) // also moves an older state.json's copy out
 
   // Groups we are in. Groups we left stay stored, so the notice of leaving keeps reaching their members.
   const ours = () => Object.values(s.groups).filter((g) => g.members.includes(me))
@@ -232,7 +254,10 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const have: Have = {}
       const tail: Have = {}
       if (existsSync(logFile(conv))) {
-        for (const line of readFileSync(logFile(conv), 'utf8').split('\n')) {
+        const text = readFileSync(logFile(conv), 'utf8')
+        // A write cut short (power lost) leaves a torn last line: end it, or the next message would be glued to it and lost
+        if (text && !text.endsWith('\n')) appendFileSync(logFile(conv), '\n')
+        for (const line of text.split('\n')) {
           try {
             const m: Msg | { skip: Have } | { tail: Have } = JSON.parse(line)
             if ('skip' in m) for (const [a, n] of Object.entries(m.skip)) have[a] = Math.max(have[a] ?? 0, n)
@@ -276,6 +301,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     sorted.delete(conv)
     haves.delete(conv)
     delete s.confirmed?.[conv]
+    rmSync(confFile(conv), { force: true })
   }
   function append(m: Msg, old = false) {
     if (!old) s.lastAt = { ...s.lastAt, [m.conv]: Date.now() }
@@ -442,7 +468,11 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const was = s.confirmed?.[w.conv]?.[key] ?? {}
       const now: Have = { ...was }
       for (const a of Object.keys(have)) now[a] = Math.max(was[a] ?? 0, Math.min(Number(w.have[a]) || 0, have[a]))
-      if (Object.keys(now).some((a) => now[a] !== was[a])) (((s.confirmed ??= {})[w.conv] ??= {})[key] = now), saveSoon()
+      const raised = Object.keys(now).filter((a) => now[a] !== was[a])
+      if (raised.length) {
+        ;((s.confirmed ??= {})[w.conv] ??= {})[key] = now
+        appendFileSync(confFile(w.conv), JSON.stringify({ k: key, h: Object.fromEntries(raised.map((a) => [a, now[a]])) }) + '\n')
+      }
       // Asking again for what it had confirmed: lost data or someone else with that key. Either way it is not sent
       // again; it is told where to carry on from, so new messages still reach it.
       if (Object.keys(was).some((a) => (Number(w.have[a]) || 0) < was[a])) {
@@ -840,8 +870,11 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (!s.friends[k] && !inGroupWith(k) && !leavers.has(k) && !s.blocked?.[k]) delete s.profiles[k], delete s.profileV?.[k], presence.forget(k), (gone = true)
     for (const [conv, peers] of Object.entries(s.confirmed ?? {})) {
       const ms = members(conv)
-      if (!ms.length) (delete s.confirmed![conv], (gone = true))
-      else for (const k of Object.keys(peers)) if (!ms.includes(k)) delete peers[k], (gone = true)
+      if (!ms.length) delete s.confirmed![conv], rmSync(confFile(conv), { force: true })
+      else if (Object.keys(peers).some((k) => !ms.includes(k))) {
+        for (const k of Object.keys(peers)) if (!ms.includes(k)) delete peers[k]
+        writeConfirmed(conv)
+      }
     }
     if (gone) saveSoon(), pushSoon()
     // Memory only, one entry per peer ever linked: kept while they are linked or still a contact
@@ -1255,7 +1288,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       for (const k of net.keys()) if (s.friends[k] === 'friend') net.send(k, { t: 'gone' })
       await new Promise((r) => setTimeout(r, 1500)) // let those notices leave before the links close
       await this.destroy()
-      for (const f of ['state.json', 'state.json.tmp', 'identity.json', 'msgs', 'files', 'pictures']) rmSync(join(dir, f), { recursive: true, force: true })
+      for (const f of ['state.json', 'state.json.tmp', 'identity.json', 'msgs', 'files', 'pictures', 'confirmed']) rmSync(join(dir, f), { recursive: true, force: true })
     },
     signal(conv: string, to: Key | null, data: unknown) {
       if (noDirect && (data as { k?: string })?.k === 'ice') return

@@ -76,7 +76,16 @@ export default function App() {
     asked.current = now
   }, [st])
 
-  if (!st) return <TitleBar place="" />
+  if (!st)
+    return (
+      <>
+        <TitleBar place="" />
+        <div className="app-loading" role="status">
+          <Emblem size={56} />
+          <p className="quiet">Starting Eleusinia…</p>
+        </div>
+      </>
+    )
   if (!st.profile.handle || editing)
     return (
       <>
@@ -118,7 +127,7 @@ export default function App() {
       {open ? (
         <Conversation key={open} st={st} conv={open} people={people} run={run} home={() => go(null)} />
       ) : (
-        <Home st={st} people={people} run={run} open={go} ring={(c) => (go(c), run(call.join(c)))} newGroup={() => setModal({ kind: 'group' })} />
+        <Home st={st} people={people} run={run} open={go} />
       )}
       {incoming.length > 0 && (
         <div className="incoming-calls">
@@ -169,7 +178,6 @@ export default function App() {
           p={{ ...prof(modal.k), name: people.name(modal.k) }}
           close={() => setModal(null)}
           message={() => go(dmId(st.me, modal.k))}
-          ring={() => (go(dmId(st.me, modal.k)), run(call.join(dmId(st.me, modal.k))))}
           edit={() => setEditing(true)}
           run={run}
         />
@@ -222,9 +230,9 @@ function TitleBar({ place, call: live }: { place: string; call?: { name: string;
   )
 }
 
-// The narrow rail on the far left: identity, Home, each group, and the global actions.
-function Home({ st, people, run, open, ring, newGroup }: { st: State; people: People; run: Run; open: (conv: string) => void; ring: (conv: string) => void; newGroup: () => void }) {
-  const [width, setWidth] = useWidth('home', 260)
+// Home: your friend ID and the search to add people, your friends (a row opens the chat, where calls start too) and
+// friend requests. Groups and direct chats are on the rail, so they are not listed here again.
+function Home({ st, people, run, open }: { st: State; people: People; run: Run; open: (conv: string) => void }) {
   const { prof, name, user, isOnline, show } = people
   const byStatus = (s: string) => Object.keys(st.friends).filter((k) => st.friends[k] === s)
   const friends = byStatus('friend').sort((a, b) => name(a).localeCompare(name(b)))
@@ -245,64 +253,15 @@ function Home({ st, people, run, open, ring, newGroup }: { st: State; people: Pe
           </span>
         ) : null}
       </button>
-      <span className="row-actions">
-        <button className="round" aria-label={`Message ${name(k)}`} title="Message" onClick={() => open(dmId(st.me, k))}>
-          <Icon name="send" size={16} />
-        </button>
-        {isOnline(k) && (
-          <button className="round" aria-label={`Call ${name(k)}`} title="Call" onClick={() => ring(dmId(st.me, k))}>
-            <Icon name="phone" size={16} />
-          </button>
-        )}
-      </span>
     </div>
   )
   const online = friends.filter((k) => st.online.includes(k))
   const offline = friends.filter((k) => !st.online.includes(k))
   const incoming = byStatus('incoming')
   const outgoing = byStatus('outgoing')
-  const groups = Object.values(st.groups).sort((a, b) => groupName(a).localeCompare(groupName(b)))
-  const live = groups.filter((g) => call.active.get(g.id)?.size && call.conv !== g.id)
 
   return (
     <>
-      <aside className="sidebar" style={{ width }} aria-label="Your groups">
-        <header className="sidebar-head">
-          <Wordmark />
-        </header>
-        <FriendId st={st} />
-        <section className="sidebar-section">
-          <div className="section-head">
-            <h2>Groups</h2>
-            <button className="icon-button" aria-label="Create a group" title="Create a group" onClick={newGroup}>
-              <Icon name="plus" size={16} />
-            </button>
-          </div>
-          {groups.map((g) => {
-            const here = g.members.filter(isOnline).length
-            const live = call.active.get(g.id)?.size || call.conv === g.id
-            return (
-              <button key={g.id} className="row-button item" onClick={() => open(g.id)}>
-                <GroupEmblem g={g} size={34} />
-                <span className="row-text">
-                  <span className="row-title">{groupName(g)}</span>
-                  <span className="row-sub">
-                    {here} of {g.members.length} online
-                  </span>
-                </span>
-                {live ? (
-                  <span className="call-chip">
-                    <Icon name="phone" size={14} /> In call
-                  </span>
-                ) : null}
-              </button>
-            )
-          })}
-          {!groups.length && <p className="quiet">No groups yet. Create one to talk with several friends at once.</p>}
-        </section>
-      </aside>
-      <Splitter label="Resize groups sidebar" width={width} set={setWidth} dir={1} />
-
       <main className="workspace home">
         <header className="page-head">
           <h1>Friends</h1>
@@ -311,7 +270,10 @@ function Home({ st, people, run, open, ring, newGroup }: { st: State; people: Pe
           </span>
         </header>
         <div className="page-body">
-          <Search st={st} run={run} />
+          <div className="home-add">
+            <FriendId st={st} />
+            <Search st={st} run={run} />
+          </div>
           <div className="home-grid">
           <div className="home-list">
           <section className="online" aria-label="Online friends">
@@ -326,28 +288,12 @@ function Home({ st, people, run, open, ring, newGroup }: { st: State; people: Pe
           {!friends.length && (
             <div className="empty-state">
               <p className="empty-title">No friends yet</p>
-              <p className="quiet">Search for someone's friend ID above. Your own ID is in the sidebar for them to find you.</p>
+              <p className="quiet">Search for someone's friend ID above, or give them yours to search for.</p>
             </div>
           )}
           </div>
-          {(live.length > 0 || incoming.length > 0 || outgoing.length > 0) && (
+          {(incoming.length > 0 || outgoing.length > 0) && (
           <div className="home-side">
-          {live.map((g) => (
-            <section key={g.id} className="live-call" aria-label={`Call in ${groupName(g)}`}>
-              <h2>Live in {groupName(g)}</h2>
-              <div className="live-row">
-                <span className="live-faces">
-                  {[...call.active.get(g.id)!].slice(0, 4).map((k) => (
-                    <Avatar key={k} k={k} p={prof(k)} size={34} />
-                  ))}
-                </span>
-                <span className="row-sub">{[...call.active.get(g.id)!].map(name).join(', ')}</span>
-                <button className="button primary" onClick={() => ring(g.id)}>
-                  Join call
-                </button>
-              </div>
-            </section>
-          ))}
           {(incoming.length > 0 || outgoing.length > 0) && (
             <section className="requests" aria-label="Friend requests">
               <div className="requests-head">
@@ -407,7 +353,7 @@ function FriendId({ st }: { st: State }) {
         <CopyButton text={st.profile.handle} label="Copy friend ID" />
       </div>
       <p className="row-sub">
-        Unique Key <span className="tail">{keyTail(st.me)}</span>
+        Key ending <span className="tail">{keyTail(st.me)}</span>
       </p>
     </section>
   )
@@ -477,7 +423,7 @@ function Search({ st, run }: { st: State; run: Run }) {
       </p>
       {found && found.length > 0 && (
         <div className="results" role="group" aria-label="Suggestions">
-          {sameId && <p className="notice">Some people here share the same ID. Ask your friend for their Unique Key and choose that one.</p>}
+          {sameId && <p className="notice">Some people here share the same ID. Ask your friend for the end of their key and choose that one.</p>}
           {found.map((r) => (
             <div key={r.key} className={`result ${r.linked ? '' : 'away'}`}>
               <button
@@ -495,7 +441,7 @@ function Search({ st, run }: { st: State; run: Run }) {
                 </span>
                 <span className="row-sub">{status(r.key) ?? (r.linked ? 'Online' : 'Offline')}</span>
               </span>
-              <span className="tail" title="Unique Key">
+              <span className="tail" title="End of their key">
                 {keyTail(r.key)}
               </span>
             </div>
@@ -718,9 +664,9 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
   )
 }
 
-type CardProps = { k: Key; st: State; p: Profile; close: () => void; message: () => void; ring: () => void; edit: () => void; run: Run }
+type CardProps = { k: Key; st: State; p: Profile; close: () => void; message: () => void; edit: () => void; run: Run }
 
-function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
+function Card({ k, st, p, close, message, edit, run }: CardProps) {
   const status = st.friends[k]
   const shared = k === st.me ? [] : Object.values(st.groups).filter((g) => g.members.includes(k)).map(groupName)
   const then = (fn: () => void) => () => {
@@ -748,7 +694,7 @@ function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
           <dd>
             <b>{p.handle || 'not set up yet'}</b> {p.handle && <CopyButton text={p.handle} label="Copy friend ID" />}
           </dd>
-          <dt>Unique Key</dt>
+          <dt>Key ending</dt>
           <dd>
             <b className="tail">{keyTail(k)}</b>
           </dd>
@@ -768,11 +714,6 @@ function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
           {status === 'friend' && (
             <button className="button primary" onClick={then(message)}>
               Message
-            </button>
-          )}
-          {status === 'friend' && st.online.includes(k) && (
-            <button className="button" onClick={then(ring)}>
-              <Icon name="phone" size={16} /> Call
             </button>
           )}
           {status === 'friend' && (
@@ -1019,10 +960,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
   return (
     <>
       <aside className={`voice ${inCall ? 'live' : ''}`} style={{ width: left }} aria-label="Voice call">
-        <button className="home back" onClick={home}>
-          <Icon name="back" size={16} /> Home
-        </button>
-        {group ? (
+        {group && (
           <div className="chamber-id">
             <label className="crest-pick" title="Change the group picture">
               <GroupEmblem g={group} size={56} />
@@ -1061,12 +999,6 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
               />
             )}
           </div>
-        ) : (
-          <button className="chamber-id person" onClick={(e) => show(other, e.currentTarget)} aria-label={`Open ${title}'s profile`}>
-            <Avatar k={other} p={prof(other)} size={64} online={isOnline(other)} />
-            <h1>{title}</h1>
-            <span className="row-sub">{prof(other).handle}</span>
-          </button>
         )}
         <section className="chamber" aria-labelledby="voice-title">
           <h2 id="voice-title">Voice</h2>
@@ -1106,7 +1038,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
                           </span>
                           <span className="row-sub">
                             {STATE_WORDS[p.pc.connectionState] ?? p.pc.connectionState}
-                            {p.relayed && p.pc.connectionState === 'connected' && ' · relayed through the chat link'}
+                            {p.relayed && p.pc.connectionState === 'connected' && ' · through the chat connection, not direct'}
                           </span>
                           <PersonVolume st={st} k={k} name={name(k)} />
                         </span>
@@ -1143,6 +1075,18 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
             </>
           ) : (
             <>
+              {others > 0 && (
+                <ul className="room" aria-label="In the call">
+                  {[...call.active.get(conv)!].map((k) => (
+                    <li key={k}>
+                      <button className="room-who" onClick={(e) => show(k, e.currentTarget)}>
+                        <Avatar k={k} p={prof(k)} size={24} />
+                        <span className="row-title">{name(k)}</span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
               <button className="button primary wide" onClick={() => run(call.join(conv))}>
                 <Icon name="phone" size={16} /> {others ? `Join call (${others})` : 'Start call'}
               </button>

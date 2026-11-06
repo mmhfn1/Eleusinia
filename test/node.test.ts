@@ -353,9 +353,15 @@ test('profiles and confirmations of people we no longer share anything with are 
   expect(a.node.state().profiles[c.key]).toBeDefined()
   expect(a.node.state().profiles[b.key]).toBeDefined() // still a friend
   await a.node.destroy()
-  const saved = JSON.parse(readFileSync(join(a.dir, 'state.json'), 'utf8'))
-  expect(saved.confirmed?.[gid]?.[c.key]).toBeUndefined()
-  expect(saved.confirmed?.[gid]?.[b.key]).toBeDefined()
+  // Kept apart from state.json, one line per raise; after the prune, compacted without C
+  expect(JSON.parse(readFileSync(join(a.dir, 'state.json'), 'utf8')).confirmed).toBeUndefined()
+  const lines = readFileSync(join(a.dir, 'confirmed', gid + '.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  expect(lines.some((l) => l.k === c.key)).toBe(false)
+  expect(lines.some((l) => l.k === b.key)).toBe(true)
+  expect(existsSync(join(a.dir, 'confirmed', other + '.jsonl'))).toBe(false) // left: forgotten with its messages
+  // Read back and compacted at the next start: still there
+  await restart(a).node.destroy()
+  expect(readFileSync(join(a.dir, 'confirmed', gid + '.jsonl'), 'utf8')).toContain(b.key)
 }, 120000)
 
 test('a new member syncs the newest 100 of each author, and older history a page at a time on request', async () => {
@@ -810,6 +816,22 @@ test('leaving a group: others learn it, even one who was offline, and the leaver
   expect(b.node.state().groups[gid]).toBeUndefined()
 }, 120000)
 
+test('a message written after a torn last line (power lost mid-write) is kept', async () => {
+  let a = start()
+  const b = start()
+  await befriend(a, b)
+  const dm = dmId(a.key, b.key)
+  a.node.send(dm, 'one')
+  await a.node.destroy()
+  writeFileSync(join(a.dir, 'msgs', dm + '.jsonl'), readFileSync(join(a.dir, 'msgs', dm + '.jsonl'), 'utf8') + '{"conv":"' + dm)
+  a = restart(a)
+  a.node.send(dm, 'two')
+  await a.node.destroy()
+  a = restart(a)
+  expect(texts(a, dm)).toEqual(['one', 'two'])
+  expect(a.node.history(dm).msgs.map((m) => m.seq)).toEqual([1, 2])
+}, 60000)
+
 test('a stolen key gets no old history: what a peer confirmed is never sent to it again', async () => {
   const a = start()
   let b = start()
@@ -936,7 +958,7 @@ test('deleting an account erases it from this computer, leaves its groups and te
   writeFileSync(join(a.dir, 'identity.json'), '{}') // stands in for the identity file Electron's main process writes
 
   await a.node.deleteAccount()
-  for (const f of ['state.json', 'identity.json', 'msgs', 'pictures']) expect(existsSync(join(a.dir, f))).toBe(false)
+  for (const f of ['state.json', 'identity.json', 'msgs', 'pictures', 'confirmed']) expect(existsSync(join(a.dir, f))).toBe(false)
   await until(() => !b.node.state().friends[a.key] && !b.node.state().groups[gid]?.members.includes(a.key))
 }, 120000)
 

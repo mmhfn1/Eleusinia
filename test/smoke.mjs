@@ -160,7 +160,7 @@ async function until(label, fn, secs = 90) {
 const open = (text) => `(async () => {
   document.querySelector('.rail-mark')?.click()
   for (let i = 0; i < 50; i++) {
-    const row = [...document.querySelectorAll('.row-button')].find(x => x.textContent.includes('${text}'))
+    const row = [...document.querySelectorAll('.rail-group')].find(x => x.getAttribute('aria-label').includes('${text}')) ?? [...document.querySelectorAll('.row-button')].find(x => x.textContent.includes('${text}'))
     if (row) return row.click()
     await new Promise(r => setTimeout(r, 100))
   }
@@ -364,7 +364,7 @@ try {
     await a.ev(`(() => { const i = document.querySelector('.search-box input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, '${typed}'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
     // Strangers cannot link: pictures come from the thumbnail published with the card
     const pic = n === 'Cy' ? '.avatar svg' : '.avatar img'
-    await until(`typing "${typed}" suggests ${n}: ${n === 'Cy' ? 'generated' : 'uploaded'} picture, ID, Unique Key ${tail}`, () =>
+    await until(`typing "${typed}" suggests ${n}: ${n === 'Cy' ? 'generated' : 'uploaded'} picture, ID, key ending ${tail}`, () =>
       a.ev(`(() => { const r = document.querySelectorAll('.result'); return r.length === 1 && !!r[0].querySelector('${pic}') && r[0].textContent.includes('${ids[n]}') && r[0].querySelector('.tail').textContent === '${tail}' })()`))
     await a.ev(`document.querySelector('.result .add-friend').click()`)
     // Served as eleusinia-pic:// (node.ts keeps pictures out of the state), and it must actually load
@@ -401,7 +401,7 @@ try {
   const bobRow = `[...document.querySelectorAll('.online .row-button')].find((x) => x.textContent.includes('Bob'))`
   await a.ev(`${bobRow}.click()`)
   await until("A's chat with Bob shows Ann (you) playing Counter-Strike 2, and Bob playing Destiny 2", () => a.ev(`${dmSide('(you)', 'Counter-Strike 2')} && ${dmSide('Bob', 'Destiny 2')}`))
-  for (const p of [a, b]) await p.ev(`document.querySelector('.home.back').click()`)
+  for (const p of [a, b]) await p.ev(`document.querySelector('.rail-mark').click()`)
 
   console.log('--- Activity: a CS2 match, through Game State Integration')
   await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
@@ -595,7 +595,7 @@ try {
 
   console.log('--- Profile panel')
   // Clicking a person opens their panel beside them: picture over a banner of their own picture, name, friend ID and
-  // about, and a box to message them; the full card, with the Unique Key and their version, opens from it.
+  // about, and a box to message them; the full card, with the key ending and their version, opens from it.
   const annPop = pop((p) => p.textContent.includes('I am Ann') && p.textContent.includes('anntester#') && !!p.querySelector('.pop-portrait .avatar img') && !!p.querySelector('.pop-banner img') && !!p.querySelector('.pop-note input'))
   const beside = (sel) => `(() => { const p = document.querySelector('.profile-pop').getBoundingClientRect(); const r = document.querySelector('${sel}').getBoundingClientRect(); return p.left >= r.right || p.right <= r.left })()`
   await b.ev(`document.querySelector('.msg .user').click()`)
@@ -605,8 +605,8 @@ try {
   await b.ev(`document.querySelector('.msg .user').click()`)
   await until('and again opens it', () => b.ev(annPop), 5)
   await b.ev(expandPop)
-  await until('its expand button opens the full card, with the Unique Key and her version', () =>
-    b.ev(`(() => { const d = document.querySelector('dialog[open].card-dialog'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('Unique Key') && /Eleusinia \\d+\\.\\d+\\.\\d+/.test(d.textContent) && !!d.querySelector('.pop-banner') })()`), 5)
+  await until('its expand button opens the full card, with the key ending and her version', () =>
+    b.ev(`(() => { const d = document.querySelector('dialog[open].card-dialog'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('Key ending') && /Eleusinia \\d+\\.\\d+\\.\\d+/.test(d.textContent) && !!d.querySelector('.pop-banner') })()`), 5)
   await b.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
   if (!(await b.ev(`(() => { const h = document.querySelector('.chat-person'); return !!h?.querySelector('.avatar') && h.textContent.includes('Ann') && h.textContent.includes('anntester#') })()`))) throw new Error('the DM header lacks the picture, name or friend ID')
   // Messaging from the panel: it lands in the DM, and the panel says so
@@ -617,8 +617,8 @@ try {
   await until('a message sent from the panel reaches Ann, and the panel says it was sent', async () => (await a.ev(shows('from the panel'))) && b.ev(pop((p) => !!p.querySelector('.pop-sent'))), 15)
   await b.ev(escape)
   await until('Escape closes the panel', () => b.ev(`!document.querySelector('.profile-pop')`), 5)
-  await b.ev(`document.querySelector('aside.voice .chamber-id.person').click()`)
-  await until('clicking her in the voice sidebar opens the same panel', () => b.ev(annPop), 5)
+  await b.ev(`[...document.querySelectorAll('aside.members .member')].find((x) => x.textContent.includes('Ann')).click()`)
+  await until('clicking her in the members list opens the same panel', () => b.ev(annPop), 5)
   await b.ev(`document.querySelector('.msgs').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`)
   await until('a click elsewhere closes it', () => b.ev(`!document.querySelector('.profile-pop')`), 5)
   await b.ev(`document.querySelector('.rail-mark').click()`)
@@ -887,8 +887,8 @@ try {
   // ELEUSINIA_NO_DIRECT=1 withholds direct routes, as two strict routers would; the call must then go through the relay.
   const forced = process.env.ELEUSINIA_NO_DIRECT === '1'
   await until(`call is ${forced ? 'relayed through the chat link' : 'direct'}`, async () =>
-    (await a.ev(`document.querySelector('.callers').textContent.includes('relayed')`)) === forced &&
-    (await b.ev(`document.querySelector('.callers').textContent.includes('relayed')`)) === forced, 10)
+    (await a.ev(`document.querySelector('.callers').textContent.includes('through the chat connection')`)) === forced &&
+    (await b.ev(`document.querySelector('.callers').textContent.includes('through the chat connection')`)) === forced, 10)
   // and the reports say so, from the route in use rather than the first one that answered
   await until(`A's diagnostics log the route as ${forced ? 'through the chat link' : 'direct'}`, () =>
     a.ev(`api.diagnostics().then((d) => d.events.some((e) => e.text.includes(${forced ? "'goes through the chat link'" : "'goes direct ('"})))`), 10)
@@ -1050,10 +1050,10 @@ try {
     await sleep(500)
     await a.ev(`document.querySelector('.rail-mark')?.click()`)
   }
-  await until('A, B and C list both groups in the Home sidebar', async () => {
+  await until('A, B and C have both groups on the rail', async () => {
     for (const p of [a, b, c]) {
       await p.ev(`document.querySelector('.rail-mark')?.click()`)
-      if (!(await p.ev(`['Trio','Second'].every(g => [...document.querySelectorAll('aside .item')].some(x => x.textContent.includes(g)))`))) return false
+      if (!(await p.ev(`['Trio','Second'].every(g => [...document.querySelectorAll('.rail-group')].some(x => x.getAttribute('aria-label').includes(g)))`))) return false
     }
     return true
   })
@@ -1106,9 +1106,9 @@ try {
   if (!(after[0] === 336 && after[1] === 246 && after[2] === '336' && after[3] === '246')) throw new Error('sidebars did not resize and persist')
   console.log('ok   voice and members sidebars grew by 16px and the widths were saved')
   await a.ev(`document.querySelector('.rail-mark').click()`)
-  const home = await a.ev(`(() => { const s = document.querySelector('.splitter'); s.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); return new Promise(r => setTimeout(() => r(document.querySelector('aside').getBoundingClientRect().width), 200)) })()`)
-  if (home !== 276) throw new Error('home sidebar did not resize: ' + home)
-  console.log('ok   home sidebar resized independently (260 -> 276), narrower than the voice sidebar')
+  // Home has no sidebar: groups and chats are on the rail
+  if (await a.ev(`!!document.querySelector('main.home') && !document.querySelector('aside:not(.members):not(.voice)')`)) console.log('ok   Home is the friends page alone, without a sidebar')
+  else throw new Error('Home still has a sidebar')
 
   console.log('--- Bob goes offline (process killed)')
   b.child.kill()
