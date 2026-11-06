@@ -22,12 +22,13 @@ test('a tampered or re-attributed message fails verification', () => {
 test('a presence note verifies only as signed, by its author, and not dated far ahead', () => {
   const kp = DHT.keyPair()
   const gid = 'ab'.repeat(16)
-  const p = signPresence(1000, gid, kp)
+  const p = signPresence(1000, gid, 'ab12ab12ab12ab12', kp)
   expect(verifyPresence(p, 1000)).toBe(true)
   expect(verifyPresence({ ...p, call: null }, 1000)).toBe(false) // the call is signed too
+  expect(verifyPresence({ ...p, v: 'cd12ab12ab12ab12' }, 1000)).toBe(false) // and the profile version
   expect(verifyPresence({ ...p, key: DHT.keyPair().publicKey.toString('hex') }, 1000)).toBe(false)
-  expect(verifyPresence(signPresence(1000 + 61000, null, kp), 1000)).toBe(false)
-  expect(verifyPresence(signPresence(1000, 'not a group', kp), 1000)).toBe(false)
+  expect(verifyPresence(signPresence(1000 + 61000, null, 'ab12ab12ab12ab12', kp), 1000)).toBe(false)
+  expect(verifyPresence(signPresence(1000, 'not a group', 'ab12ab12ab12ab12', kp), 1000)).toBe(false)
 })
 
 test('missing returns only what the peer lacks', () => {
@@ -274,6 +275,11 @@ test('a group member not linked with us shows online and in a call through prese
   d.node.signal(gid, null, { k: 'leave' })
   await until(() => heard.some((e) => e.from === d.key && e.conv === gid && e.data.k === 'leave'))
   expect(heard.filter((e) => e.data.k === 'join').length).toBe(1)
+  // D renames: B, still not linked with D, sees the new name from D's card, fetched because the note's version changed
+  await new Promise((r) => setTimeout(r, 1100)) // past the last note's limit
+  await d.node.setProfile({ name: 'Dee' })
+  await until(() => b.node.state().profiles[d.key]?.name === 'Dee')
+  expect(b.node.state().online).not.toContain(d.key)
 }, 120000)
 
 test('pictures stay out of state.json and state pushes, and come back after a restart', async () => {
@@ -316,6 +322,34 @@ test('a long backlog arrives whole, in pages; group history from before joining 
   a.node.send(gid, 'new')
   await until(() => b.node.state().chats[gid]?.unread === 1)
 }, 150000)
+
+test('profiles and confirmations of people we no longer share anything with are dropped', async () => {
+  const a = start()
+  const b = start()
+  const c = start()
+  const d = start()
+  await befriend(a, b)
+  await befriend(b, c)
+  await befriend(b, d)
+  const gid = b.node.createGroup('passing', [a.key, c.key])
+  const other = b.node.createGroup('brief', [a.key, d.key])
+  await until(() => !!a.node.state().groups[gid] && !!c.node.state().groups[gid] && !!a.node.state().groups[other])
+  a.node.send(gid, 'hi all')
+  await until(() => texts(c, gid).includes('hi all') && !!a.node.state().profiles[c.key]?.name && !!a.node.state().profiles[d.key]?.name)
+  await new Promise((r) => setTimeout(r, 6000)) // receipts go round every 5 s, so A holds what C confirmed
+  // The owner removes C: A still shares the group, so C's name stays for their old messages, but what C confirmed goes
+  b.node.removeFromGroup(gid, c.key)
+  await until(() => !a.node.state().groups[gid].members.includes(c.key))
+  // A leaves the other group: D, a stranger otherwise, is forgotten
+  a.node.leaveGroup(other)
+  await until(() => !a.node.state().profiles[d.key])
+  expect(a.node.state().profiles[c.key]).toBeDefined()
+  expect(a.node.state().profiles[b.key]).toBeDefined() // still a friend
+  await a.node.destroy()
+  const saved = JSON.parse(readFileSync(join(a.dir, 'state.json'), 'utf8'))
+  expect(saved.confirmed?.[gid]?.[c.key]).toBeUndefined()
+  expect(saved.confirmed?.[gid]?.[b.key]).toBeDefined()
+}, 120000)
 
 test('activity reaches friends only while shared, with only the details chosen, and never someone hidden', async () => {
   const a = start()
@@ -856,7 +890,7 @@ test('deleting an account erases it from this computer, leaves its groups and te
 }, 120000)
 
 test('only a few conversations stay in memory; the rest are read back from disk, and history can be limited', async () => {
-  const a = start()
+  const a = start(undefined, undefined, { keepMsgs: 5 })
   let b = start()
   await befriend(a, b)
   const dm = dmId(a.key, b.key)

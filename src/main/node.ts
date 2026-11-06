@@ -29,7 +29,7 @@ import { idSeed, readClaims, signClaim, withClaim, writeClaims } from '../shared
 import { type FileRef, validFiles } from '../shared/media'
 import { cleanLink } from '../shared/links'
 import { type Area, type Report, cleanReport } from '../shared/reports'
-import { type Presence, groupIdOf, heldFrom, mergeGroup, missing, ownerOf, signAdd, signEdit, signLeft, signMsg, signPresence, signRemoved, validGroup, verifyAdd, verifyMsg, verifyPresence, withLink } from '../shared/sync'
+import { type Presence, groupIdOf, heldFrom, mergeGroup, missing, ownerOf, signAdd, signEdit, signLeft, signMsg, profileVersion, signPresence, signRemoved, validGroup, verifyAdd, verifyMsg, verifyPresence, withLink } from '../shared/sync'
 import { openRequest, requestSeed, sealRequest } from '../shared/sealed'
 import { createImpairment, parseNetSim } from '../shared/netsim'
 import { createFiles } from './files'
@@ -42,6 +42,7 @@ type Saved = {
   lastAt?: Record<string, number> // per conversation: when its newest message arrived here
   blocked?: Record<Key, number> // people we blocked, and when: no friend requests, no links, their messages uncounted
   joinedAt?: Record<string, number> // per group: when it reached us; history written before that is not unread
+  profileV?: Record<Key, string> // the profile version (profileVersion) we hold of each person, from a greeting or their card
   profile: Profile
   friends: Record<Key, FriendStatus>
   profiles: Record<Key, Profile>
@@ -77,10 +78,12 @@ type Opts = {
   diag?: (area: Area, text: string) => void // diagnostic events, kept in memory by the caller
   forwardTo?: number // how many members a group message is passed on to; testing: 0, so only asking delivers
   groupLinks?: number // how many members of each group we dial ourselves (besides friends and people in our call)
+  // Conversations kept in memory: as many recently used ones as fit in this many messages (the one in use always
+  // stays), so a server's busy channels are not read back from disk for every catch-up page. Testing: a few.
+  keepMsgs?: number
 }
 
 // Conversations whose messages stay in memory; the open one and a couple being synced.
-const KEEP_LOGS = 3
 const CATCHUP_PAGE = 200 // messages sent per catch-up round
 const CATCHUP_BACKLOG = 1 << 20 // no new round while this much is still unsent on the link
 // shortcut: one bucket per author and conversation, 20 a second after a burst of 400; servers want per-channel
@@ -88,7 +91,7 @@ const CATCHUP_BACKLOG = 1 << 20 // no new round while this much is still unsent 
 const FLOOD = { burst: 400, perSecond: 20 }
 
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
-export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', links, strict, relayLimits, maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8 }: Opts) {
+export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', links, strict, relayLimits, maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8, keepMsgs = 50000 }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
   const file = join(dir, 'state.json')
   mkdirSync(join(dir, 'msgs'), { recursive: true })
@@ -140,7 +143,19 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
 
   // Groups we are in. Groups we left stay stored, so the notice of leaving keeps reaching their members.
   const ours = () => Object.values(s.groups).filter((g) => g.members.includes(me))
-  const inGroupWith = (key: Key) => ours().some((g) => g.members.includes(key))
+  // Everyone in a group with us, as one set: asked for every link, message and state push, which scanning each
+  // group's members would make cost groups × members. Rebuilt when any group's member list changes (a merge always
+  // makes a new list; nothing changes one in place).
+  let matesOf: unknown[] = []
+  let mates = new Set<Key>()
+  function inGroupWith(key: Key) {
+    const gs = Object.values(s.groups)
+    if (gs.length !== matesOf.length || gs.some((g, i) => g.members !== matesOf[i])) {
+      matesOf = gs.map((g) => g.members)
+      mates = new Set(gs.filter((g) => g.members.includes(me)).flatMap((g) => g.members))
+    }
+    return mates.has(key)
+  }
   const known = (key: Key) => s.friends[key] === 'friend' || inGroupWith(key)
   const wants = (key: Key) => known(key) || s.friends[key] === 'outgoing'
 
@@ -182,7 +197,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     const to = net.keys().filter((k) => k !== from && k !== p.key && sharesGroup(k, p.key))
     for (const k of from ? few(to, 3) : to) net.send(k, { t: 'presence', p })
   }
-  const announcePresence = () => passPresence(signPresence(Date.now(), ourCall, keyPair), null)
+  const ownNote = () => signPresence(Date.now(), ourCall, profileVersion(s.profile), keyPair)
+  const announcePresence = () => passPresence(ownNote(), null)
   // Someone not linked with us moved between group calls: the page hears it as their join or leave signal, and from
   // there links up with them as with anyone in its call.
   function callMoved(k: Key, from: string | null, to: string | null) {
@@ -232,6 +248,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   // Message logs live on disk. Only the few most recently used conversations stay in memory, so long histories
   // cost nothing while unused; what each author has sent so far (`have`) is tiny and always kept.
   const logs = new Map<string, Msg[]>() // least recently used first
+  const sorted = new Map<string, Msg[]>() // a cached log in time order, for history; dropped when a message is added
   const haves = new Map<string, Have>()
   const logFile = (conv: string) => join(dir, 'msgs', conv + '.jsonl')
   // Callers must pass a conv that members() accepted: it becomes a file name.
@@ -253,12 +270,20 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       haves.set(conv, have)
     }
     logs.set(conv, msgs)
-    for (const old of logs.keys()) if (logs.size > KEEP_LOGS) logs.delete(old)
+    let total = 0
+    for (const l of logs.values()) total += l.length
+    for (const [old, l] of logs) {
+      if (total <= keepMsgs || old === conv) break
+      logs.delete(old)
+      sorted.delete(old)
+      total -= l.length
+    }
     return msgs
   }
   const haveOf = (conv: string) => haves.get(conv) ?? (msgsOf(conv), haves.get(conv)!)
   function forget(conv: string) {
     logs.delete(conv)
+    sorted.delete(conv)
     haves.delete(conv)
     delete s.confirmed?.[conv]
   }
@@ -269,6 +294,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     pushSoon()
     haveOf(m.conv)[m.author] = m.seq
     logs.get(m.conv)?.push(m)
+    sorted.delete(m.conv)
     appendFileSync(logFile(m.conv), JSON.stringify(m) + '\n')
     emit({ type: 'msg', m })
     if (m.files) files.note(m)
@@ -322,7 +348,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     hi(key)
     if (s.friends[key] === 'friend') sendHave(key, dmId(me, key))
     for (const g of shared) sendHave(key, g.id)
-    if (shared.length) net.send(key, { t: 'presence', p: signPresence(Date.now(), ourCall, keyPair) })
+    if (shared.length) net.send(key, { t: 'presence', p: ownNote() })
     sendActivity(key)
   }
   function reach(key: Key) {
@@ -383,6 +409,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       else reachable.delete(key)
       // Every link opening greets: only a changed profile is written and sent to the window
       const profile = cleanProfile(w)
+      if (s.profileV?.[key] !== profileVersion(profile)) s.profileV = { ...s.profileV, [key]: profileVersion(profile) }
       if (JSON.stringify(profile) === JSON.stringify(s.profiles[key])) return pushSoon()
       s.profiles[key] = profile
       return changed()
@@ -509,13 +536,15 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const p = w.p
       if (!verifyPresence(p) || p.key === me || p.at <= Date.now() - PRESENCE_TTL || !inGroupWith(p.key) || s.blocked?.[p.key]) return
       const was = present.get(p.key)
-      // Newer only: at most every 20 s, or every second when their call changed, so a member cannot flood everyone
-      if (was && p.at < was.at + (p.call === was.call ? 20000 : 1000)) return
+      // Newer only: at most every 20 s, every 10 s when their profile changed, every second when their call did. Each
+      // note is passed on by everyone, so these limits are what keeps one member from flooding all the others.
+      if (was && p.at < was.at + (p.call !== was.call ? 1000 : p.v !== was.v ? 10000 : 20000)) return
       const before = was && !gone.has(p.key) && was.at > Date.now() - PRESENCE_TTL ? was.call : null
       present.set(p.key, p)
       gone.delete(p.key)
       passPresence(p, key)
       if (!net.linked(p.key)) callMoved(p.key, before, p.call)
+      if (!net.linked(p.key) && s.profileV?.[p.key] !== p.v) refreshCard(p.key, p.v)
       pushSoon()
     } else if (w.t === 'pkt') {
       if (typeof w.d === 'string') relay.deliver(key, Buffer.from(w.d, 'base64'))
@@ -767,9 +796,26 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (Date.now() - Math.max(at, signalled.get(k) ?? 0) > IDLE) net.drop(k), signalled.delete(k)
     }
   }
+  // What we keep about people only while they share something with us: their profile (also those who left one of our
+  // groups, whose old messages still show their name, and blocked people, for the Blocked list) and, per
+  // conversation, what each member confirmed holding. Links come and go with bounded links, so without this both
+  // would grow with everyone ever seen, and state.json is rewritten with every change.
+  function prune() {
+    let gone = false
+    const leavers = new Set(ours().flatMap((g) => [...Object.keys(g.left ?? {}), ...Object.keys(g.removed ?? {})]))
+    for (const k of Object.keys(s.profiles))
+      if (!s.friends[k] && !inGroupWith(k) && !leavers.has(k) && !s.blocked?.[k]) delete s.profiles[k], delete s.profileV?.[k], clearTimeout(refreshed.get(k)?.later), refreshed.delete(k), (gone = true)
+    for (const [conv, peers] of Object.entries(s.confirmed ?? {})) {
+      const ms = members(conv)
+      if (!ms.length) (delete s.confirmed![conv], (gone = true))
+      else for (const k of Object.keys(peers)) if (!ms.includes(k)) delete peers[k], (gone = true)
+    }
+    if (gone) saveSoon(), pushSoon()
+  }
   const redial = () => {
     relayTick()
     expirePresence()
+    prune()
     const picked = new Set(ours().flatMap(linkPick))
     closeIdle(picked)
     const keys = new Set([...picked, ...demand.keys()])
@@ -947,6 +993,36 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     }
   }
   const namer = setInterval(nameUnlinked, redialMs * 2)
+  // A member not linked with us changed their name or picture (their presence note's version differs): their card
+  // again. A new version is fetched at most every 10 s per person (a later one waits for that, once), the same one
+  // again only after 5 minutes. The card has a thumbnail and a shortened about; a link brings the rest.
+  type Refresh = { at: number; v: string; tries: number; later?: ReturnType<typeof setTimeout> }
+  const refreshed = new Map<Key, Refresh>()
+  function refreshCard(k: Key, v: string) {
+    const r = refreshed.get(k)
+    const wait = !r ? 0 : r.v === v ? r.at + 300000 - Date.now() : r.at + 10000 - Date.now()
+    if (wait > 0) {
+      if (r && r.v !== v && !r.later) r.later = setTimeout(() => ((r.later = undefined), refreshCard(k, v)), wait)
+      return
+    }
+    const entry: Refresh = { at: Date.now(), v, tries: r?.v === '' ? r.tries : 0 }
+    refreshed.set(k, entry)
+    tell(`card:${k}`, `…${k.slice(-6)} has a new profile; fetching their card`)
+    fetchCard(k).then((card) => {
+      tell(`card:${k}`, `…${k.slice(-6)}'s card: ${!card ? 'none' : JSON.stringify(card) === JSON.stringify(s.profiles[k]) ? 'not new yet' : 'new'}`)
+      if (!card || !known(k) || net.linked(k)) return
+      // The same card again is an old copy (the new one not yet out on the DHT): tried again in 10 s, three times
+      if (JSON.stringify(card) === JSON.stringify(s.profiles[k])) {
+        if (++entry.tries > 3) return
+        entry.v = ''
+        entry.later ??= setTimeout(() => ((entry.later = undefined), refreshCard(k, v)), 10000)
+        return
+      }
+      s.profiles[k] = card
+      s.profileV = { ...s.profileV, [k]: v }
+      changed()
+    })
+  }
 
   return {
     state,
@@ -969,6 +1045,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       changed()
       publishCard()
       for (const k of net.keys()) if (wants(k)) hi(k)
+      announcePresence() // members not linked with us see the new version and fetch the card
       if (fresh) await Promise.all([announce(), publishId().catch(() => {})]) // so the ID can be found as soon as setup finishes
     },
     // People matching what has been typed so far: an exact friend ID (online, or offline through their ID card), or
@@ -1109,7 +1186,11 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       members(conv).forEach(need) // looking at a conversation is a reason to reach its people
       const all = msgsOf(conv)
       const n = Math.max(1, Number(limit) || 1)
-      return { msgs: all.length > n ? [...all].sort((a, b) => a.ts - b.ts).slice(-n) : all, acked: s.acked[conv] ?? 0, total: all.length }
+      if (all.length <= n) return { msgs: all, acked: s.acked[conv] ?? 0, total: all.length }
+      // Sorted once per change, not on every look (opening the chat, loading earlier messages)
+      let byTime = sorted.get(conv)
+      if (!byTime) sorted.set(conv, (byTime = [...all].sort((a, b) => a.ts - b.ts)))
+      return { msgs: byTime.slice(-n), acked: s.acked[conv] ?? 0, total: all.length }
     },
     // Works with nobody online: the message is logged now and synced whenever a member connects.
     // refs: files added with addFile or addBytes first, so we can hand them to whoever asks.
@@ -1248,6 +1329,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       clearInterval(announcer)
       clearInterval(presenceTimer)
       for (const t of floodRetry.values()) clearTimeout(t)
+      for (const r of refreshed.values()) clearTimeout(r.later)
       clearInterval(watcher)
       clearInterval(namer)
       clearInterval(probeReset)

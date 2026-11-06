@@ -1,4 +1,4 @@
-import { type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useReducer, useRef, useState } from 'react'
+import { type FormEvent, type KeyboardEvent, type ReactNode, memo, useEffect, useReducer, useRef, useState } from 'react'
 import { type Offset, clampOffset, cropRect } from '../shared/crop'
 import { type Group, type Key, type Profile, type State, dmId, keyTail } from '../shared/protocol'
 import * as call from './call'
@@ -950,6 +950,36 @@ function GroupName({ g, run }: { g: Group; run: Run }) {
   )
 }
 
+type MemberProps = { k: Key; p: Profile; name: string; you: boolean; online: boolean; speaking: boolean; a?: State['activity'][Key]; show: People['show'] }
+// One row of the members list. Kept from redrawing unless it changed: every state push builds new profile and activity
+// objects, and a server's list has a couple of hundred rows. show only opens things, so it is left out.
+const MemberRow = memo(
+  function MemberRow({ k, p, name, you, online, speaking, a, show }: MemberProps) {
+    return (
+      <button className={`member${speaking ? ' speaking' : ''}`} onClick={(e) => show(k, e.currentTarget)} onContextMenu={card(show, k)} aria-label={`${name}${you ? ' (you)' : ''}: open profile`}>
+        <Avatar k={k} p={p} size={32} online={online} />
+        <span className="row-text">
+          <span className="row-title">
+            <span className="user">{name}</span>
+            {you && <span className="row-sub"> (you)</span>}
+          </span>
+          <span className="row-sub">{a?.game ? <ActivityLine a={a} /> : p.handle}</span>
+        </span>
+      </button>
+    )
+  },
+  (x, y) =>
+    x.k === y.k &&
+    x.name === y.name &&
+    x.you === y.you &&
+    x.online === y.online &&
+    x.speaking === y.speaking &&
+    x.p.name === y.p.name &&
+    x.p.handle === y.p.handle &&
+    x.p.avatar === y.p.avatar &&
+    JSON.stringify(x.a?.game ?? null) === JSON.stringify(y.a?.game ?? null),
+)
+
 // What shows speaking rings redraws by itself when someone starts or stops speaking, not the conversation around it.
 function Speaking({ children }: { children: () => ReactNode }) {
   useSpeaking()
@@ -971,16 +1001,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
   // A speaking ring wherever someone in this call appears.
   const ring = (k: Key) => (inCall && call.speaking.has(k) ? ' speaking' : '')
   const member = (k: Key) => (
-    <button className={`member${ring(k)}`} key={k} onClick={(e) => show(k, e.currentTarget)} onContextMenu={card(show, k)} aria-label={`${name(k)}${k === st.me ? ' (you)' : ''}: open profile`}>
-      <Avatar k={k} p={prof(k)} size={32} online={isOnline(k)} />
-      <span className="row-text">
-        <span className="row-title">
-          <span className="user">{name(k)}</span>
-          {k === st.me && <span className="row-sub"> (you)</span>}
-        </span>
-        <span className="row-sub">{st.activity[k]?.game ? <ActivityLine a={st.activity[k]} /> : prof(k).handle}</span>
-      </span>
-    </button>
+    <MemberRow key={k} k={k} p={prof(k)} name={name(k)} you={k === st.me} online={isOnline(k)} speaking={!!ring(k)} a={st.activity[k]} show={show} />
   )
   // One round, icon-only call button; its name stays readable to screen readers (and to the smoke test).
   const control = (label: string, icon: Parameters<typeof Icon>[0]['name'], onClick: () => void, pressed?: boolean, extra = '') => (
