@@ -7,7 +7,7 @@ import { type Key, type Profile, type State, MAX_TEXT, dmId } from '../shared/pr
 import { GameGlance } from './Activity'
 import * as call from './call'
 import { type People, type Run, api } from './common'
-import { PersonVolume } from './Media'
+import { PersonVolume, useSpeaking } from './Media'
 import { Avatar, Icon } from './ui'
 
 // The banner behind a profile: the art of the game they are playing, else their own picture, blurred into fog. It is
@@ -25,16 +25,19 @@ export function ProfileBanner({ st, k, p }: { st: State; k: Key; p: Profile }) {
 type PopProps = { k: Key; from: HTMLElement; st: State; people: People; run: Run; close: () => void; expand: () => void; chat: () => void; edit: () => void }
 
 export function ProfilePop({ k, from, st, people, run, close, expand, chat, edit }: PopProps) {
+  useSpeaking()
   const ref = useRef<HTMLDivElement>(null)
   const [at, setAt] = useState<{ left: number; top: number; side: 'right' | 'left' | 'below' | 'above' } | null>(null)
   const p = people.prof(k)
   const name = people.name(k)
   const me = k === st.me
   const status = st.friends[k]
-  const online = me || st.online.includes(k)
+  const online = people.isOnline(k)
   const inCall = !me && !!call.conv && call.peers.has(k)
   const voice = call.voices.get(k)
   const game = st.activity[k]?.game
+  const blocked = st.blocked.includes(k)
+  const [blocking, setBlocking] = useState(false) // asked "are you sure" first
 
   // Beside what was clicked: to its right when there is room, else to its left; a wide row (the friends list) gets it
   // dropped from its start instead, so it opens by the person rather than across the window. Always inside the window.
@@ -121,6 +124,10 @@ export function ProfilePop({ k, from, st, people, run, close, expand, chat, edit
           <button className="button wide" onClick={() => (close(), edit())}>
             Edit profile
           </button>
+        ) : blocked ? (
+          <button className="button wide" onClick={() => run(api.call('unblock', k))}>
+            Unblock
+          </button>
         ) : status === 'friend' ? (
           <Note k={k} name={name} st={st} run={run} chat={chat} />
         ) : status === 'outgoing' ? (
@@ -130,6 +137,21 @@ export function ProfilePop({ k, from, st, people, run, close, expand, chat, edit
             <Icon name="userPlus" size={16} /> {status === 'incoming' ? 'Accept friend request' : 'Add friend'}
           </button>
         )}
+        {!me && !blocked && (blocking ? (
+          <div className="pop-confirm" role="group" aria-label={`Block ${name}?`}>
+            <p className="pop-quiet">{status === 'friend' ? 'This also removes them as a friend. ' : ''}Their requests and messages stop reaching you. Unblock any time in Settings.</p>
+            <button className="button danger" onClick={() => (setBlocking(false), run(api.call('block', k)))}>
+              Block {name}
+            </button>
+            <button className="button" onClick={() => setBlocking(false)}>
+              Cancel
+            </button>
+          </div>
+        ) : (
+          <button className="link-button pop-block" onClick={() => setBlocking(true)}>
+            Block
+          </button>
+        ))}
       </div>
     </div>,
     document.body,

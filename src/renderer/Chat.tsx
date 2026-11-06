@@ -1,15 +1,17 @@
 // A conversation's messages: history, live updates, delivery marks and the message box.
-import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode, memo, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react'
 import { type LinkPreview, firstLink, splitLinks } from '../shared/links'
 import { type FileRef, MAX_FILES, inlineKind, sizeLabel } from '../shared/media'
-import { type FileState, type Key, type Msg, type State, MAX_TEXT, stack } from '../shared/protocol'
+import { type FileState, type Key, type Msg, type Profile, type State, MAX_TEXT, stack } from '../shared/protocol'
 import * as call from './call'
-import { Avatar, Dialog, Emblem, GroupEmblem, Icon } from './ui'
-import { type People, type Run, api } from './common'
+import { Avatar, Confirm, Dialog, Emblem, Icon } from './ui'
+import { type People, type Run, api, leaveGroupAsk } from './common'
 
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString()
 const dayLabel = (ts: number) =>
   sameDay(ts, Date.now()) ? 'Today' : sameDay(ts, Date.now() - 864e5) ? 'Yesterday' : new Date(ts).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+// A message from before times were checked could hold one no Date can show; toISOString would throw on it
+const iso = (ts: number) => (Number.isFinite(new Date(ts).getTime()) ? new Date(ts).toISOString() : undefined)
 const clock = (ts: number) => new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 
 type ChatProps = { st: State; conv: string; title: string; people: People; run: Run; home: () => void; stage: ReactNode }
@@ -23,7 +25,17 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   const [msgs, setMsgs] = useState<Msg[]>([])
   const [acked, setAcked] = useState(0)
   const [loaded, setLoaded] = useState(false)
+  const [failed, setFailed] = useState('') // the history could not be read
   const [total, setTotal] = useState(0)
+  const [earlier, setEarlier] = useState(false) // older history on other members' computers (we joined after it)
+  // Asking members for that older history: what the count was when we asked, and whether nobody answered in time
+  const [olderAsk, setOlderAsk] = useState<{ conv: string; total: number; none?: boolean } | null>(null)
+  const asking = olderAsk?.conv === conv && !olderAsk.none && total <= olderAsk.total
+  useEffect(() => {
+    if (!asking) return
+    const t = setTimeout(() => setOlderAsk((a) => a && { ...a, none: true }), 8000)
+    return () => clearTimeout(t)
+  }, [asking])
   const [more, setMore] = useState({ conv, limit: PAGE })
   const limit = more.conv === conv ? more.limit : PAGE
   const kept = useRef<number | null>(null) // the list's height before older messages were added above
@@ -38,14 +50,28 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   const asked = useRef(new Set<string>())
   const [viewing, setViewing] = useState<FileRef | null>(null)
   const link = useLinkDraft()
+  // Read only while really being read: the window focused (not just visible on a second screen during a game) and the
+  // newest messages in view. Checked again when the window gains focus or the list reaches the bottom.
+  const [, seen] = useReducer((n: number) => n + 1, 0)
+  useEffect(() => {
+    window.addEventListener('focus', seen)
+    document.addEventListener('visibilitychange', seen)
+    return () => (window.removeEventListener('focus', seen), document.removeEventListener('visibilitychange', seen))
+  }, [])
+  const unread = st.chats[conv]?.unread ?? 0
+  useEffect(() => {
+    if (unread && !document.hidden && document.hasFocus() && atBottom.current) api.call('markRead', conv)
+  })
 
   useEffect(() => {
     api.call('history', conv, limit).then((h) => {
       setMsgs(h.msgs)
       setAcked(h.acked)
       setTotal(h.total)
+      setEarlier(!!h.earlier)
       setLoaded(true)
-    })
+      setFailed('')
+    }, (e) => setFailed(String(e?.message ?? e).replace(/^.*Error: /, '')))
     return api.on((e) => {
       if (e.type === 'msg' && e.m.conv === conv) {
         setMsgs((m) => [...m, e.m].slice(-(limit + PAGE))) // a chat left open in a busy group keeps a bounded window
@@ -143,42 +169,19 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
     const mine = m.author === st.me
     const pending = mine && m.seq > acked
     rows.push(
-      <div key={m.author + m.seq} className={`msg ${mine ? 'mine' : ''} ${continued ? 'continued' : ''}`}>
-        <div className="msg-gutter">{continued ? <time className="msg-hover-time">{clock(m.ts)}</time> : <Avatar k={m.author} p={prof(m.author)} size={36} />}</div>
-        <div className="msg-main">
-          {!continued && (
-            <div className="msg-head">
-              {user(m.author)}
-              <time dateTime={new Date(m.ts).toISOString()} title={new Date(m.ts).toLocaleString()}>
-                {clock(m.ts)}
-              </time>
-            </div>
-          )}
-          {m.text && (
-            <p className="msg-text">
-              <MsgText text={m.text} />
-            </p>
-          )}
-          {m.link && <LinkCard l={m.link} />}
-          {m.files && (
-            <div className="msg-files">
-              {m.files.map((f) => (
-                <Attachment key={f.h} f={f} st={files[f.h]} view={() => setViewing(f)} />
-              ))}
-            </div>
-          )}
-          {pending && (
-            <span className="msg-status pending" title="Not delivered yet. It will be sent automatically when they are online.">
-              <Icon name="clock" size={12} /> pending, sends when they are online
-            </span>
-          )}
-          {m === lastDelivered && (
-            <span className="msg-status delivered">
-              <Icon name="check" size={12} /> Delivered
-            </span>
-          )}
-        </div>
-      </div>,
+      <MsgRow
+        key={m.author + m.seq}
+        m={m}
+        continued={continued}
+        mine={mine}
+        pending={pending}
+        delivered={m === lastDelivered}
+        p={prof(m.author)}
+        name={name(m.author)}
+        files={m.files?.map((f) => files[f.h]) ?? []}
+        show={show}
+        view={setViewing}
+      />,
     )
   })
 
@@ -186,13 +189,11 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
     <main className="workspace chat" onDragOver={(e) => e.dataTransfer.types.includes('Files') && e.preventDefault()} onDrop={drop}>
       <header className="chat-head">
         {group ? (
-          <>
-            <GroupEmblem g={group} size={32} />
-            <div className="row-text">
-              <h1>{title}</h1>
-              <span className="row-sub">{`${group.members.length} members · ${group.members.filter(isOnline).length} online`}</span>
-            </div>
-          </>
+          // The group's name heads the sidebar, as a server's will; this is its one room, as a channel will be
+          <div className="row-text">
+            <span className="chat-title">Chat</span>
+            <span className="row-sub">{`${group.members.length} members, ${group.members.filter(isOnline).length} online`}</span>
+          </div>
         ) : (
           <button className="chat-person" onClick={(e) => show(other, e.currentTarget)} aria-label={`Open ${title}'s profile`}>
             <Avatar k={other} p={prof(other)} size={32} online={isOnline(other)} />
@@ -237,40 +238,17 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
         )}
       </header>
       {removing && (
-        <Dialog label="Remove member" close={() => setRemoving(null)}>
-          <h1>Remove {name(removing)}?</h1>
-          <p>They stop receiving this group's messages and cannot be added back. Anyone only they added leaves with them until someone adds them again.</p>
-          <div className="form-actions">
-            <button className="button" onClick={() => setRemoving(null)}>
-              Cancel
-            </button>
-            <button className="button danger" onClick={() => (run(api.call('removeFromGroup', conv, removing)), setRemoving(null))}>
-              <Icon name="leave" size={16} /> Remove
-            </button>
-          </div>
-        </Dialog>
+        <Confirm
+          ask={{
+            title: `Remove ${name(removing)}?`,
+            body: "They stop receiving this group's messages and cannot be added back. Anyone only they added leaves with them until someone adds them again.",
+            yes: 'Remove',
+            act: () => run(api.call('removeFromGroup', conv, removing)),
+          }}
+          close={() => setRemoving(null)}
+        />
       )}
-      {leaving && (
-        <Dialog label="Leave group" close={() => setLeaving(false)}>
-          <h1>Leave {title}?</h1>
-          <p>Its messages are deleted from this computer, and you cannot be added back to this group.</p>
-          <div className="form-actions">
-            <button className="button" onClick={() => setLeaving(false)}>
-              Cancel
-            </button>
-            <button
-              className="button danger"
-              onClick={() => {
-                if (call.conv === conv) call.leave()
-                run(api.call('leaveGroup', conv))
-                home()
-              }}
-            >
-              <Icon name="leave" size={16} /> Leave group
-            </button>
-          </div>
-        </Dialog>
-      )}
+      {leaving && <Confirm ask={leaveGroupAsk(title, () => (call.conv === conv && call.leave(), run(api.call('leaveGroup', conv)), home()))} close={() => setLeaving(false)} />}
 
       {viewing && (
         <Dialog label={viewing.n} close={() => setViewing(null)} className="image-view">
@@ -281,7 +259,17 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
         </Dialog>
       )}
       {stage}
-      <div className="msgs" ref={list} onScroll={(e) => (atBottom.current = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 40)}>
+      <div className="msgs" ref={list} onScroll={(e) => {
+          const was = atBottom.current
+          atBottom.current = e.currentTarget.scrollHeight - e.currentTarget.scrollTop - e.currentTarget.clientHeight < 40
+          if (atBottom.current && !was) seen()
+        }}>
+        {failed && (
+          <div className="empty-state" role="alert">
+            <p className="empty-title">These messages could not be read</p>
+            <p className="quiet">{failed}. Open the chat again to retry; if it keeps failing, send a report from the Eleusinia menu (right-click the emblem).</p>
+          </div>
+        )}
         {loaded && !sorted.length && (
           <div className="empty-state">
             <Emblem size={84} className="faint" />
@@ -293,17 +281,21 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
             </p>
           </div>
         )}
-        {total > msgs.length && (
+        {(total > msgs.length || earlier) && (
           <button
             className="button subtle earlier"
+            disabled={asking}
             onClick={() => {
               kept.current = list.current!.scrollHeight
               setMore({ conv, limit: limit + PAGE })
+              // Everything here is shown: the next page comes from another member, arriving as messages
+              if (total <= msgs.length) setOlderAsk({ conv, total }), api.call('older', conv)
             }}
           >
-            Show earlier messages
+            {asking ? 'Asking members who are online…' : 'Show earlier messages'}
           </button>
         )}
+        {olderAsk?.conv === conv && olderAsk.none && total <= olderAsk.total && <p className="quiet earlier-none">No one online has earlier messages right now. Try again later.</p>}
         {rows}
       </div>
 
@@ -365,6 +357,76 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
 
 // One shared file in a message. Pictures show inline (a tiny preview until they arrive); videos and sounds play
 // inline once downloaded; anything else is a card to download and then find in its folder.
+type RowProps = {
+  m: Msg
+  continued: boolean
+  mine: boolean
+  pending: boolean
+  delivered: boolean
+  p: Profile
+  name: string
+  files: (FileState | undefined)[]
+  show: People['show']
+  view: (f: FileRef) => void
+}
+// One message. Kept from redrawing unless it changed: every state push (someone coming online) would otherwise redraw
+// the whole history. show and view are left out of the comparison: they only open things and never change what shows.
+const MsgRow = memo(
+  function MsgRow({ m, continued, mine, pending, delivered, p, name, files, show, view }: RowProps) {
+    return (
+      <div className={`msg ${mine ? 'mine' : ''} ${continued ? 'continued' : ''}`}>
+        <div className="msg-gutter">{continued ? <time className="msg-hover-time">{clock(m.ts)}</time> : <Avatar k={m.author} p={p} size={36} />}</div>
+        <div className="msg-main">
+          {!continued && (
+            <div className="msg-head">
+              <button className="user" onClick={(e) => show(m.author, e.currentTarget)}>
+                {name}
+              </button>
+              <time dateTime={iso(m.ts)} title={new Date(m.ts).toLocaleString()}>
+                {clock(m.ts)}
+              </time>
+            </div>
+          )}
+          {m.text && (
+            <p className="msg-text">
+              <MsgText text={m.text} />
+            </p>
+          )}
+          {m.link && <LinkCard l={m.link} />}
+          {m.files && (
+            <div className="msg-files">
+              {m.files.map((f, i) => (
+                <Attachment key={f.h} f={f} st={files[i]} view={() => view(f)} />
+              ))}
+            </div>
+          )}
+          {pending && (
+            <span className="msg-status pending" title="Not delivered yet. It will be sent automatically when they are online.">
+              <Icon name="clock" size={12} /> pending, sends when they are online
+            </span>
+          )}
+          {delivered && (
+            <span className="msg-status delivered">
+              <Icon name="check" size={12} /> Delivered
+            </span>
+          )}
+        </div>
+      </div>
+    )
+  },
+  (a, b) =>
+    a.m === b.m &&
+    a.continued === b.continued &&
+    a.mine === b.mine &&
+    a.pending === b.pending &&
+    a.delivered === b.delivered &&
+    a.name === b.name &&
+    a.p.name === b.p.name &&
+    a.p.avatar === b.p.avatar &&
+    a.files.length === b.files.length &&
+    a.files.every((f, i) => f === b.files[i]),
+)
+
 function Attachment({ f, st, view }: { f: FileRef; st?: FileState; view: () => void }) {
   const kind = inlineKind(f.t)
   const done = st?.state === 'done'

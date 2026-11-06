@@ -64,6 +64,7 @@ export function createRelay(toPeer: (key: Key, packet: Buffer) => void, interfac
       if (p?.pc) p.sock.send(packet, p.pc.port, p.pc.address)
     },
     close,
+    has: (key: Key) => ports.has(key), // a call with them is using the link
     closeAll: () => [...ports.keys()].forEach(close),
   }
 }

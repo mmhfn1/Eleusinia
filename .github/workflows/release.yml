@@ -14,8 +14,10 @@ on:
       - 'test/**'
   workflow_dispatch:
 
+# Read-only by default: the build runs third-party code (npm packages, electron-builder), which must not get a token
+# that can push code or publish. Only the publish job, which runs nothing but gh, may write.
 permissions:
-  contents: write # to publish the release
+  contents: read
 
 concurrency:
   group: release
@@ -33,6 +35,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0 # the release tags, to number this one
+          persist-credentials: false
       - id: v
         run: |
           VERSION=$(node -e "
@@ -66,6 +69,8 @@ jobs:
       VERSION: ${{ needs.version.outputs.version }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false # the token is not left in .git/config for the build steps to read
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
@@ -121,7 +126,8 @@ jobs:
           MAIN_VITE_BUNGIE_CLIENT_SECRET: ${{ secrets.BUNGIE_CLIENT_SECRET }}
         run: |
           npx electron-vite build
-          npx electron-builder ${{ matrix.target }} --publish never
+          # electron-builder downloads Electron and its tools from GitHub, which sometimes answers 504: tried up to 3 times
+          for i in 1 2 3; do npx electron-builder ${{ matrix.target }} --publish never && break; [ $i = 3 ] && exit 1; echo "retrying in 30 s"; sleep 30; done
 
       # The update signature installed copies require before installing (src/shared/updatesig.ts). Fails without the
       # key, so no unsigned release goes out.
@@ -151,6 +157,8 @@ jobs:
   publish:
     needs: [version, build]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # to publish the release
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:

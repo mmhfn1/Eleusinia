@@ -195,6 +195,8 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
     listening,
     linked: (key: Key) => links.has(key),
     keys: () => [...links.keys()],
+    // We dialed it, and when it opened: links we made and no longer need are ours to close
+    ours: (key: Key) => (links.get(key)?.initiator === me ? links.get(key)!.at : null),
     send(key: Key, w: Wire) {
       links.get(key)?.sock.write(JSON.stringify(w) + '\n')
     },

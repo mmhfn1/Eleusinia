@@ -1,5 +1,5 @@
 // Calls on screen: the voice panel's pieces, screen sharing and camera dialogs, and the stage that shows videos.
-import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState } from 'react'
+import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { usable } from '../shared/devices'
 import { type Key, type State } from '../shared/protocol'
 import type { Steadiness } from '../shared/quality'
@@ -44,7 +44,11 @@ export function VoiceSignal({ name }: { name: (k: Key) => string }) {
 
 // The call itself, above the chat while nobody shares video: everyone in it under one pool of light, whoever is talking
 // lifted and glowing. It gives way to the stage once a screen or camera is on.
+// Redraws the component that calls it whenever someone starts or stops speaking.
+export const useSpeaking = () => useSyncExternalStore(call.onSpeaking, call.speakingVersion)
+
 export function Oculus({ st, name, show }: { st: State; name: (k: Key) => string; show: (k: Key, from: HTMLElement) => void }) {
+  useSpeaking()
   if (call.shares.size || call.cameras.size || call.sharing() || call.filming()) return null
   const people = [st.me, ...call.peers.keys()]
   const prof = (k: Key) => (k === st.me ? st.profile : st.profiles[k])
@@ -559,6 +563,7 @@ const GRID_FULL = 4 // up to this many cameras in the grid each get full quality
 const PEOPLE_ROW = 'people-row-hidden' // remembered per computer: whether the people row under a stream is folded away
 
 export function Stage({ st, name, settings }: { st: State; name: (k: Key) => string; settings: () => void }) {
+  useSpeaking()
   const [focus, setFocus] = useState<string | null>(null)
   const [joined, setJoined] = useState<Key | null>(null)
   const [hidden, setHidden] = useState(false)

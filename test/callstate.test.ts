@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { type IceCandidate, OFFLINE_GRACE, REJOIN_MS, RESTART_AFTER, RESTART_GRACE, backoff, createCandidates, createWatchdog, offers, quickVideo, rejoinFrom, restartAfterFor } from '../src/shared/callstate'
+import { ASKS, type IceCandidate, OFFLINE_GRACE, REJOIN_MS, RESTART_AFTER, RESTART_GRACE, backoff, createCandidates, createWatchdog, offers, quickVideo, rejoinFrom, restartAfterFor } from '../src/shared/callstate'
 
 // Stands in for RTCPeerConnection: rejects candidates until a remote description is set, as the real one does.
 function fakePc() {
@@ -217,7 +217,27 @@ test('the larger key never restarts or rebuilds; it answers the other side', () 
   w.update('disconnected')
   w.update('failed')
   timers.advance(120000)
+  expect(log.filter((x) => x !== 'ask' && x !== 'give up')).toEqual([])
+})
+
+test('the larger key asks the other side to offer again, then gives up on someone who never does', () => {
+  const timers = fakeTimers()
+  const log: string[] = []
+  const w = createWatchdog('bb', 'aa', { restart: () => log.push('restart'), rebuild: () => log.push('rebuild'), ask: () => log.push('ask'), giveUp: () => log.push('give up') }, timers)
+  w.update('connected')
+  w.update('failed')
+  timers.advance(backoff(0)) // the offering side rebuilds first
   expect(log).toEqual([])
+  timers.advance(backoff(1) - backoff(0))
+  expect(log).toEqual(['ask'])
+  timers.advance(120000)
+  expect(log).toEqual([...Array(ASKS).fill('ask'), 'give up'])
+  // An offer that does come back connects, and stops the asking
+  const again = watch('bb', 'aa')
+  again.w.update('failed')
+  again.w.update('connected')
+  again.timers.advance(120000)
+  expect(again.timers.pending).toBe(0)
 })
 
 test('stopping (peer offline or call ended) cancels pending recovery', () => {

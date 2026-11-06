@@ -71,6 +71,7 @@ export type State = {
   reports: number // problem and crash reports waiting to reach the developers' inbox
   versions: Record<Key, Version> // what each person we have greeted runs; memory only
   relayed: Key[] // online people whose link goes through a mutual friend's relay: voice and text only
+  present: Key[] // group members online but not linked with us, known from their presence notes
   activity: Record<Key, Activity> // what contacts are doing now, memory only; ours as they see it, under our own key
   chats: Record<string, { unread: number; at: number }> // conversations with at least one message: unread messages and missed calls, last activity
   blocked: Key[]
@@ -96,8 +97,9 @@ export type Wire =
   | { t: 'reach'; key: Key; ok?: boolean } // asking a contact whether it can relay us to `key`, and its answer
   | { t: 'relayed'; by: Key } // sent by whoever dialed: this link goes through `by`'s relay
   | { t: 'group'; g: Group }
-  | { t: 'have'; conv: string; have: Have; re?: boolean; held?: Have } // held: what the receiver already confirmed holding, which is not sent again
-  | { t: 'msg'; m: Msg }
+  | { t: 'have'; conv: string; have: Have; re?: boolean; held?: Have; tail?: boolean } // held: what the receiver already confirmed holding, which is not sent again; tail: a new member, who takes only recent history
+  | { t: 'older'; conv: string; upTo: Have } // asking for messages at or below these, the newest first (a new member scrolling back)
+  | { t: 'msg'; m: Msg; start?: boolean } // start: the first of a new member's shallow start for that author, past a gap on purpose
   | { t: 'call'; conv: string; data: unknown }
   | { t: 'pkt'; d: string } // a relayed call packet too big for a datagram, base64
   | { t: 'gone' } // the sender deleted their account
@@ -109,6 +111,7 @@ export type Wire =
   | { t: 'part'; h: string; off: number; d: string } // that piece, base64
   | { t: 'nope'; h: string } // the sender does not have that file, or not for us
   | { t: 'activity'; a: unknown } // what the sender is doing (shared/activity.ts), checked by cleanActivity
+  | { t: 'presence'; p: unknown } // someone's signed "I am online" note, passed along between group members (sync.ts)
 
 export type Event =
   | { type: 'state'; state: State }

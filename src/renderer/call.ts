@@ -86,6 +86,7 @@ type Peer = {
 
 export const active = new Map<string, Set<Key>>() // conversation -> peers we know are in its call
 const unjoined = new Set<string>() // conversations with a call going on that we have not joined since it began
+const blips = new Map<string, ReturnType<typeof setTimeout>>() // calls emptied by people going offline, for a minute
 const announced = new Map<string, number>() // conversation -> when we last showed "started a call"
 export const peers = new Map<Key, Peer>()
 // Outlives a rebuilt connection, so reconnect attempts keep backing off until one holds.
@@ -138,15 +139,27 @@ let grabbing = false // a still screen sends no new frame, so a grab can wait; o
 const wants = new Map<string, Level>()
 const shown = new Map<string, Level>()
 // Nothing but voice goes through a friend's relay: it is capped for voice and text.
-// A screen goes to no one until they join it; cameras show by themselves, as before.
-const want = (slot: Slot, k: Key): Level => (state?.relayed?.includes(k) ? 'off' : (wants.get(`${slot}:${k}`) ?? (slot === 'screen' ? 'off' : 'full')))
+// A screen goes to no one until they join it; a camera starts at thumbnail size until a viewer shows it bigger, so
+// someone in the call but reading another conversation is not sent full quality.
+const want = (slot: Slot, k: Key): Level => (state?.relayed?.includes(k) ? 'off' : (wants.get(`${slot}:${k}`) ?? (slot === 'screen' ? 'off' : 'thumb')))
 let starved = 0 // samples in a row where our stream to someone was held back by their or our bandwidth
 let cpuBound = 0 // ... or by our computer not encoding fast enough
 let upload: { kbps: number | null; at: number } | null = null
 let notify = () => {}
 export const onChange = (fn: () => void) => void (notify = fn)
+// Speaking rings change many times a second in a busy call: only what shows them listens (useSpeaking in Media.tsx),
+// not the whole window.
+let speakingAt = 0
+const speakers = new Set<() => void>()
+export const onSpeaking = (fn: () => void) => (speakers.add(fn), () => void speakers.delete(fn))
+export const speakingVersion = () => speakingAt
 
 const send = (c: string, to: Key | null, data: unknown) => window.api.call('signal', c, to, data)
+// Updates about our call (mute, share, camera) go only to the people in it, not every member of the group.
+const sendInCall = (to: Key | null, data: unknown) => {
+  if (!conv) return
+  for (const k of to ? [to] : (active.get(conv) ?? [])) send(conv, k, data)
+}
 
 // Sounds. Joining and leaving are not heard while deafened; mute and deafen always are, to confirm them.
 // The app's sounds follow both the master volume and their own (Settings: Sound volume).
@@ -184,7 +197,7 @@ export const callVersionOf = (k: Key) => state.versions?.[k]?.call ?? 1
 const compatible = (k: Key) => callVersionOf(k) === CALL_VERSION
 export function mismatched() {
   if (!conv) return []
-  return [...(active.get(conv) ?? [])].filter((k) => !compatible(k)).map((k) => ({ k, app: state.versions?.[k]?.app ?? 'an older version', newer: callVersionOf(k) > CALL_VERSION }))
+  return [...(active.get(conv) ?? [])].filter((k) => state.versions?.[k] && !compatible(k)).map((k) => ({ k, app: state.versions?.[k]?.app ?? 'an older version', newer: callVersionOf(k) > CALL_VERSION }))
 }
 // 0 to 2 (200%); played through a GainNode, so above 100% is a real boost.
 const clampVolume = (v: number | undefined) => Math.min(2, Math.max(0, v ?? 1))
@@ -374,7 +387,7 @@ function listenAll() {
   if (g.open !== gateOpen) (gateOpen = g.open), applyMic()
   check(state.me, own, ownLevel, sending()) // your own ring stays off whenever your microphone is not sending
   for (const [k, p] of peers) check(k, p.voice, p.voice ? level(p.voice) : 0, true)
-  if (changed) notify()
+  if (changed) speakingAt++, speakers.forEach((f) => f())
 }
 
 function close(k: Key) {
@@ -423,7 +436,12 @@ function connect(k: Key) {
       createWatchdog(
         state.me,
         k,
-        { restart: () => serial(() => restart(k)), rebuild: () => (log(`rebuilding the connection to ${who(k)}`), serial(() => offer(k))) },
+        {
+          restart: () => serial(() => restart(k)),
+          rebuild: () => (log(`rebuilding the connection to ${who(k)}`), serial(() => offer(k))),
+          ask: () => conv && (log(`asking ${who(k)} to reconnect`), send(conv, k, { k: 'join' })),
+          giveUp: () => conv && (log(`${who(k)} never reconnected; dropping them`), left(conv, k), drop(k), notify()),
+        },
         undefined,
         { flowing: () => flowing(k), restartAfter: () => restartAfterFor(pingSummary(pingReadings.get(k) ?? [])?.ms) },
       ),
@@ -543,10 +561,10 @@ const describeOut = (o: Out<Source & { name: string }>) => ({
   starved: starved >= STARVED_AFTER,
 })
 function sendShare(k: Key | null) {
-  if (conv) send(conv, k, { k: 'share', ...(screen ? { ...describeOut(screen), sound: !!screen.sound } : { on: false }) })
+  sendInCall(k, { k: 'share', ...(screen ? { ...describeOut(screen), sound: !!screen.sound } : { on: false }) })
 }
 function sendCamera(k: Key | null) {
-  if (conv) send(conv, k, { k: 'camera', ...(camera ? describeOut(camera) : { on: false }) })
+  sendInCall(k, { k: 'camera', ...(camera ? describeOut(camera) : { on: false }) })
 }
 
 const captureLimits = (src: ScreenSource, q: Quality) => ({ width: { max: widthFor(src, q.height) }, height: { max: q.height }, frameRate: { max: q.fps } })
@@ -977,6 +995,9 @@ export async function join(c: string) {
   listening = setInterval(listenAll, 50)
   navigator.mediaDevices.addEventListener('devicechange', onDeviceChange)
   send(c, null, { k: 'join' })
+  // The broadcast reaches only members linked with us; anyone already in the call who is not (a big group, known from
+  // their presence note) gets it addressed, which makes the node dial them
+  for (const k of active.get(c) ?? []) if (!state.online.includes(k)) send(c, k, { k: 'join' })
   ringing.delete(c)
   callingSince = isDm(c) && !active.get(c)?.size ? Date.now() : null
   sound('join')
@@ -1049,7 +1070,7 @@ export function onHotkey(action: string, down: boolean) {
   if (action === 'deafen') toggleDeafen()
 }
 
-const sendVoice = (k: Key | null) => conv && send(conv, k, { k: 'voice', muted, deafened })
+const sendVoice = (k: Key | null) => sendInCall(k, { k: 'voice', muted, deafened })
 
 // Unmuting while deafened also undeafens, since you cannot talk without hearing the reply.
 export function toggleMute() {
@@ -1080,8 +1101,13 @@ async function handle(from: Key, c: string, d: any) {
     if (c === conv) drop(from)
     return
   }
+  // A call starting that we are not in: if it ends before we join, it was missed. Not one coming back from a blip,
+  // nor any later signal of a call we already joined and left.
+  const resumed = blips.has(c)
+  clearTimeout(blips.get(c))
+  blips.delete(c)
+  if (c !== conv && !set.size && !resumed) unjoined.add(c)
   // At most one a minute per conversation, so leaving and joining over and over cannot flood the notifications
-  if (c !== conv) unjoined.add(c) // a call we are not in; if it ends before we join, it was missed
   if (!set.size && !conv && !state.settings.muted?.[c] && (announced.get(c) ?? 0) < Date.now() - 60000) {
     announced.set(c, Date.now())
     new Notification('Eleusinia', { body: `${state.profiles[from]?.name || 'Someone'} started a call` })
@@ -1095,6 +1121,9 @@ async function handle(from: Key, c: string, d: any) {
   if (fresh && c !== conv && isDm(c) && !ringing.has(c)) ringing.set(c, Date.now()), notify()
   loops()
   if (c !== conv) return
+  // In our call but never linked with us (a big group, known from their presence note): our join, addressed to them,
+  // makes the node link up; their answer then comes with their version
+  if (!state.versions?.[from]) return void send(c, from, { k: 'join' })
   if (!compatible(from)) return log(`not connecting ${who(from)}: call version ${callVersionOf(from)}, ours ${CALL_VERSION}`), notify()
 
   if (d.k === 'join') {
@@ -1155,10 +1184,16 @@ export function silence(c: string) {
 }
 
 // Someone left a call, by saying so or by going offline.
-function left(c: string, k: Key) {
+function left(c: string, k: Key, offline = false) {
   const had = active.get(c)?.delete(k)
   if (had && c === conv && !deafened) sound('leave')
-  if (!active.get(c)?.size) ringing.delete(c), unjoined.delete(c) && window.api.call('missedCall', c).catch(() => {})
+  if (!active.get(c)?.size) {
+    ringing.delete(c)
+    // Gone offline rather than left: the call may come back within a minute, and is then the same call
+    const ended = () => (blips.delete(c), unjoined.delete(c) && window.api.call('missedCall', c).catch(() => {}))
+    if (offline && had) clearTimeout(blips.get(c)), blips.set(c, setTimeout(ended, 60000))
+    else if (!blips.has(c)) ended()
+  }
   loops()
 }
 
@@ -1197,7 +1232,7 @@ export function onState(next: State) {
   for (const k of prev.online) {
     if (next.online.includes(k)) continue
     const gone = () => {
-      for (const c of active.keys()) left(c, k)
+      for (const c of active.keys()) left(c, k, true)
       drop(k)
     }
     const w = peers.has(k) && watchdogs.get(k)

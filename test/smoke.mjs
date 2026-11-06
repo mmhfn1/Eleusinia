@@ -29,7 +29,9 @@ const bootstrap = testnet?.bootstrap.map((n) => `${n.host}:${n.port}`).join(',')
 // The app reads ELEUSINIA_BOOTSTRAP only when set; in public mode it is removed, in case the shell has one.
 const { ELEUSINIA_BOOTSTRAP: _, ...baseEnv } = process.env
 // Updates are off, so a run against the packaged app never downloads a real release.
-const appEnv = { ...(bootstrap ? { ...baseEnv, ELEUSINIA_BOOTSTRAP: bootstrap } : baseEnv), ELEUSINIA_NO_UPDATES: '1' }
+// No picks in groups: Bob and Cy, not friends, meet only in Ann's groups and never link, as most members of a big
+// group do not; their group chat, presence and call go through notes and addressed signals (see '--- Groups')
+const appEnv = { ...(bootstrap ? { ...baseEnv, ELEUSINIA_BOOTSTRAP: bootstrap } : baseEnv), ELEUSINIA_NO_UPDATES: '1', ELEUSINIA_TEST_GROUP_LINKS: '0' }
 console.log(publicDht ? 'DHT: public (ELEUSINIA_SMOKE_PUBLIC=1)' : `DHT: local test network at ${bootstrap}`)
 
 // A developers' inbox of the test's own, never the real one, which every app below sends its reports to. No GitHub
@@ -101,6 +103,11 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
     await new Promise((r) => spawn('powershell', ['-NoProfile', '-Command', ps], { stdio: 'ignore' }).on('exit', r))
     return true
   }
+  // A conversation counts as read only in a focused window, and three windows cannot all have focus: each acts as if
+  // it had, unless a step turns it off to see an unfocused window.
+  // Resolves once DevTools has applied it, so a step right after sees the window as it set it
+  const focused = (on) => new Promise((done) => (pending.set(++id, done), ws.send(JSON.stringify({ id, method: 'Emulation.setFocusEmulationEnabled', params: { enabled: on } }))))
+  await focused(true)
   // Lets the test read what each call connection actually receives (getStats), without the app exposing anything.
   // Crashes the page as a real renderer crash would (Chromium's own command for it).
   const crash = () => ws.send(JSON.stringify({ id: ++id, method: 'Page.crash' }))
@@ -112,7 +119,7 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
       ws.send(JSON.stringify({ id, method: 'Page.captureScreenshot' }))
     })
   await ev(`(() => { window.__pcs = []; const P = RTCPeerConnection; window.RTCPeerConnection = class extends P { constructor(...a) { super(...a); window.__pcs.push(this) } } })()`)
-  return { child, ev, dir, title, windowState, crash, shot }
+  return { child, ev, dir, title, windowState, crash, shot, focused }
 }
 
 // What one of the live connection's slots has received (see slotsOf in call.ts): 'sound' is the second audio.
@@ -153,7 +160,7 @@ async function until(label, fn, secs = 90) {
 const open = (text) => `(async () => {
   document.querySelector('.rail-mark')?.click()
   for (let i = 0; i < 50; i++) {
-    const row = [...document.querySelectorAll('.row-button')].find(x => x.textContent.includes('${text}'))
+    const row = [...document.querySelectorAll('.rail-group')].find(x => x.getAttribute('aria-label').includes('${text}')) ?? [...document.querySelectorAll('.row-button')].find(x => x.textContent.includes('${text}'))
     if (row) return row.click()
     await new Promise(r => setTimeout(r, 100))
   }
@@ -357,10 +364,11 @@ try {
     await a.ev(`(() => { const i = document.querySelector('.search-box input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, '${typed}'); i.dispatchEvent(new Event('input', { bubbles: true })) })()`)
     // Strangers cannot link: pictures come from the thumbnail published with the card
     const pic = n === 'Cy' ? '.avatar svg' : '.avatar img'
-    await until(`typing "${typed}" suggests ${n}: ${n === 'Cy' ? 'generated' : 'uploaded'} picture, ID, Unique Key ${tail}`, () =>
+    await until(`typing "${typed}" suggests ${n}: ${n === 'Cy' ? 'generated' : 'uploaded'} picture, ID, key ending ${tail}`, () =>
       a.ev(`(() => { const r = document.querySelectorAll('.result'); return r.length === 1 && !!r[0].querySelector('${pic}') && r[0].textContent.includes('${ids[n]}') && r[0].querySelector('.tail').textContent === '${tail}' })()`))
     await a.ev(`document.querySelector('.result .add-friend').click()`)
-    await until(`${n} sees the request with Ann's picture`, () => p.ev(`[...document.querySelectorAll('.request')].some(r => r.textContent.includes('Ann') && r.querySelector('.avatar img'))`))
+    // Served as eleusinia-pic:// (node.ts keeps pictures out of the state), and it must actually load
+    await until(`${n} sees the request with Ann's picture`, () => p.ev(`[...document.querySelectorAll('.request')].some(r => { const i = r.querySelector('.avatar img'); return r.textContent.includes('Ann') && i?.src.startsWith('eleusinia-pic://') && i.complete && i.naturalWidth > 0 })`))
     await p.ev(`[...document.querySelectorAll('.request button')].find(x => x.textContent === 'Accept').click()`)
   }
 
@@ -393,7 +401,7 @@ try {
   const bobRow = `[...document.querySelectorAll('.online .row-button')].find((x) => x.textContent.includes('Bob'))`
   await a.ev(`${bobRow}.click()`)
   await until("A's chat with Bob shows Ann (you) playing Counter-Strike 2, and Bob playing Destiny 2", () => a.ev(`${dmSide('(you)', 'Counter-Strike 2')} && ${dmSide('Bob', 'Destiny 2')}`))
-  for (const p of [a, b]) await p.ev(`document.querySelector('.home.back').click()`)
+  for (const p of [a, b]) await p.ev(`document.querySelector('.rail-mark').click()`)
 
   console.log('--- Activity: a CS2 match, through Game State Integration')
   await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
@@ -587,7 +595,7 @@ try {
 
   console.log('--- Profile panel')
   // Clicking a person opens their panel beside them: picture over a banner of their own picture, name, friend ID and
-  // about, and a box to message them; the full card, with the Unique Key and their version, opens from it.
+  // about, and a box to message them; the full card, with the key ending and their version, opens from it.
   const annPop = pop((p) => p.textContent.includes('I am Ann') && p.textContent.includes('anntester#') && !!p.querySelector('.pop-portrait .avatar img') && !!p.querySelector('.pop-banner img') && !!p.querySelector('.pop-note input'))
   const beside = (sel) => `(() => { const p = document.querySelector('.profile-pop').getBoundingClientRect(); const r = document.querySelector('${sel}').getBoundingClientRect(); return p.left >= r.right || p.right <= r.left })()`
   await b.ev(`document.querySelector('.msg .user').click()`)
@@ -597,8 +605,14 @@ try {
   await b.ev(`document.querySelector('.msg .user').click()`)
   await until('and again opens it', () => b.ev(annPop), 5)
   await b.ev(expandPop)
-  await until('its expand button opens the full card, with the Unique Key and her version', () =>
-    b.ev(`(() => { const d = document.querySelector('dialog[open].card-dialog'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('Unique Key') && /Eleusinia \\d+\\.\\d+\\.\\d+/.test(d.textContent) && !!d.querySelector('.pop-banner') })()`), 5)
+  await until('its expand button opens the full card, with the key ending and her version', () =>
+    b.ev(`(() => { const d = document.querySelector('dialog[open].card-dialog'); return !!d && d.textContent.includes('I am Ann') && d.textContent.includes('Key ending') && /Eleusinia \\d+\\.\\d+\\.\\d+/.test(d.textContent) && !!d.querySelector('.pop-banner') })()`), 5)
+  // Remove friend on the card asks first, in the rail's words; Cancel keeps her and the card
+  await b.ev(`[...document.querySelectorAll('dialog[open].card-dialog button')].find(x => x.textContent === 'Remove friend').click()`)
+  await until('Remove friend on the card asks first', () => b.ev(`[...document.querySelectorAll('dialog[open] h1')].some(h => h.textContent === 'Remove Ann?')`), 5)
+  await b.ev(`[...document.querySelectorAll('dialog[open]')].pop().querySelector('.form-actions .button:not(.danger)').click()`)
+  await until('Cancel keeps Ann as a friend and the card open', () => b.ev(`!![...document.querySelectorAll('dialog[open] h1')].every(h => h.textContent !== 'Remove Ann?') && !!document.querySelector('dialog[open].card-dialog')`), 5)
+  if (!(await b.ev(`api.call('state').then((s) => Object.entries(s.profiles).some(([k, p]) => p.name === 'Ann' && s.friends[k] === 'friend'))`))) throw new Error('Cancel removed a friend')
   await b.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
   if (!(await b.ev(`(() => { const h = document.querySelector('.chat-person'); return !!h?.querySelector('.avatar') && h.textContent.includes('Ann') && h.textContent.includes('anntester#') })()`))) throw new Error('the DM header lacks the picture, name or friend ID')
   // Messaging from the panel: it lands in the DM, and the panel says so
@@ -609,8 +623,8 @@ try {
   await until('a message sent from the panel reaches Ann, and the panel says it was sent', async () => (await a.ev(shows('from the panel'))) && b.ev(pop((p) => !!p.querySelector('.pop-sent'))), 15)
   await b.ev(escape)
   await until('Escape closes the panel', () => b.ev(`!document.querySelector('.profile-pop')`), 5)
-  await b.ev(`document.querySelector('aside.voice .chamber-id.person').click()`)
-  await until('clicking her in the voice sidebar opens the same panel', () => b.ev(annPop), 5)
+  await b.ev(`[...document.querySelectorAll('aside.members .member')].find((x) => x.textContent.includes('Ann')).click()`)
+  await until('clicking her in the members list opens the same panel', () => b.ev(annPop), 5)
   await b.ev(`document.querySelector('.msgs').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`)
   await until('a click elsewhere closes it', () => b.ev(`!document.querySelector('.profile-pop')`), 5)
   await b.ev(`document.querySelector('.rail-mark').click()`)
@@ -680,6 +694,13 @@ try {
   await until('unmuting shows it again', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '3'`), 5)
   await b.ev(`${railDm}.click()`)
   await until('opening the DM reads it: the count is gone', () => b.ev(`!!document.querySelector('.chat-person') && !${railDm}.querySelector('.rail-count')`), 5)
+  // Shown but not focused (on a second screen during a game) is not read
+  await b.focused(false)
+  await a.ev(say('still there?'))
+  await until('in an unfocused window, the open DM still counts a new message', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '1'`), 15)
+  await b.focused(true)
+  await b.ev(`window.dispatchEvent(new Event('focus'))`)
+  await until('focusing the window reads it', () => b.ev(`!${railDm}.querySelector('.rail-count')`), 5)
 
   console.log('--- Voice call from the left sidebar')
   const joinsBefore = (await sounds(a)).filter((x) => x === 'join').length // the missed call above played one
@@ -872,8 +893,8 @@ try {
   // ELEUSINIA_NO_DIRECT=1 withholds direct routes, as two strict routers would; the call must then go through the relay.
   const forced = process.env.ELEUSINIA_NO_DIRECT === '1'
   await until(`call is ${forced ? 'relayed through the chat link' : 'direct'}`, async () =>
-    (await a.ev(`document.querySelector('.callers').textContent.includes('relayed')`)) === forced &&
-    (await b.ev(`document.querySelector('.callers').textContent.includes('relayed')`)) === forced, 10)
+    (await a.ev(`document.querySelector('.callers').textContent.includes('through the chat connection')`)) === forced &&
+    (await b.ev(`document.querySelector('.callers').textContent.includes('through the chat connection')`)) === forced, 10)
   // and the reports say so, from the route in use rather than the first one that answered
   await until(`A's diagnostics log the route as ${forced ? 'through the chat link' : 'direct'}`, () =>
     a.ev(`api.diagnostics().then((d) => d.events.some((e) => e.text.includes(${forced ? "'goes through the chat link'" : "'goes direct ('"})))`), 10)
@@ -945,6 +966,7 @@ try {
     a.ev(`document.querySelector('.hotkeys [role=alert]')?.textContent.includes('F23 is already the hotkey for Mute') && ${row('Deafen')}.querySelector('kbd').textContent === 'Not set'`), 5)
   await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
   await until('A shows push to talk with its key', async () => (await you()).includes('Push to talk: hold F24'), 5)
+  await a.focused(false) // emulated focus would also keep the page visible
   if (await a.windowState('minimized')) await until('A is minimised', () => a.ev('document.hidden'), 10)
   // B must actually receive A's voice only while the key is held, not just see the label change. Bytes, not audio
   // energy, since a remote voice plays through Web Audio and its receiver reports no energy; a disabled microphone
@@ -972,6 +994,7 @@ try {
   await key(UiohookKey.F23, false)
   await until('F23 again unmutes', () => a.ev(`!document.querySelector('.callers .voice-mark')`), 5)
   await a.windowState('normal')
+  await a.focused(true)
   await a.ev(`api.call('setSettings', { hotkeys: {} })`)
   await key(UiohookKey.F23, true)
   await key(UiohookKey.F23, false)
@@ -1033,10 +1056,10 @@ try {
     await sleep(500)
     await a.ev(`document.querySelector('.rail-mark')?.click()`)
   }
-  await until('A, B and C list both groups in the Home sidebar', async () => {
+  await until('A, B and C have both groups on the rail', async () => {
     for (const p of [a, b, c]) {
       await p.ev(`document.querySelector('.rail-mark')?.click()`)
-      if (!(await p.ev(`['Trio','Second'].every(g => [...document.querySelectorAll('aside .item')].some(x => x.textContent.includes(g)))`))) return false
+      if (!(await p.ev(`['Trio','Second'].every(g => [...document.querySelectorAll('.rail-group')].some(x => x.getAttribute('aria-label').includes(g)))`))) return false
     }
     return true
   })
@@ -1062,6 +1085,15 @@ try {
   await b.ev(`(() => { const i = document.querySelector('.group-name-edit'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'The Trio'); i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })()`)
   await until('B renames the group, and A and Cy see the new name', async () =>
     (await b.ev(`document.querySelector('.group-name')?.textContent === 'The Trio'`)) && (await a.ev(`document.querySelector('.group-name')?.textContent === 'The Trio'`)) && c.ev(`document.querySelector('.group-name')?.textContent === 'The Trio'`), 15)
+  // Bob and Cy have no link (no picks, not friends): Bob saw Cy online above from Cy's presence note. Cy starts a call
+  // in the group; Bob learns of it from the note, and his join, addressed to Cy, links them for the call.
+  await c.ev(press('Start call'))
+  await until("B sees Cy's call in the group, through Cy's presence note", () => b.ev(`[...document.querySelectorAll('aside.voice button')].some(x => x.textContent.includes('Join call (1)'))`), 30)
+  await b.ev(press('Join call'))
+  await until('B and Cy, never linked before, connect for the call', async () =>
+    (await b.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Cy')`)) && c.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Bob')`), 45)
+  await b.ev(press('Leave call'))
+  await c.ev(press('Leave call'))
 
   console.log('--- Resizable sidebars')
   const widths = await a.ev(`(() => {
@@ -1080,9 +1112,9 @@ try {
   if (!(after[0] === 336 && after[1] === 246 && after[2] === '336' && after[3] === '246')) throw new Error('sidebars did not resize and persist')
   console.log('ok   voice and members sidebars grew by 16px and the widths were saved')
   await a.ev(`document.querySelector('.rail-mark').click()`)
-  const home = await a.ev(`(() => { const s = document.querySelector('.splitter'); s.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); return new Promise(r => setTimeout(() => r(document.querySelector('aside').getBoundingClientRect().width), 200)) })()`)
-  if (home !== 276) throw new Error('home sidebar did not resize: ' + home)
-  console.log('ok   home sidebar resized independently (260 -> 276), narrower than the voice sidebar')
+  // Home has no sidebar: groups and chats are on the rail
+  if (await a.ev(`!!document.querySelector('main.home') && !document.querySelector('aside:not(.members):not(.voice)')`)) console.log('ok   Home is the friends page alone, without a sidebar')
+  else throw new Error('Home still has a sidebar')
 
   console.log('--- Bob goes offline (process killed)')
   b.child.kill()

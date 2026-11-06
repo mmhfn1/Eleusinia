@@ -8,7 +8,7 @@ import { afterAll, beforeAll, expect, onTestFailed, test } from 'vitest'
 import { createNode } from '../src/main/node'
 import { type RelayLimits, createNet, relayKeyPair } from '../src/main/network'
 import { CALL_VERSION, type Group, type Msg, cleanProfile, dmId, identicon, isHandle, keyTail, normHandle, stack, versionOf } from '../src/shared/protocol'
-import { heldFrom, mergeGroup, missing, signAdd, signLeft, signMsg, validGroup, verifyAdd, verifyMsg } from '../src/shared/sync'
+import { heldFrom, mergeGroup, missing, signAdd, signLeft, signMsg, signPresence, validGroup, verifyAdd, verifyMsg, verifyPresence } from '../src/shared/sync'
 
 test('a tampered or re-attributed message fails verification', () => {
   const a = DHT.keyPair()
@@ -17,6 +17,25 @@ test('a tampered or re-attributed message fails verification', () => {
   expect(verifyMsg(m)).toBe(true)
   expect(verifyMsg({ ...m, text: 'bye' })).toBe(false)
   expect(verifyMsg({ ...m, author: b.publicKey.toString('hex') })).toBe(false)
+})
+
+test('a presence note verifies only as signed, by its author, and not dated far ahead', () => {
+  const kp = DHT.keyPair()
+  const gid = 'ab'.repeat(16)
+  const p = signPresence(1000, gid, 'ab12ab12ab12ab12', kp)
+  expect(verifyPresence(p, 1000)).toBe(true)
+  expect(verifyPresence({ ...p, call: null }, 1000)).toBe(false) // the call is signed too
+  expect(verifyPresence({ ...p, v: 'cd12ab12ab12ab12' }, 1000)).toBe(false) // and the profile version
+  expect(verifyPresence({ ...p, key: DHT.keyPair().publicKey.toString('hex') }, 1000)).toBe(false)
+  expect(verifyPresence(signPresence(1000 + 61000, null, 'ab12ab12ab12ab12', kp), 1000)).toBe(false)
+  expect(verifyPresence(signPresence(1000, 'not a group', 'ab12ab12ab12ab12', kp), 1000)).toBe(false)
+})
+
+test('a message must carry a time a date can show', () => {
+  const kp = DHT.keyPair()
+  const at = (ts: number) => signMsg({ conv: 'c', author: kp.publicKey.toString('hex'), seq: 1, ts, text: 'x' }, kp.secretKey)
+  expect(verifyMsg(at(Date.now()))).toBe(true)
+  for (const ts of [1e300, 8.64e15, -1, 0, 1.5]) expect(verifyMsg(at(ts))).toBe(false)
 })
 
 test('missing returns only what the peer lacks', () => {
@@ -242,6 +261,153 @@ test('a group member that passing on missed asks for the message once a receipt 
   expect(c.node.state().online).not.toContain(a.key)
 }, 120000)
 
+// B and D never link (as with most pairs in a big group, where each member dials only a few others), yet B sees D
+// online and in the group's call, from D's signed presence note passed along by A.
+test('a group member not linked with us shows online and in a call through presence notes passed between members', async () => {
+  const [kb, kd] = [DHT.keyPair(), DHT.keyPair()]
+  const hex = (k: typeof kb) => k.publicKey.toString('hex')
+  const heard: any[] = []
+  const a = start()
+  const b = start(undefined, kb, { links: (k) => k !== hex(kd), emit: (e: any) => e.type === 'call' && heard.push(e) })
+  const d = start(undefined, kd, { links: (k) => k !== hex(kb) })
+  await befriend(a, b)
+  await befriend(a, d)
+  const gid = a.node.createGroup('presence', [b.key, d.key])
+  await until(() => !!b.node.state().groups[gid] && !!d.node.state().groups[gid])
+  d.node.signal(gid, null, { k: 'join' })
+  await until(() => b.node.state().present.includes(d.key))
+  await until(() => heard.some((e) => e.from === d.key && e.conv === gid && e.data.k === 'join'))
+  expect(b.node.state().online).not.toContain(d.key)
+  await new Promise((r) => setTimeout(r, 1100)) // call changes count at most once a second
+  d.node.signal(gid, null, { k: 'leave' })
+  await until(() => heard.some((e) => e.from === d.key && e.conv === gid && e.data.k === 'leave'))
+  expect(heard.filter((e) => e.data.k === 'join').length).toBe(1)
+  // D renames: B, still not linked with D, sees the new name from D's card, fetched because the note's version changed
+  await new Promise((r) => setTimeout(r, 10100)) // a profile change counts at most every 10 s after the last note
+  await d.node.setProfile({ name: 'Dee' })
+  await until(() => b.node.state().profiles[d.key]?.name === 'Dee')
+  expect(b.node.state().online).not.toContain(d.key)
+}, 120000)
+
+test('pictures stay out of state.json and state pushes, and come back after a restart', async () => {
+  const a = start()
+  let b = start()
+  await befriend(a, b)
+  const png = 'data:image/png;base64,' + 'A'.repeat(2000)
+  await a.node.setProfile({ username: a.node.state().profile.handle.split('#')[0], name: 'Ann', about: '', avatar: png })
+  await until(() => b.node.state().profiles[a.key]?.avatar.startsWith('eleusinia-pic://'))
+  const id = b.node.state().profiles[a.key].avatar.slice('eleusinia-pic://'.length)
+  expect(b.node.picture(id)).toBe(png)
+  await b.node.destroy()
+  expect(readFileSync(join(b.dir, 'state.json'), 'utf8')).not.toContain('A'.repeat(2000))
+  b = restart(b)
+  expect(b.node.picture(id)).toBe(png)
+  expect(b.node.state().profiles[a.key].avatar).toBe('eleusinia-pic://' + id)
+  expect(b.node.picture('../state.json')).toBeNull()
+}, 120000)
+
+// 450 is past both a catch-up page (200) and the flood bucket's burst (400): it still all arrives, a page at a time,
+// with whatever was turned away sent again when asked.
+test('a long backlog arrives whole, in pages; group history from before joining is not unread', async () => {
+  const a = start()
+  let b = start()
+  const c = start()
+  await befriend(a, b)
+  await befriend(a, c)
+  const dm = dmId(a.key, b.key)
+  await b.node.destroy()
+  for (let i = 0; i < 450; i++) a.node.send(dm, 'm' + i)
+  b = restart(b)
+  await expect.poll(() => texts(b, dm).length, { timeout: 90000, interval: 200 }).toBe(450)
+  expect(b.node.state().chats[dm].unread).toBe(450) // sent to us while we were away: unread
+  const gid = a.node.createGroup('history', [c.key])
+  for (let i = 0; i < 5; i++) a.node.send(gid, 'old ' + i)
+  await until(() => texts(c, gid).length === 5)
+  a.node.addToGroup(gid, b.key)
+  await until(() => texts(b, gid).length === 5)
+  expect(b.node.state().chats[gid]?.unread ?? 0).toBe(0)
+  a.node.send(gid, 'new')
+  await until(() => b.node.state().chats[gid]?.unread === 1)
+}, 150000)
+
+test('profiles and confirmations of people we no longer share anything with are dropped', async () => {
+  const a = start()
+  const b = start()
+  const c = start()
+  const d = start()
+  await befriend(a, b)
+  await befriend(b, c)
+  await befriend(b, d)
+  const gid = b.node.createGroup('passing', [a.key, c.key])
+  const other = b.node.createGroup('brief', [a.key, d.key])
+  await until(() => !!a.node.state().groups[gid] && !!c.node.state().groups[gid] && !!a.node.state().groups[other])
+  a.node.send(gid, 'hi all')
+  await until(() => texts(c, gid).includes('hi all') && !!a.node.state().profiles[c.key]?.name && !!a.node.state().profiles[d.key]?.name)
+  await new Promise((r) => setTimeout(r, 6000)) // receipts go round every 5 s, so A holds what C confirmed
+  // The owner removes C: A still shares the group, so C's name stays for their old messages, but what C confirmed goes
+  b.node.removeFromGroup(gid, c.key)
+  await until(() => !a.node.state().groups[gid].members.includes(c.key))
+  // A leaves the other group: D, a stranger otherwise, is forgotten
+  a.node.leaveGroup(other)
+  await until(() => !a.node.state().profiles[d.key])
+  expect(a.node.state().profiles[c.key]).toBeDefined()
+  expect(a.node.state().profiles[b.key]).toBeDefined() // still a friend
+  await a.node.destroy()
+  // Kept apart from state.json, one line per raise; after the prune, compacted without C
+  expect(JSON.parse(readFileSync(join(a.dir, 'state.json'), 'utf8')).confirmed).toBeUndefined()
+  const lines = readFileSync(join(a.dir, 'confirmed', gid + '.jsonl'), 'utf8').trim().split('\n').map((l) => JSON.parse(l))
+  expect(lines.some((l) => l.k === c.key)).toBe(false)
+  expect(lines.some((l) => l.k === b.key)).toBe(true)
+  expect(existsSync(join(a.dir, 'confirmed', other + '.jsonl'))).toBe(false) // left: forgotten with its messages
+  // Read back and compacted at the next start: still there
+  await restart(a).node.destroy()
+  expect(readFileSync(join(a.dir, 'confirmed', gid + '.jsonl'), 'utf8')).toContain(b.key)
+}, 120000)
+
+test('a new member syncs the newest 100 of each author, and older history a page at a time on request', async () => {
+  const a = start()
+  const b = start()
+  const c = start()
+  await befriend(a, b)
+  await befriend(a, c)
+  const gid = a.node.createGroup('history', [b.key])
+  await until(() => !!b.node.state().groups[gid])
+  for (let i = 1; i <= 150; i++) a.node.send(gid, 'a' + i)
+  for (let i = 1; i <= 5; i++) b.node.send(gid, 'b' + i)
+  await until(() => texts(b, gid).length === 155)
+  a.node.addToGroup(gid, c.key)
+  await until(() => texts(c, gid).length === 105)
+  await new Promise((r) => setTimeout(r, 1500)) // nothing more comes by itself
+  expect(texts(c, gid).length).toBe(105)
+  expect(texts(c, gid)).toContain('a51')
+  expect(texts(c, gid)).not.toContain('a50')
+  expect(c.node.history(gid).earlier).toBe(true)
+  expect(c.node.state().chats[gid]?.unread ?? 0).toBe(0)
+  expect(c.node.older(gid)).toBe(true)
+  await until(() => texts(c, gid).length === 155)
+  expect(c.node.history(gid).earlier).toBe(false)
+  // Still in order, and new messages carry on as usual
+  a.node.send(gid, 'a151')
+  await until(() => texts(c, gid).includes('a151'))
+  expect(c.node.history(gid, 3).msgs.map((m: any) => m.text)).toEqual(['b4', 'b5', 'a151'])
+}, 150000)
+
+// With no picks of their own (groupLinks 0), B and D are not linked; a call signal B addresses to D, as call.ts does
+// for someone in its call it has no link with, makes B dial D.
+test('a call signal to a group member we are not linked with links us up with them', async () => {
+  const a = start()
+  const b = start(undefined, undefined, { groupLinks: 0 })
+  const d = start(undefined, undefined, { groupLinks: 0 })
+  await befriend(a, b)
+  await befriend(a, d)
+  const gid = a.node.createGroup('call', [b.key, d.key])
+  await until(() => !!b.node.state().groups[gid] && !!d.node.state().groups[gid])
+  await new Promise((r) => setTimeout(r, 1500))
+  expect(b.node.state().online).not.toContain(d.key)
+  b.node.signal(gid, d.key, { k: 'join' })
+  await until(() => b.node.state().online.includes(d.key))
+}, 120000)
+
 test('activity reaches friends only while shared, with only the details chosen, and never someone hidden', async () => {
   const a = start()
   const b = start()
@@ -368,7 +534,9 @@ test('a stranger sees our picture in search and requests, as a small thumbnail, 
   expect(found[0].profile.avatar).toBe('data:image/jpeg;base64,' + jpeg.toString('base64'))
   b.node.addFriend(a.key)
   await until(() => a.node.state().friends[b.key] === 'incoming')
-  expect(a.node.state().profiles[b.key].avatar).toBe('data:image/jpeg;base64,' + jpeg.toString('base64'))
+  // The state carries a link to the picture, not the picture
+  const link = a.node.state().profiles[b.key].avatar
+  expect(a.node.picture(link.slice('eleusinia-pic://'.length))).toBe('data:image/jpeg;base64,' + jpeg.toString('base64'))
 }, 120000)
 
 test('someone watching the request topic of a person sees one-off keys, never who is asking', async () => {
@@ -648,6 +816,22 @@ test('leaving a group: others learn it, even one who was offline, and the leaver
   expect(b.node.state().groups[gid]).toBeUndefined()
 }, 120000)
 
+test('a message written after a torn last line (power lost mid-write) is kept', async () => {
+  let a = start()
+  const b = start()
+  await befriend(a, b)
+  const dm = dmId(a.key, b.key)
+  a.node.send(dm, 'one')
+  await a.node.destroy()
+  writeFileSync(join(a.dir, 'msgs', dm + '.jsonl'), readFileSync(join(a.dir, 'msgs', dm + '.jsonl'), 'utf8') + '{"conv":"' + dm)
+  a = restart(a)
+  a.node.send(dm, 'two')
+  await a.node.destroy()
+  a = restart(a)
+  expect(texts(a, dm)).toEqual(['one', 'two'])
+  expect(a.node.history(dm).msgs.map((m) => m.seq)).toEqual([1, 2])
+}, 60000)
+
 test('a stolen key gets no old history: what a peer confirmed is never sent to it again', async () => {
   const a = start()
   let b = start()
@@ -774,12 +958,12 @@ test('deleting an account erases it from this computer, leaves its groups and te
   writeFileSync(join(a.dir, 'identity.json'), '{}') // stands in for the identity file Electron's main process writes
 
   await a.node.deleteAccount()
-  for (const f of ['state.json', 'identity.json', 'msgs']) expect(existsSync(join(a.dir, f))).toBe(false)
+  for (const f of ['state.json', 'identity.json', 'msgs', 'pictures', 'confirmed']) expect(existsSync(join(a.dir, f))).toBe(false)
   await until(() => !b.node.state().friends[a.key] && !b.node.state().groups[gid]?.members.includes(a.key))
 }, 120000)
 
 test('only a few conversations stay in memory; the rest are read back from disk, and history can be limited', async () => {
-  const a = start()
+  const a = start(undefined, undefined, { keepMsgs: 5 })
   let b = start()
   await befriend(a, b)
   const dm = dmId(a.key, b.key)

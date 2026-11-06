@@ -38,6 +38,7 @@ type Opts = {
   members: (conv: string) => Key[]
   emit: (f: FileState) => void
   limitMB: () => number | undefined
+  want?: (key: Key) => void // nobody linked has it: link with whoever sent it (in a big group we may not be)
 }
 
 const WINDOW = 4 // pieces in flight per download
@@ -53,7 +54,7 @@ export const hashFile = (path: string) =>
       .on('error', reject)
   })
 
-export function createFiles({ dir, me, send, linked, relayed, backlog, members, emit, limitMB }: Opts) {
+export function createFiles({ dir, me, send, linked, relayed, backlog, members, emit, limitMB, want }: Opts) {
   const root = join(dir, 'files')
   mkdirSync(root, { recursive: true })
   const indexFile = join(root, 'index.json')
@@ -101,7 +102,7 @@ export function createFiles({ dir, me, send, linked, relayed, backlog, members, 
       j.next = j.got
       j.last = Date.now()
       tell(h)
-      if (!j.from) return
+      if (!j.from) return void want?.(e.by)
     }
     while (j.next < e.size && j.next - j.got < WINDOW * CHUNK) {
       send(j.from, { t: 'get', h, off: j.next })
@@ -300,6 +301,8 @@ export function createFiles({ dir, me, send, linked, relayed, backlog, members, 
 
   return {
     note,
+    // A download from them is under way, so the link must stay
+    busy: (k: Key) => [...jobs.values()].some((j) => j.from === k && !j.failed),
     addPath,
     addBytes,
     fetch,

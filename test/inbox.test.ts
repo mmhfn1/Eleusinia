@@ -76,6 +76,16 @@ test('the issue text names the kind, time, tester and report, and lists app deta
   expect(issue.body).toContain('00:00:00 error   oom')
 })
 
+test('a report too long for one GitHub issue leaves out its oldest events, and says so', () => {
+  const events = Array.from({ length: 400 }, (_, i) => ({ at: i * 1000, area: 'network' as const, text: `event ${i} `.padEnd(290, 'x') }))
+  const meta = { version: '0.0.1', build: 'tester', os: 'Windows 10', arch: 'x64', electron: '44', chrome: '140', locale: 'en-GB', memoryGb: 16 }
+  const issue = issueOf({ report: { id: '0123456789abcdef', at: 0, kind: 'bug', title: 'Long', body: 'b'.repeat(4000), meta, events }, from: 'A3F9C2', received: 0, issue: null })
+  expect(issue.body.length).toBeLessThanOrEqual(65536)
+  expect(issue.body).toContain('event 399 ')
+  expect(issue.body).not.toContain('event 0 ')
+  expect(issue.body).toMatch(/the \d+ oldest left out to fit/)
+})
+
 test('reports are limited per sender and for everyone together, each for an hour', () => {
   const allowed = reportLimit(2, 3)
   expect([allowed('a', 0), allowed('a', 1), allowed('a', 2)]).toEqual([true, true, false])

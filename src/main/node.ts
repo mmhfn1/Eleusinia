@@ -29,9 +29,10 @@ import { idSeed, readClaims, signClaim, withClaim, writeClaims } from '../shared
 import { type FileRef, validFiles } from '../shared/media'
 import { cleanLink } from '../shared/links'
 import { type Area, type Report, cleanReport } from '../shared/reports'
-import { groupIdOf, heldFrom, mergeGroup, missing, ownerOf, signAdd, signEdit, signLeft, signMsg, signRemoved, validGroup, verifyAdd, verifyMsg, withLink } from '../shared/sync'
+import { EDIT_AHEAD_MS, groupIdOf, heldFrom, mergeGroup, missing, ownerOf, signAdd, signEdit, signLeft, signMsg, profileVersion, signRemoved, validGroup, verifyAdd, verifyMsg, withLink } from '../shared/sync'
 import { openRequest, requestSeed, sealRequest } from '../shared/sealed'
 import { createImpairment, parseNetSim } from '../shared/netsim'
+import { createPresence } from './presence'
 import { createFiles } from './files'
 import { type Activity, type Game, cleanActivity, shareable } from '../shared/activity'
 import { type RelayLimits, RELAY_LIMITS, createNet } from './network'
@@ -41,6 +42,8 @@ type Saved = {
   unread?: Record<string, number> // per conversation: messages from others and missed calls since it was last read
   lastAt?: Record<string, number> // per conversation: when its newest message arrived here
   blocked?: Record<Key, number> // people we blocked, and when: no friend requests, no links, their messages uncounted
+  joinedAt?: Record<string, number> // per group: when it reached us; history written before that is not unread
+  profileV?: Record<Key, string> // the profile version (profileVersion) we hold of each person, from a greeting or their card
   profile: Profile
   friends: Record<Key, FriendStatus>
   profiles: Record<Key, Profile>
@@ -75,16 +78,48 @@ type Opts = {
   version?: string // this app's version, told to everyone we greet
   diag?: (area: Area, text: string) => void // diagnostic events, kept in memory by the caller
   forwardTo?: number // how many members a group message is passed on to; testing: 0, so only asking delivers
+  groupLinks?: number // how many members of each group we dial ourselves (besides friends and people in our call)
+  // Conversations kept in memory: as many recently used ones as fit in this many messages (the one in use always
+  // stays), so a server's busy channels are not read back from disk for every catch-up page. Testing: a few.
+  keepMsgs?: number
 }
 
 // Conversations whose messages stay in memory; the open one and a couple being synced.
-const KEEP_LOGS = 3
+const CATCHUP_PAGE = 200 // messages sent per catch-up round
+// A new member of a group syncs only each author's newest this many; older ones come a page at a time on request
+const SHALLOW = 100
+const CATCHUP_BACKLOG = 1 << 20 // no new round while this much is still unsent on the link
+// shortcut: one bucket per author and conversation, 20 a second after a burst of 400; servers want per-channel
+// slow mode on top, set by their roles
+const FLOOD = { burst: 400, perSecond: 20 }
 
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
-export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', links, strict, relayLimits, maxRequests = 200, netsim, thumbnail, forwardTo = 3 }: Opts) {
+export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', links, strict, relayLimits, maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8, keepMsgs = 50000 }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
   const file = join(dir, 'state.json')
   mkdirSync(join(dir, 'msgs'), { recursive: true })
+  // Pictures (ours, everyone's and the groups') are kept apart in pictures/<id>, named by their hash, and state.json
+  // holds only `pic:<id>`: at 200 members they would be several MB, rewritten with every change. The window gets them
+  // as eleusinia-pic://<id> (index.ts) for the same reason, instead of inside every state push.
+  const pics = join(dir, 'pictures')
+  mkdirSync(pics, { recursive: true })
+  const picIds = new Map<string, string>() // data URL -> id, so each picture is hashed once
+  const kept = new Set<string>() // ids state.json points to, read at start; others are deleted then
+  function picId(data: string) {
+    let id = picIds.get(data)
+    if (id) return id
+    id = createHash('sha256').update(data).digest('hex').slice(0, 32)
+    if (!existsSync(join(pics, id))) writeFileSync(join(pics, id), data)
+    picIds.set(data, id)
+    return id
+  }
+  const toRef = (v: unknown) => (typeof v === 'string' && v.startsWith('data:') ? 'pic:' + picId(v) : v)
+  function fromRef(v: unknown) {
+    if (typeof v !== 'string' || !/^pic:[0-9a-f]{32}$/.test(v)) return v
+    kept.add(v.slice(4))
+    return existsSync(join(pics, v.slice(4))) ? readFileSync(join(pics, v.slice(4)), 'utf8') : ''
+  }
+  const picUrl = (p: Profile): Profile => (p.avatar ? { ...p, avatar: 'eleusinia-pic://' + picId(p.avatar) } : p)
   const s: Saved = {
     profile: { handle: '', name: '', about: '', avatar: '' },
     friends: {},
@@ -92,24 +127,60 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     groups: {},
     acked: {},
     settings: { audioKbps: 32, mic: '', out: '' },
-    ...(existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : {}),
+    ...(existsSync(file) ? JSON.parse(readFileSync(file, 'utf8'), (k, v) => (k === 'avatar' ? fromRef(v) : v)) : {}),
   }
   const save = () => {
-    writeFileSync(file + '.tmp', JSON.stringify(s))
+    writeFileSync(file + '.tmp', JSON.stringify(s, function (k, v) { return this === s && k === 'confirmed' ? undefined : k === 'avatar' ? toRef(v) : v }))
     renameSync(file + '.tmp', file) // atomic, so a crash mid-write cannot corrupt the state
   }
   // Groups from before owners: their owner is found once, from the copy on this computer, and kept from then on, so a
   // member's later made-up copies cannot change who it is.
   for (const g of Object.values(s.groups)) if (!g.owner) g.owner = ownerOf(g) ?? undefined
+  // Pictures nothing points to any more (changed or forgotten), unless state.json is from before pictures were apart
+  if (kept.size) for (const f of readdirSync(pics)) if (!kept.has(f)) rmSync(join(pics, f), { force: true })
   if (!s.lastAt) {
     s.lastAt = {}
     for (const f of existsSync(join(dir, 'msgs')) ? readdirSync(join(dir, 'msgs')) : [])
       if (f.endsWith('.jsonl')) s.lastAt[f.slice(0, -6)] = statSync(join(dir, 'msgs', f)).mtimeMs
   }
+  // What each member confirmed holding (`confirmed`) is kept apart in confirmed/<conv>.jsonl: it grows to members ×
+  // authors (about 600 KB for a full group) and changes with every receipt, so inside state.json it would rewrite
+  // all of that every 2 s. A receipt appends only the authors it raised; each file is compacted at start.
+  const confDir = join(dir, 'confirmed')
+  mkdirSync(confDir, { recursive: true })
+  const confFile = (conv: string) => join(confDir, conv + '.jsonl')
+  const writeConfirmed = (conv: string) => {
+    const peers = s.confirmed?.[conv] ?? {}
+    writeFileSync(confFile(conv) + '.tmp', Object.entries(peers).map(([k, h]) => JSON.stringify({ k, h }) + '\n').join(''))
+    renameSync(confFile(conv) + '.tmp', confFile(conv))
+  }
+  for (const f of readdirSync(confDir)) {
+    if (!f.endsWith('.jsonl')) continue
+    const peers = ((s.confirmed ??= {})[f.slice(0, -6)] ??= {})
+    for (const line of readFileSync(join(confDir, f), 'utf8').split('\n')) {
+      try {
+        const { k, h } = JSON.parse(line)
+        for (const [a, n] of Object.entries(h as Have)) (peers[k] ??= {})[a] = Math.max(peers[k]?.[a] ?? 0, n)
+      } catch {} // blank or torn last line
+    }
+  }
+  for (const conv of Object.keys(s.confirmed ?? {})) writeConfirmed(conv) // also moves an older state.json's copy out
 
   // Groups we are in. Groups we left stay stored, so the notice of leaving keeps reaching their members.
   const ours = () => Object.values(s.groups).filter((g) => g.members.includes(me))
-  const inGroupWith = (key: Key) => ours().some((g) => g.members.includes(key))
+  // Everyone in a group with us, as one set: asked for every link, message and state push, which scanning each
+  // group's members would make cost groups × members. Rebuilt when any group's member list changes (a merge always
+  // makes a new list; nothing changes one in place).
+  let matesOf: unknown[] = []
+  let mates = new Set<Key>()
+  function inGroupWith(key: Key) {
+    const gs = Object.values(s.groups)
+    if (gs.length !== matesOf.length || gs.some((g, i) => g.members !== matesOf[i])) {
+      matesOf = gs.map((g) => g.members)
+      mates = new Set(gs.filter((g) => g.members.includes(me)).flatMap((g) => g.members))
+    }
+    return mates.has(key)
+  }
   const known = (key: Key) => s.friends[key] === 'friend' || inGroupWith(key)
   const wants = (key: Key) => known(key) || s.friends[key] === 'outgoing'
 
@@ -140,13 +211,13 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const shareActivity = () => (sharing ??= setTimeout(() => ((sharing = null), net.keys().forEach(sendActivity)), 2000))
   // A burst of updates (several friends starting games) is one state push to the window.
   let pushing: ReturnType<typeof setTimeout> | null = null
-  const pushSoon = () => (pushing ??= setTimeout(() => ((pushing = null), push()), 300))
+  const pushSoon = () => (pushing ??= setTimeout(() => ((pushing = null), push()), 100))
 
   const state = (): State => ({
     me,
     profile: s.profile,
     friends: s.friends,
-    profiles: s.profiles,
+    profiles: Object.fromEntries(Object.entries(s.profiles).map(([k, p]) => [k, picUrl(p)])),
     online: net.keys().filter(known),
     groups: Object.fromEntries(ours().map((g) => [g.id, g])),
     settings: s.settings,
@@ -156,6 +227,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     activity: { ...Object.fromEntries([...theirs].filter(([k]) => known(k) && net.linked(k))), [me]: ourActivity() },
     chats: Object.fromEntries(Object.entries(s.lastAt ?? {}).filter(([c]) => members(c).length).map(([c, at]) => [c, { unread: s.unread?.[c] ?? 0, at }])),
     blocked: Object.keys(s.blocked ?? {}),
+    present: presence.online().filter(known),
   })
   const push = () => emit({ type: 'state', state: state() })
   // For frequent small changes (receipts in a busy group): written within 2 s rather than once per message.
@@ -164,12 +236,13 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   // The whole state is rewritten, so many changes at once (contacts coming online at start) share one write.
   const changed = () => {
     saveSoon()
-    push()
+    pushSoon()
   }
 
   // Message logs live on disk. Only the few most recently used conversations stay in memory, so long histories
   // cost nothing while unused; what each author has sent so far (`have`) is tiny and always kept.
   const logs = new Map<string, Msg[]>() // least recently used first
+  const sorted = new Map<string, Msg[]>() // a cached log in time order, for history; dropped when a message is added
   const haves = new Map<string, Have>()
   const logFile = (conv: string) => join(dir, 'msgs', conv + '.jsonl')
   // Callers must pass a conv that members() accepted: it becomes a file name.
@@ -179,34 +252,65 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     else {
       msgs = []
       const have: Have = {}
+      const tail: Have = {}
       if (existsSync(logFile(conv))) {
-        for (const line of readFileSync(logFile(conv), 'utf8').split('\n')) {
+        const text = readFileSync(logFile(conv), 'utf8')
+        // A write cut short (power lost) leaves a torn last line: end it, or the next message would be glued to it and lost
+        if (text && !text.endsWith('\n')) appendFileSync(logFile(conv), '\n')
+        for (const line of text.split('\n')) {
           try {
-            const m: Msg | { skip: Have } = JSON.parse(line)
+            const m: Msg | { skip: Have } | { tail: Have } = JSON.parse(line)
             if ('skip' in m) for (const [a, n] of Object.entries(m.skip)) have[a] = Math.max(have[a] ?? 0, n)
-            else msgs.push(m), (have[m.author] = m.seq)
+            else if ('tail' in m) for (const [a, n] of Object.entries(m.tail)) (have[a] = Math.max(have[a] ?? 0, n)), (tail[a] = n)
+            else msgs.push(m), (have[m.author] = Math.max(have[m.author] ?? 0, m.seq)) // older ones come later in the file
           } catch {} // blank or torn last line
         }
       }
       haves.set(conv, have)
+      for (const a of Object.keys(tail)) if (!tail[a]) delete tail[a]
+      tails.set(conv, tail)
     }
     logs.set(conv, msgs)
-    for (const old of logs.keys()) if (logs.size > KEEP_LOGS) logs.delete(old)
+    let total = 0
+    for (const l of logs.values()) total += l.length
+    for (const [old, l] of logs) {
+      if (total <= keepMsgs || old === conv) break
+      logs.delete(old)
+      sorted.delete(old)
+      total -= l.length
+    }
     return msgs
   }
   const haveOf = (conv: string) => haves.get(conv) ?? (msgsOf(conv), haves.get(conv)!)
+  // Per author, the newest message never fetched because we joined after it (`{ tail }` lines): everything at or below
+  // it is older history, fetched only on request (`older`), newest first, each step lowering it by one.
+  const tails = new Map<string, Have>()
+  const tailOf = (conv: string) => tails.get(conv) ?? (msgsOf(conv), tails.get(conv)!)
+  function setTail(conv: string, a: Key, n: number) {
+    const t = tailOf(conv)
+    if (n > 0) t[a] = n
+    else delete t[a]
+    appendFileSync(logFile(conv), JSON.stringify({ tail: { [a]: n } }) + '\n')
+  }
+  // Only a group that reached us after this came in (joinedAt) takes a shallow start: a member of an older group, or
+  // a friend's DM, still gets everything, as before.
+  const shallow = (conv: string) => Object.hasOwn(s.groups, conv) && !!s.joinedAt?.[conv]
   function forget(conv: string) {
     logs.delete(conv)
+    tails.delete(conv)
+    sorted.delete(conv)
     haves.delete(conv)
     delete s.confirmed?.[conv]
+    rmSync(confFile(conv), { force: true })
   }
-  function append(m: Msg) {
-    s.lastAt = { ...s.lastAt, [m.conv]: Date.now() }
-    if (m.author !== me && !s.blocked?.[m.author]) s.unread = { ...s.unread, [m.conv]: (s.unread?.[m.conv] ?? 0) + 1 }
+  function append(m: Msg, old = false) {
+    if (!old) s.lastAt = { ...s.lastAt, [m.conv]: Date.now() }
+    if (m.author !== me && !s.blocked?.[m.author] && m.ts >= (s.joinedAt?.[m.conv] ?? 0)) s.unread = { ...s.unread, [m.conv]: (s.unread?.[m.conv] ?? 0) + 1 }
     saveSoon()
     pushSoon()
-    haveOf(m.conv)[m.author] = m.seq
+    haveOf(m.conv)[m.author] = Math.max(haveOf(m.conv)[m.author] ?? 0, m.seq)
     logs.get(m.conv)?.push(m)
+    sorted.delete(m.conv)
     appendFileSync(logFile(m.conv), JSON.stringify(m) + '\n')
     emit({ type: 'msg', m })
     if (m.files) files.note(m)
@@ -237,13 +341,16 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       ...(relayKey && { relay: relayKey }),
     })
   const sendHave = (key: Key, conv: string, re?: boolean) =>
-    net.send(key, { t: 'have', conv, have: haveOf(conv), re })
+    net.send(key, { t: 'have', conv, have: haveOf(conv), re, ...(shallow(conv) && { tail: true }) })
   // Group receipts also go, at most every 5 s per group, to a few random linked members (whoever passed a message on
   // got one already), so over a few rounds each of them knows what we hold and never sends it to our key again (see
   // `confirmed`), and one that missed a message asks for it. To every member, a big group would send members² a round.
   const receipts = new Set<string>()
   const askedFor = new Map<string, number>()
-  const sentUpTo = new Map<string, Have>() // per link and conversation: what catch-up already sent, until the link closes
+  const flood = new Map<string, { left: number; at: number }>()
+  const askedOlder = new Map<Key, number>()
+  const floodRetry = new Map<string, ReturnType<typeof setTimeout>>()
+  const sentUpTo = new Map<string, { have: Have; at: number }>() // per link and conversation: what catch-up just sent
   const few = (ks: Key[], n = forwardTo) => ks.sort(() => Math.random() - 0.5).slice(0, n)
   const sendReceipts = () => {
     for (const conv of receipts) for (const k of few(members(conv).filter((k) => k !== me && net.linked(k)), 3)) sendHave(k, conv, true)
@@ -258,6 +365,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     hi(key)
     if (s.friends[key] === 'friend') sendHave(key, dmId(me, key))
     for (const g of shared) sendHave(key, g.id)
+    if (shared.length) net.send(key, { t: 'presence', p: presence.note() })
     sendActivity(key)
   }
   function reach(key: Key) {
@@ -316,7 +424,11 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       } else relayKeys.delete(key)
       if (w.via === true) reachable.add(key)
       else reachable.delete(key)
-      s.profiles[key] = cleanProfile(w)
+      // Every link opening greets: only a changed profile is written and sent to the window
+      const profile = cleanProfile(w)
+      if (s.profileV?.[key] !== profileVersion(profile)) s.profileV = { ...s.profileV, [key]: profileVersion(profile) }
+      if (JSON.stringify(profile) === JSON.stringify(s.profiles[key])) return pushSoon()
+      s.profiles[key] = profile
       return changed()
     }
     if (w.t === 'group') {
@@ -330,9 +442,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       // They are behind (for example, they have not heard that someone left): send them ours.
       if (JSON.stringify(merged) !== JSON.stringify(mergeGroup(undefined, g))) net.send(key, { t: 'group', g: merged })
       if (JSON.stringify(merged) === JSON.stringify(s.groups[g.id])) return
+      if (!s.groups[g.id]) s.joinedAt = { ...s.joinedAt, [g.id]: Date.now() }
+      if (merged.members.includes(me) && merged.members.some((k) => !s.groups[g.id]?.members.includes(k))) presence.announceSoon()
       s.groups[g.id] = merged
       changed()
-      return spread(merged)
+      // Passed on to a few linked members, like messages: each member passing it to all would be members² copies.
+      // Anyone it misses gets it when they next link with someone (greet), or back from a member who is ahead.
+      for (const k of few(merged.members.filter((k) => k !== me && k !== key && net.linked(k)), 3)) net.send(k, { t: 'group', g: merged })
+      return
     }
     if (!known(key)) return
     if (w.t === 'activity') {
@@ -351,7 +468,11 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const was = s.confirmed?.[w.conv]?.[key] ?? {}
       const now: Have = { ...was }
       for (const a of Object.keys(have)) now[a] = Math.max(was[a] ?? 0, Math.min(Number(w.have[a]) || 0, have[a]))
-      if (Object.keys(now).some((a) => now[a] !== was[a])) (((s.confirmed ??= {})[w.conv] ??= {})[key] = now), saveSoon()
+      const raised = Object.keys(now).filter((a) => now[a] !== was[a])
+      if (raised.length) {
+        ;((s.confirmed ??= {})[w.conv] ??= {})[key] = now
+        appendFileSync(confFile(w.conv), JSON.stringify({ k: key, h: Object.fromEntries(raised.map((a) => [a, now[a]])) }) + '\n')
+      }
       // Asking again for what it had confirmed: lost data or someone else with that key. Either way it is not sent
       // again; it is told where to carry on from, so new messages still reach it.
       if (Object.keys(was).some((a) => (Number(w.have[a]) || 0) < was[a])) {
@@ -370,11 +491,20 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       }
       // Read the log only when they lack something; a receipt for what they already hold costs nothing. What this link
       // already carried is not sent again: receipts come per message, so a long catch-up would resend its tail each time.
+      // A page at a time (CATCHUP_PAGE), the next when their receipts show this one arrived, and none while the link
+      // still has a lot unsent: a new member of a busy group would otherwise be sent its whole history in one burst.
+      // What was sent holds back only receipts, for 10 s: when they ask (a page they turned away, FLOOD), they get it.
+      const sent = sentUpTo.get(key + w.conv)
       const from: Have = { ...now }
-      for (const [a, n] of Object.entries(sentUpTo.get(key + w.conv) ?? {})) from[a] = Math.max(from[a] ?? 0, n)
-      if (Object.entries(have).some(([a, n]) => n > (from[a] ?? 0))) {
-        for (const m of missing(msgsOf(w.conv), from)) net.send(key, { t: 'msg', m })
-        sentUpTo.set(key + w.conv, { ...have })
+      if (sent && w.re && sent.at > Date.now() - 10000) for (const [a, n] of Object.entries(sent.have)) from[a] = Math.max(from[a] ?? 0, n)
+      // A new member holding nothing of an author starts at that author's newest SHALLOW; the first one says so (start)
+      const starts = new Set<string>()
+      if (w.tail === true) for (const [a, n] of Object.entries(have)) if (!(Number(w.have[a]) > 0) && !(from[a] > 0) && n > SHALLOW) (from[a] = n - SHALLOW), starts.add(a)
+      if (net.backlog(key) < CATCHUP_BACKLOG && Object.entries(have).some(([a, n]) => n > (from[a] ?? 0))) {
+        const upTo = { ...from }
+        for (const m of missing(msgsOf(w.conv), from).slice(0, CATCHUP_PAGE))
+          net.send(key, { t: 'msg', m, ...(starts.has(m.author) && m.seq === from[m.author] + 1 && { start: true }) }), (upTo[m.author] = Math.max(upTo[m.author] ?? 0, m.seq))
+        sentUpTo.set(key + w.conv, { have: upTo, at: Date.now() })
       }
       if (!w.re) sendHave(key, w.conv, true)
       // Their receipt shows messages we lack (passing on missed us): ask, and they send them. At most every 5 s per
@@ -387,7 +517,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const seq = Math.min(Number(w.have[me]) || 0, have[me] ?? 0)
       if (seq > (s.acked[w.conv] ?? 0)) {
         s.acked[w.conv] = seq
-        save()
+        saveSoon() // every confirmed message: written within 2 s, and flushed when the node stops
         emit({ type: 'acked', conv: w.conv, seq })
       }
     } else if (w.t === 'msg') {
@@ -396,9 +526,32 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const ms = members(m?.conv)
       if (!ms.includes(key) || !ms.includes(m.author)) return
       const next = (haveOf(m.conv)[m.author] ?? 0) + 1
-      if (m.seq < next) return // already have it
-      if (m.seq > next) return sendHave(key, m.conv, true) // gap: ask for what we lack
+      const t = Number.isSafeInteger(m.seq) ? tailOf(m.conv)[m.author] : undefined
+      const old = !!t && m.seq === t // the next older one, asked for with `older`
+      if (m.seq < next && !old) return // already have it
+      // gap: ask for what we lack, unless it is the start a member sent us on purpose because we are new here and hold
+      // nothing of this author. Never for a message that merely overtook earlier ones (gossip, everyone talking at once).
+      if (m.seq > next && !(w.start === true && next === 1 && shallow(m.conv) && verifyMsg(m) && m.ts <= Date.now() + EDIT_AHEAD_MS)) return sendHave(key, m.conv, true)
       if (!verifyMsg(m)) return
+      // Dated far ahead it would stay pinned below everything for good: turned away until its time comes (it is asked
+      // for again then, so only the author's own later messages wait behind it)
+      if (m.ts > Date.now() + EDIT_AHEAD_MS) return
+      // A member's messages count against a bucket per author and conversation (FLOOD); past it they are turned away
+      // and come again when asked, so a burst from an honest catch-up only slows down, while a flood cannot outrun it.
+      const b = flood.get(m.author + m.conv) ?? { left: FLOOD.burst, at: Date.now() }
+      b.left = Math.min(FLOOD.burst, b.left + ((Date.now() - b.at) / 1000) * FLOOD.perSecond)
+      b.at = Date.now()
+      if (b.left < 1) {
+        flood.set(m.author + m.conv, b)
+        // Asked for again once the bucket has refilled a little, or a direct chat, with no regular receipts, would stall
+        if (!floodRetry.has(m.author + m.conv)) floodRetry.set(m.author + m.conv, setTimeout(() => (floodRetry.delete(m.author + m.conv), sendHave(key, m.conv)), 2000))
+        return
+      }
+      b.left--
+      if (flood.size > 5000) flood.clear()
+      flood.set(m.author + m.conv, b)
+      if (old) return void (append(m, true), setTail(m.conv, m.author, m.seq - 1))
+      if (m.seq > next) setTail(m.conv, m.author, m.seq - 1), (haveOf(m.conv)[m.author] = m.seq - 1)
       append(m)
       sendHave(key, m.conv, true) // delivery receipt
       if (Object.hasOwn(s.groups, m.conv)) receipts.add(m.conv)
@@ -414,6 +567,24 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       s.declined = { ...s.declined, [key]: Date.now() } // their old request, still announced for a while, must not come back
       if (!known(key)) delete s.profiles[key]
       changed()
+    } else if (w.t === 'older') {
+      // A page of older history for a member who joined after it: per author, at or below what they asked, the newest
+      // first; at most one page a second per peer
+      if (!members(w.conv).includes(key) || !w.upTo || typeof w.upTo !== 'object' || (askedOlder.get(key) ?? 0) > Date.now() - 1000) return
+      askedOlder.set(key, Date.now())
+      const upTo = w.upTo as Record<string, unknown>
+      // Each author's run by number, newest first, so a page never skips one (they take only the next one down); the
+      // runs are merged by time, so the page is the conversation's newest older stretch
+      const runs = new Map<string, Msg[]>()
+      for (const m of msgsOf(w.conv)) if (Number(upTo[m.author]) >= m.seq) (runs.get(m.author) ?? runs.set(m.author, []).get(m.author)!).push(m)
+      for (const r of runs.values()) r.sort((x, y) => y.seq - x.seq)
+      for (let n = 0; n < CATCHUP_PAGE && runs.size; n++) {
+        const [a, r] = [...runs].reduce((x, y) => (y[1][0].ts > x[1][0].ts ? y : x))
+        net.send(key, { t: 'msg', m: r.shift()! })
+        if (!r.length) runs.delete(a)
+      }
+    } else if (w.t === 'presence') {
+      presence.receive(key, w.p)
     } else if (w.t === 'pkt') {
       if (typeof w.d === 'string') relay.deliver(key, Buffer.from(w.d, 'base64'))
     } else if (w.t === 'probe') {
@@ -575,6 +746,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       },
       close(key) {
         diag('network', `link closed with …${key.slice(-6)}`)
+        presence.closed(key)
         for (const k of sentUpTo.keys()) if (k.startsWith(key)) sentUpTo.delete(k)
         theirs.delete(key)
         sentActivity.delete(key)
@@ -604,6 +776,29 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     links,
     strict,
   )
+  // Group members we are not linked with, online by their presence notes (presence.ts)
+  const presence = createPresence({
+    keyPair,
+    net,
+    emit,
+    few,
+    tell,
+    ownProfile: () => s.profile,
+    around: (k) => new Set(ours().filter((g) => g.members.includes(k)).flatMap((g) => g.members)),
+    inCall: (conv, k) => members(conv).includes(k),
+    accepts: (k) => inGroupWith(k) && !s.blocked?.[k],
+    version: (k) => s.profileV?.[k],
+    async card(k, v) {
+      const c = await fetchCard(k)
+      if (!c || !known(k) || net.linked(k)) return 'skip'
+      if (JSON.stringify(c) === JSON.stringify(s.profiles[k])) return 'same'
+      s.profiles[k] = c
+      s.profileV = { ...s.profileV, [k]: v }
+      changed()
+      return 'stored'
+    },
+    changed: () => pushSoon(),
+  })
   // Testing only: a simulated bad line on the relayed call path (shared/netsim.ts).
   const sim = parseNetSim(netsim)
   const impair = sim && createImpairment(sim)
@@ -618,6 +813,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     members,
     emit: (file) => emit({ type: 'file', file }),
     limitMB: () => s.settings.cacheMB,
+    // Dialled with the next redial (it takes demand), and through a relaying friend if a direct dial fails
+    want: (k) => void (k !== me && known(k) && !net.linked(k) && !demand.has(k) && demand.set(k, Date.now())),
   })
 
   // Someone offline is dialled less and less often (15 s, doubling to 5 minutes in use): every dial is a DHT lookup,
@@ -632,9 +829,66 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     const n = (retries.get(k)?.n ?? 0) + 1
     retries.set(k, { n, next: later(n, redialMs) })
   }
+  // Who we dial ourselves: friends, whoever we have something for (a call signal), and a few members of each group,
+  // picked by a hash of both keys so each member picks different ones. With everyone dialing everyone, a group of
+  // 200 would be 20,000 links; this way each member has about 2 × groupLinks, and messages, receipts and presence
+  // notes travel along them. Links others make to us are kept.
+  // Down that list until groupLinks of them are linked or still being tried for the first time, so offline picks (a
+  // dial that failed) do not leave us cut off; at most 3 times as many, each backing off while offline. Counting
+  // first tries keeps a burst of dials at start from reaching 3 × groupLinks.
+  function linkPick(g: Group) {
+    const order = g.members
+      .filter((k) => k !== me)
+      .map((k) => [createHash('sha256').update(me + k).digest('hex'), k])
+      .sort()
+    const out: Key[] = []
+    for (const [, k] of order) {
+      if (out.filter((p) => net.linked(p) || !retries.get(p)?.n).length >= groupLinks || out.length >= groupLinks * 3) break
+      out.push(k)
+    }
+    return out
+  }
+  // A link we dialed for something passing (a group change, a call, a file) and no longer need is closed after 10
+  // minutes, or extra links would pile up into everyone linked with everyone again. Never a friend, one of our picks,
+  // someone we still have something for, or anyone a call is using (its relay port).
+  const signalled = new Map<Key, number>() // when we last sent someone a call signal
+  function closeIdle(picked: Set<Key>) {
+    for (const k of net.keys()) {
+      const at = net.ours(k)
+      if (at === null || s.friends[k] || picked.has(k) || demand.has(k) || k === inbox || relay.has(k) || files.busy(k) || net.backlog(k) > 0) continue
+      if (Date.now() - Math.max(at, signalled.get(k) ?? 0) > IDLE) net.drop(k), signalled.delete(k)
+    }
+  }
+  // What we keep about people only while they share something with us: their profile (also those who left one of our
+  // groups, whose old messages still show their name, and blocked people, for the Blocked list) and, per
+  // conversation, what each member confirmed holding. Links come and go with bounded links, so without this both
+  // would grow with everyone ever seen, and state.json is rewritten with every change.
+  function prune() {
+    let gone = false
+    const leavers = new Set(ours().flatMap((g) => [...Object.keys(g.left ?? {}), ...Object.keys(g.removed ?? {})]))
+    for (const k of Object.keys(s.profiles))
+      if (!s.friends[k] && !inGroupWith(k) && !leavers.has(k) && !s.blocked?.[k]) delete s.profiles[k], delete s.profileV?.[k], presence.forget(k), (gone = true)
+    for (const [conv, peers] of Object.entries(s.confirmed ?? {})) {
+      const ms = members(conv)
+      if (!ms.length) delete s.confirmed![conv], rmSync(confFile(conv), { force: true })
+      else if (Object.keys(peers).some((k) => !ms.includes(k))) {
+        for (const k of Object.keys(peers)) if (!ms.includes(k)) delete peers[k]
+        writeConfirmed(conv)
+      }
+    }
+    if (gone) saveSoon(), pushSoon()
+    // Memory only, one entry per peer ever linked: kept while they are linked or still a contact
+    for (const m of [used, signalled]) for (const k of m.keys()) if (!net.linked(k)) m.delete(k)
+    for (const k of versions.keys()) if (!net.linked(k) && !known(k)) versions.delete(k)
+    for (const [id, b] of flood) if (Date.now() - b.at > 60000) flood.delete(id) // long since refilled
+  }
   const redial = () => {
     relayTick()
-    const keys = new Set(ours().flatMap((g) => g.members))
+    presence.expire()
+    prune()
+    const picked = new Set(ours().flatMap(linkPick))
+    closeIdle(picked)
+    const keys = new Set([...picked, ...demand.keys()])
     for (const [k, st] of Object.entries(s.friends)) if (st !== 'incoming') keys.add(k)
     keys.delete(me)
     for (const k of keys) if (due(k)) net.dial(k)
@@ -795,6 +1049,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   }
   const ready = Promise.all([applyRelay(), announce().then(checkRequests)])
   const announcer = setInterval(announce, 5 * 60000)
+  const presenceTimer = setInterval(() => presence.announce(), 60000)
   const watcher = setInterval(checkRequests, redialMs * 2) // every 30 s in use
   // A group member we have never linked with (two strict routers) would show as their key: their published card
   // names them. A few at a time, each at most hourly.
@@ -808,7 +1063,6 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     }
   }
   const namer = setInterval(nameUnlinked, redialMs * 2)
-
   return {
     state,
     ready,
@@ -830,6 +1084,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       changed()
       publishCard()
       for (const k of net.keys()) if (wants(k)) hi(k)
+      presence.announce() // members not linked with us see the new version and fetch the card
       if (fresh) await Promise.all([announce(), publishId().catch(() => {})]) // so the ID can be found as soon as setup finishes
     },
     // People matching what has been typed so far: an exact friend ID (online, or offline through their ID card), or
@@ -963,12 +1218,26 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       delete s.declined?.[key]
       changed()
     },
+    // Older history of a group we joined after it, from up to two linked members; it arrives as messages.
+    older(conv: string) {
+      const upTo = members(conv).length ? tailOf(conv) : {}
+      if (!Object.keys(upTo).length) return false
+      for (const k of few(members(conv).filter((k) => k !== me && net.linked(k)), 2)) net.send(k, { t: 'older', conv, upTo })
+      return true
+    },
+    // A picture the window was given as eleusinia-pic://<id>, for index.ts to serve.
+    picture: (id: string) => (/^[0-9a-f]{32}$/.test(id) && existsSync(join(pics, id)) ? readFileSync(join(pics, id), 'utf8') : null),
     history(conv: string, limit = Infinity) {
       if (!members(conv).length) return { msgs: [], acked: 0, total: 0 }
       members(conv).forEach(need) // looking at a conversation is a reason to reach its people
       const all = msgsOf(conv)
       const n = Math.max(1, Number(limit) || 1)
-      return { msgs: all.length > n ? [...all].sort((a, b) => a.ts - b.ts).slice(-n) : all, acked: s.acked[conv] ?? 0, total: all.length }
+      const earlier = Object.keys(tailOf(conv)).length > 0 // older history on other members' computers, by request
+      if (all.length <= n) return { msgs: all, acked: s.acked[conv] ?? 0, total: all.length, earlier }
+      // Sorted once per change, not on every look (opening the chat, loading earlier messages)
+      let byTime = sorted.get(conv)
+      if (!byTime) sorted.set(conv, (byTime = [...all].sort((a, b) => a.ts - b.ts)))
+      return { msgs: byTime.slice(-n), acked: s.acked[conv] ?? 0, total: all.length, earlier }
     },
     // Works with nobody online: the message is logged now and synced whenever a member connects.
     // refs: files added with addFile or addBytes first, so we can hand them to whoever asks.
@@ -1019,13 +1288,20 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       for (const k of net.keys()) if (s.friends[k] === 'friend') net.send(k, { t: 'gone' })
       await new Promise((r) => setTimeout(r, 1500)) // let those notices leave before the links close
       await this.destroy()
-      for (const f of ['state.json', 'state.json.tmp', 'identity.json', 'msgs', 'files']) rmSync(join(dir, f), { recursive: true, force: true })
+      for (const f of ['state.json', 'state.json.tmp', 'identity.json', 'msgs', 'files', 'pictures', 'confirmed']) rmSync(join(dir, f), { recursive: true, force: true })
     },
     signal(conv: string, to: Key | null, data: unknown) {
       if (noDirect && (data as { k?: string })?.k === 'ice') return
       for (const k of members(conv)) if (k !== me && (!to || to === k)) net.send(k, { t: 'call', conv, data }), used.set(k, Date.now()), need(k)
-      // Whoever a signal is addressed to is in the call with us: sought out even when not a friend.
-      if (to && to !== me && members(conv).includes(to) && !net.linked(to)) demand.set(to, demand.get(to) ?? Date.now())
+      if (to) signalled.set(to, Date.now())
+      // Whoever a signal is addressed to is in the call with us: sought out even when not a friend, and dialled now.
+      if (to && to !== me && members(conv).includes(to) && !net.linked(to)) {
+        demand.set(to, demand.get(to) ?? Date.now())
+        if (due(to)) net.dial(to)
+      }
+      // Our own group call, told in our presence note so members not linked with us see it too. Never a direct call.
+      const k = (data as { k?: string })?.k
+      if (!to && (k === 'join' || k === 'leave')) presence.inGroupCall(k === 'join' && Object.hasOwn(s.groups, conv) ? conv : null)
     },
     // A UDP port on this machine that carries a call with `key` over the peer link (see relay.ts).
     relayOpen: (key: Key) => (known(key) ? relay.open(key) : null),
@@ -1098,6 +1374,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       clearInterval(timer)
       clearInterval(delivery)
       clearInterval(announcer)
+      clearInterval(presenceTimer)
+      for (const t of floodRetry.values()) clearTimeout(t)
+      presence.destroy()
       clearInterval(watcher)
       clearInterval(namer)
       clearInterval(probeReset)

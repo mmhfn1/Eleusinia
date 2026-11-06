@@ -2,7 +2,31 @@ import { createHash } from 'node:crypto'
 import crypto from 'hypercore-crypto'
 import { type LinkPreview, cleanLink, linkBody } from './links'
 import { filesBody, validFiles } from './media'
-import { type Add, type Group, type Have, type Key, type Msg, MAX_TEXT, isGroupId, isKey, isPicture } from './protocol'
+import { type Add, type Group, type Have, type Key, type Msg, type Profile, MAX_TEXT, isGroupId, isKey, isPicture } from './protocol'
+
+// A signed "online" note, passed along between group members so they know who is online without a link to everyone.
+// call: the group whose call the author is in, if any, so members not linked with them still see the call.
+// v: their profile's version (profileVersion), so members not linked with them notice a new name or picture.
+export type Presence = { key: Key; at: number; call: string | null; v: string; sig: string }
+const presenceBody = (key: string, at: number, call: string | null, v: string) => Buffer.from(`presence:${key}:${at}:${call ?? ''}:${v}`)
+export const profileVersion = (p: Profile) => createHash('sha256').update(JSON.stringify([p.handle, p.name, p.about, p.avatar])).digest('hex').slice(0, 16)
+export const signPresence = (at: number, call: string | null, v: string, kp: { publicKey: Buffer; secretKey: Buffer }): Presence => {
+  const key = kp.publicKey.toString('hex')
+  return { key, at, call, v, sig: crypto.sign(presenceBody(key, at, call, v), kp.secretKey).toString('hex') }
+}
+export function verifyPresence(p: any, now = Date.now()): p is Presence {
+  return (
+    !!p &&
+    isKey(p.key) &&
+    Number.isSafeInteger(p.at) &&
+    p.at <= now + 60000 && // a note dated ahead cannot keep someone online for long after they left
+    (p.call === null || isGroupId(p.call)) &&
+    typeof p.v === 'string' &&
+    /^[0-9a-f]{16}$/.test(p.v) &&
+    isSig(p.sig) &&
+    crypto.verify(presenceBody(p.key, p.at, p.call, p.v), Buffer.from(p.sig, 'hex'), Buffer.from(p.key, 'hex'))
+  )
+}
 
 // Files are signed only when present, so messages from before files existed still verify.
 const body = (m: Omit<Msg, 'sig'>) => Buffer.from(JSON.stringify([m.conv, m.author, m.seq, m.ts, m.text, ...(m.files ? [filesBody(m.files)] : [])]))
@@ -42,7 +66,9 @@ export function verifyMsg(m: Msg): boolean {
     isKey(m.author) &&
     Number.isSafeInteger(m.seq) &&
     m.seq > 0 &&
-    typeof m.ts === 'number' &&
+    Number.isSafeInteger(m.ts) &&
+    m.ts > 0 &&
+    m.ts < 8.64e15 && // the latest time a Date can hold: past it, showing the message throws
     typeof m.text === 'string' &&
     m.text.length <= MAX_TEXT &&
     (m.files === undefined || validFiles(m.files)) &&
@@ -82,7 +108,7 @@ export const signEdit = (g: Pick<Group, 'id' | 'name' | 'avatar' | 'updatedAt'>,
   by: kp.publicKey.toString('hex'),
   sig: crypto.sign(editBody(g), kp.secretKey).toString('hex'),
 })
-export const EDIT_AHEAD_MS = 10 * 60000 // an edit dated further ahead than this is ignored until its time comes
+export const EDIT_AHEAD_MS = 10 * 60000 // an edit or message dated further ahead than this is ignored until its time comes
 
 const isMap = (x: unknown, max = 100) => x === undefined || (!!x && typeof x === 'object' && !Array.isArray(x) && Object.keys(x).length <= max)
 
@@ -124,7 +150,7 @@ export function ownerOf(local: Group | undefined, ...others: Group[]): Key | nul
 // The same result on every peer in any order. Members are everyone reachable from the owner through signed adds,
 // minus those who left (signed by themselves) or were removed (signed by the owner); someone added only by a removed
 // member is out too, until a member adds them again. Leavers' adds still count, so leaving drops nobody else. The
-// name and picture follow the newest change a member signed; without a signed one, the first copy seen here stands.
+// name and picture follow the newest change a current member signed (not someone who left or was removed); without a signed one, the first copy seen here stands.
 export function mergeGroup(a: Group | undefined, b: Group, now = Date.now()): Group {
   const sides = a ? [a, b] : [b]
   const id = sides[0].id
@@ -159,7 +185,7 @@ export function mergeGroup(a: Group | undefined, b: Group, now = Date.now()): Gr
     if (pick && (owner || members.includes(k))) adds[k] = { by: pick.by, sig: pick.sig }
   }
   const signed = (g: Group) =>
-    !!owner && !!g.edit && valid.has(g.edit.by) && !removed[g.edit.by] && g.updatedAt <= now + EDIT_AHEAD_MS && crypto.verify(editBody(g), Buffer.from(g.edit.sig, 'hex'), Buffer.from(g.edit.by, 'hex'))
+    !!owner && !!g.edit && valid.has(g.edit.by) && !removed[g.edit.by] && !left[g.edit.by] && g.updatedAt <= now + EDIT_AHEAD_MS && crypto.verify(editBody(g), Buffer.from(g.edit.sig, 'hex'), Buffer.from(g.edit.by, 'hex'))
   const later = (x: Group, y: Group) => x.updatedAt > y.updatedAt || (x.updatedAt === y.updatedAt && (x.name > y.name || (x.name === y.name && (x.avatar ?? '') > (y.avatar ?? ''))))
   let look: Group
   if (!owner) look = a && !later(b, a) ? a : b // the old rules

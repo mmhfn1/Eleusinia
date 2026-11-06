@@ -253,6 +253,10 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
         </label>
       </section>
       <section className="settings-section">
+        <h2>Blocked people</h2>
+        <Blocked st={st} />
+      </section>
+      <section className="settings-section">
         <h2>Audio devices and quality</h2>
         <AudioSettings st={st} />
       </section>
@@ -290,6 +294,26 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
 }
 
 const WINDOWS = navigator.userAgent.includes('Windows')
+
+// Everyone blocked, each with Unblock. Unblocking does not make them a friend again; they can send a request.
+function Blocked({ st }: { st: State }) {
+  if (!st.blocked.length) return <p className="quiet">Nobody. Block someone from their profile, or by right-clicking a direct chat.</p>
+  return (
+    <>
+      {st.blocked.map((k) => (
+        <div className="settings-row" key={k}>
+          <Avatar k={k} p={st.profiles[k] ?? NOBODY} size={32} />
+          <span className="row-text">
+            <span className="row-title">{st.settings.nicknames?.[k] || labelOf(st.profiles[k] ?? NOBODY, k)}</span>
+          </span>
+          <button className="button" onClick={() => api.call('unblock', k)}>
+            Unblock
+          </button>
+        </div>
+      ))}
+    </>
+  )
+}
 
 // Pictures that downloaded by themselves are kept up to this much, the oldest deleted first. Files you saved and
 // files you sent are never counted or deleted.

@@ -83,8 +83,13 @@ export function createInbox({ dir, keyPair, dht, github, log = () => {}, fileEve
           unfiled.delete(f)
           continue
         }
-        const issue = await createIssue(github, s).catch((e) => (log(`could not file ${s.report.id} yet: ${e.message}`), null))
-        if (!issue) break
+        const issue = await createIssue(github, s).catch((e) => (log(`could not file ${s.report.id} yet: ${e.message}`), e))
+        // GitHub refusing this one report (a 4xx other than sign-in or rate limits) must not hold back the ones after
+        // it; anything else (offline, GitHub down, a bad token) stops the round until the next minute.
+        if (issue instanceof Error) {
+          if (refused(issue)) continue
+          break
+        }
         s.issue = issue
         writeFileSync(join(saved, f), JSON.stringify(s, null, 2))
         unfiled.delete(f)
@@ -118,9 +123,19 @@ export function issueOf(s: Saved) {
     quiet(r.body) || '_No description._',
   ]
   if (r.meta) parts.push('### App and system', ...Object.entries(r.meta).map(([k, v]) => `- ${k}: \`${v}\``))
-  if (r.events?.length) parts.push('### Events (UTC)', ['```text', ...r.events.map(eventLine), '```'].join('\n'))
-  return { title: quiet(`[${r.kind}] ${r.title}`), body: parts.filter(Boolean).join('\n\n'), labels: [r.kind] }
+  const head = parts.filter(Boolean).join('\n\n')
+  // GitHub refuses an issue body over 65536 characters; 400 long events go past it, so the oldest are left out.
+  const lines = (r.events ?? []).map(eventLine)
+  const room = ISSUE_MAX - head.length - 200
+  let size = 0
+  let cut = lines.length // the newest that fit are kept: lines[cut..]
+  while (cut > 0 && size + lines[cut - 1].length + 1 <= room) size += lines[--cut].length + 1
+  const kept = lines.slice(cut)
+  const events = lines.length ? `\n\n### Events (UTC)${cut ? `, the ${cut} oldest left out to fit` : ''}\n${['```text', ...kept, '```'].join('\n')}` : ''
+  return { title: quiet(`[${r.kind}] ${r.title}`), body: head + events, labels: [r.kind] }
 }
+const ISSUE_MAX = 65000
+const refused = (e: Error & { status?: number }) => !!e.status && e.status >= 400 && e.status < 500 && ![401, 403, 429].includes(e.status)
 
 async function createIssue(github: { token: string; repo: string }, s: Saved): Promise<number> {
   const post = (body: object) =>
@@ -132,6 +147,6 @@ async function createIssue(github: { token: string; repo: string }, s: Saved): P
   const issue = issueOf(s)
   let res = await post(issue)
   if (res.status === 422) res = await post({ ...issue, labels: undefined }) // the token may not be allowed to create labels
-  if (!res.ok) throw new Error(`GitHub answered ${res.status}`)
+  if (!res.ok) throw Object.assign(new Error(`GitHub answered ${res.status}`), { status: res.status })
   return (await res.json()).number
 }
