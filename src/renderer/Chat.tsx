@@ -10,6 +10,8 @@ import { type People, type Run, api } from './common'
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString()
 const dayLabel = (ts: number) =>
   sameDay(ts, Date.now()) ? 'Today' : sameDay(ts, Date.now() - 864e5) ? 'Yesterday' : new Date(ts).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+// A message from before times were checked could hold one no Date can show; toISOString would throw on it
+const iso = (ts: number) => (Number.isFinite(new Date(ts).getTime()) ? new Date(ts).toISOString() : undefined)
 const clock = (ts: number) => new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 
 type ChatProps = { st: State; conv: string; title: string; people: People; run: Run; home: () => void; stage: ReactNode }
@@ -24,6 +26,15 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   const [acked, setAcked] = useState(0)
   const [loaded, setLoaded] = useState(false)
   const [total, setTotal] = useState(0)
+  const [earlier, setEarlier] = useState(false) // older history on other members' computers (we joined after it)
+  // Asking members for that older history: what the count was when we asked, and whether nobody answered in time
+  const [olderAsk, setOlderAsk] = useState<{ conv: string; total: number; none?: boolean } | null>(null)
+  const asking = olderAsk?.conv === conv && !olderAsk.none && total <= olderAsk.total
+  useEffect(() => {
+    if (!asking) return
+    const t = setTimeout(() => setOlderAsk((a) => a && { ...a, none: true }), 8000)
+    return () => clearTimeout(t)
+  }, [asking])
   const [more, setMore] = useState({ conv, limit: PAGE })
   const limit = more.conv === conv ? more.limit : PAGE
   const kept = useRef<number | null>(null) // the list's height before older messages were added above
@@ -56,6 +67,7 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
       setMsgs(h.msgs)
       setAcked(h.acked)
       setTotal(h.total)
+      setEarlier(!!h.earlier)
       setLoaded(true)
     })
     return api.on((e) => {
@@ -286,17 +298,21 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
             </p>
           </div>
         )}
-        {total > msgs.length && (
+        {(total > msgs.length || earlier) && (
           <button
             className="button subtle earlier"
+            disabled={asking}
             onClick={() => {
               kept.current = list.current!.scrollHeight
               setMore({ conv, limit: limit + PAGE })
+              // Everything here is shown: the next page comes from another member, arriving as messages
+              if (total <= msgs.length) setOlderAsk({ conv, total }), api.call('older', conv)
             }}
           >
-            Show earlier messages
+            {asking ? 'Asking members who are online…' : 'Show earlier messages'}
           </button>
         )}
+        {olderAsk?.conv === conv && olderAsk.none && total <= olderAsk.total && <p className="quiet earlier-none">No one online has earlier messages right now. Try again later.</p>}
         {rows}
       </div>
 
@@ -383,7 +399,7 @@ const MsgRow = memo(
               <button className="user" onClick={(e) => show(m.author, e.currentTarget)}>
                 {name}
               </button>
-              <time dateTime={new Date(m.ts).toISOString()} title={new Date(m.ts).toLocaleString()}>
+              <time dateTime={iso(m.ts)} title={new Date(m.ts).toLocaleString()}>
                 {clock(m.ts)}
               </time>
             </div>

@@ -31,6 +31,13 @@ test('a presence note verifies only as signed, by its author, and not dated far 
   expect(verifyPresence(signPresence(1000, 'not a group', 'ab12ab12ab12ab12', kp), 1000)).toBe(false)
 })
 
+test('a message must carry a time a date can show', () => {
+  const kp = DHT.keyPair()
+  const at = (ts: number) => signMsg({ conv: 'c', author: kp.publicKey.toString('hex'), seq: 1, ts, text: 'x' }, kp.secretKey)
+  expect(verifyMsg(at(Date.now()))).toBe(true)
+  for (const ts of [1e300, 8.64e15, -1, 0, 1.5]) expect(verifyMsg(at(ts))).toBe(false)
+})
+
 test('missing returns only what the peer lacks', () => {
   const log = [1, 2, 3].map((seq) => ({ conv: 'c', author: 'x', seq, ts: 0, text: '', sig: '' }))
   expect(missing(log, { x: 2 }).map((m) => m.seq)).toEqual([3])
@@ -276,7 +283,7 @@ test('a group member not linked with us shows online and in a call through prese
   await until(() => heard.some((e) => e.from === d.key && e.conv === gid && e.data.k === 'leave'))
   expect(heard.filter((e) => e.data.k === 'join').length).toBe(1)
   // D renames: B, still not linked with D, sees the new name from D's card, fetched because the note's version changed
-  await new Promise((r) => setTimeout(r, 1100)) // past the last note's limit
+  await new Promise((r) => setTimeout(r, 10100)) // a profile change counts at most every 10 s after the last note
   await d.node.setProfile({ name: 'Dee' })
   await until(() => b.node.state().profiles[d.key]?.name === 'Dee')
   expect(b.node.state().online).not.toContain(d.key)
@@ -349,6 +356,50 @@ test('profiles and confirmations of people we no longer share anything with are 
   const saved = JSON.parse(readFileSync(join(a.dir, 'state.json'), 'utf8'))
   expect(saved.confirmed?.[gid]?.[c.key]).toBeUndefined()
   expect(saved.confirmed?.[gid]?.[b.key]).toBeDefined()
+}, 120000)
+
+test('a new member syncs the newest 100 of each author, and older history a page at a time on request', async () => {
+  const a = start()
+  const b = start()
+  const c = start()
+  await befriend(a, b)
+  await befriend(a, c)
+  const gid = a.node.createGroup('history', [b.key])
+  await until(() => !!b.node.state().groups[gid])
+  for (let i = 1; i <= 150; i++) a.node.send(gid, 'a' + i)
+  for (let i = 1; i <= 5; i++) b.node.send(gid, 'b' + i)
+  await until(() => texts(b, gid).length === 155)
+  a.node.addToGroup(gid, c.key)
+  await until(() => texts(c, gid).length === 105)
+  await new Promise((r) => setTimeout(r, 1500)) // nothing more comes by itself
+  expect(texts(c, gid).length).toBe(105)
+  expect(texts(c, gid)).toContain('a51')
+  expect(texts(c, gid)).not.toContain('a50')
+  expect(c.node.history(gid).earlier).toBe(true)
+  expect(c.node.state().chats[gid]?.unread ?? 0).toBe(0)
+  expect(c.node.older(gid)).toBe(true)
+  await until(() => texts(c, gid).length === 155)
+  expect(c.node.history(gid).earlier).toBe(false)
+  // Still in order, and new messages carry on as usual
+  a.node.send(gid, 'a151')
+  await until(() => texts(c, gid).includes('a151'))
+  expect(c.node.history(gid, 3).msgs.map((m: any) => m.text)).toEqual(['b4', 'b5', 'a151'])
+}, 150000)
+
+// With no picks of their own (groupLinks 0), B and D are not linked; a call signal B addresses to D, as call.ts does
+// for someone in its call it has no link with, makes B dial D.
+test('a call signal to a group member we are not linked with links us up with them', async () => {
+  const a = start()
+  const b = start(undefined, undefined, { groupLinks: 0 })
+  const d = start(undefined, undefined, { groupLinks: 0 })
+  await befriend(a, b)
+  await befriend(a, d)
+  const gid = a.node.createGroup('call', [b.key, d.key])
+  await until(() => !!b.node.state().groups[gid] && !!d.node.state().groups[gid])
+  await new Promise((r) => setTimeout(r, 1500))
+  expect(b.node.state().online).not.toContain(d.key)
+  b.node.signal(gid, d.key, { k: 'join' })
+  await until(() => b.node.state().online.includes(d.key))
 }, 120000)
 
 test('activity reaches friends only while shared, with only the details chosen, and never someone hidden', async () => {

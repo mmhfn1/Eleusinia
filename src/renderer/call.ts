@@ -995,6 +995,9 @@ export async function join(c: string) {
   listening = setInterval(listenAll, 50)
   navigator.mediaDevices.addEventListener('devicechange', onDeviceChange)
   send(c, null, { k: 'join' })
+  // The broadcast reaches only members linked with us; anyone already in the call who is not (a big group, known from
+  // their presence note) gets it addressed, which makes the node dial them
+  for (const k of active.get(c) ?? []) if (!state.online.includes(k)) send(c, k, { k: 'join' })
   ringing.delete(c)
   callingSince = isDm(c) && !active.get(c)?.size ? Date.now() : null
   sound('join')

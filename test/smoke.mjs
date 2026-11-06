@@ -29,7 +29,9 @@ const bootstrap = testnet?.bootstrap.map((n) => `${n.host}:${n.port}`).join(',')
 // The app reads ELEUSINIA_BOOTSTRAP only when set; in public mode it is removed, in case the shell has one.
 const { ELEUSINIA_BOOTSTRAP: _, ...baseEnv } = process.env
 // Updates are off, so a run against the packaged app never downloads a real release.
-const appEnv = { ...(bootstrap ? { ...baseEnv, ELEUSINIA_BOOTSTRAP: bootstrap } : baseEnv), ELEUSINIA_NO_UPDATES: '1' }
+// No picks in groups: Bob and Cy, not friends, meet only in Ann's groups and never link, as most members of a big
+// group do not; their group chat, presence and call go through notes and addressed signals (see '--- Groups')
+const appEnv = { ...(bootstrap ? { ...baseEnv, ELEUSINIA_BOOTSTRAP: bootstrap } : baseEnv), ELEUSINIA_NO_UPDATES: '1', ELEUSINIA_TEST_GROUP_LINKS: '0' }
 console.log(publicDht ? 'DHT: public (ELEUSINIA_SMOKE_PUBLIC=1)' : `DHT: local test network at ${bootstrap}`)
 
 // A developers' inbox of the test's own, never the real one, which every app below sends its reports to. No GitHub
@@ -103,8 +105,9 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
   }
   // A conversation counts as read only in a focused window, and three windows cannot all have focus: each acts as if
   // it had, unless a step turns it off to see an unfocused window.
-  const focused = (on) => ws.send(JSON.stringify({ id: ++id, method: 'Emulation.setFocusEmulationEnabled', params: { enabled: on } }))
-  focused(true)
+  // Resolves once DevTools has applied it, so a step right after sees the window as it set it
+  const focused = (on) => new Promise((done) => (pending.set(++id, done), ws.send(JSON.stringify({ id, method: 'Emulation.setFocusEmulationEnabled', params: { enabled: on } }))))
+  await focused(true)
   // Lets the test read what each call connection actually receives (getStats), without the app exposing anything.
   // Crashes the page as a real renderer crash would (Chromium's own command for it).
   const crash = () => ws.send(JSON.stringify({ id: ++id, method: 'Page.crash' }))
@@ -686,10 +689,10 @@ try {
   await b.ev(`${railDm}.click()`)
   await until('opening the DM reads it: the count is gone', () => b.ev(`!!document.querySelector('.chat-person') && !${railDm}.querySelector('.rail-count')`), 5)
   // Shown but not focused (on a second screen during a game) is not read
-  b.focused(false)
+  await b.focused(false)
   await a.ev(say('still there?'))
   await until('in an unfocused window, the open DM still counts a new message', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '1'`), 15)
-  b.focused(true)
+  await b.focused(true)
   await b.ev(`window.dispatchEvent(new Event('focus'))`)
   await until('focusing the window reads it', () => b.ev(`!${railDm}.querySelector('.rail-count')`), 5)
 
@@ -957,7 +960,7 @@ try {
     a.ev(`document.querySelector('.hotkeys [role=alert]')?.textContent.includes('F23 is already the hotkey for Mute') && ${row('Deafen')}.querySelector('kbd').textContent === 'Not set'`), 5)
   await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
   await until('A shows push to talk with its key', async () => (await you()).includes('Push to talk: hold F24'), 5)
-  a.focused(false) // emulated focus would also keep the page visible
+  await a.focused(false) // emulated focus would also keep the page visible
   if (await a.windowState('minimized')) await until('A is minimised', () => a.ev('document.hidden'), 10)
   // B must actually receive A's voice only while the key is held, not just see the label change. Bytes, not audio
   // energy, since a remote voice plays through Web Audio and its receiver reports no energy; a disabled microphone
@@ -985,7 +988,7 @@ try {
   await key(UiohookKey.F23, false)
   await until('F23 again unmutes', () => a.ev(`!document.querySelector('.callers .voice-mark')`), 5)
   await a.windowState('normal')
-  a.focused(true)
+  await a.focused(true)
   await a.ev(`api.call('setSettings', { hotkeys: {} })`)
   await key(UiohookKey.F23, true)
   await key(UiohookKey.F23, false)
@@ -1076,6 +1079,15 @@ try {
   await b.ev(`(() => { const i = document.querySelector('.group-name-edit'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'The Trio'); i.dispatchEvent(new Event('input', { bubbles: true })); i.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })) })()`)
   await until('B renames the group, and A and Cy see the new name', async () =>
     (await b.ev(`document.querySelector('.group-name')?.textContent === 'The Trio'`)) && (await a.ev(`document.querySelector('.group-name')?.textContent === 'The Trio'`)) && c.ev(`document.querySelector('.group-name')?.textContent === 'The Trio'`), 15)
+  // Bob and Cy have no link (no picks, not friends): Bob saw Cy online above from Cy's presence note. Cy starts a call
+  // in the group; Bob learns of it from the note, and his join, addressed to Cy, links them for the call.
+  await c.ev(press('Start call'))
+  await until("B sees Cy's call in the group, through Cy's presence note", () => b.ev(`[...document.querySelectorAll('aside.voice button')].some(x => x.textContent.includes('Join call (1)'))`), 30)
+  await b.ev(press('Join call'))
+  await until('B and Cy, never linked before, connect for the call', async () =>
+    (await b.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Cy')`)) && c.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Bob')`), 45)
+  await b.ev(press('Leave call'))
+  await c.ev(press('Leave call'))
 
   console.log('--- Resizable sidebars')
   const widths = await a.ev(`(() => {

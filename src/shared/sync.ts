@@ -66,7 +66,9 @@ export function verifyMsg(m: Msg): boolean {
     isKey(m.author) &&
     Number.isSafeInteger(m.seq) &&
     m.seq > 0 &&
-    typeof m.ts === 'number' &&
+    Number.isSafeInteger(m.ts) &&
+    m.ts > 0 &&
+    m.ts < 8.64e15 && // the latest time a Date can hold: past it, showing the message throws
     typeof m.text === 'string' &&
     m.text.length <= MAX_TEXT &&
     (m.files === undefined || validFiles(m.files)) &&
@@ -106,7 +108,7 @@ export const signEdit = (g: Pick<Group, 'id' | 'name' | 'avatar' | 'updatedAt'>,
   by: kp.publicKey.toString('hex'),
   sig: crypto.sign(editBody(g), kp.secretKey).toString('hex'),
 })
-export const EDIT_AHEAD_MS = 10 * 60000 // an edit dated further ahead than this is ignored until its time comes
+export const EDIT_AHEAD_MS = 10 * 60000 // an edit or message dated further ahead than this is ignored until its time comes
 
 const isMap = (x: unknown, max = 100) => x === undefined || (!!x && typeof x === 'object' && !Array.isArray(x) && Object.keys(x).length <= max)
 

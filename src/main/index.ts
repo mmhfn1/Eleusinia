@@ -443,6 +443,9 @@ function startApp() {
     emit: (e) => !win.isDestroyed() && win.webContents.send('event', e),
     noDirect: process.env.ELEUSINIA_NO_DIRECT === '1',
     strict: process.env.ELEUSINIA_STRICT === '1', // testing: behave as behind a strict router (smoke's relayed mode)
+    // testing, on a local test DHT only: how many members of each group to dial (0: only friends, so group members
+    // who are not friends stay unlinked, as most pairs are in a big group)
+    ...(process.env.ELEUSINIA_BOOTSTRAP && process.env.ELEUSINIA_TEST_GROUP_LINKS && { groupLinks: Number(process.env.ELEUSINIA_TEST_GROUP_LINKS) }),
     netsim: process.env.ELEUSINIA_TEST_NET, // testing: a simulated bad line for calls (shared/netsim.ts)
     thumbnail: (avatar) => {
       const img = nativeImage.createFromDataURL(avatar)

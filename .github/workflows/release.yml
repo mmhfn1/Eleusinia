@@ -126,7 +126,8 @@ jobs:
           MAIN_VITE_BUNGIE_CLIENT_SECRET: ${{ secrets.BUNGIE_CLIENT_SECRET }}
         run: |
           npx electron-vite build
-          npx electron-builder ${{ matrix.target }} --publish never
+          # electron-builder downloads Electron and its tools from GitHub, which sometimes answers 504: tried up to 3 times
+          for i in 1 2 3; do npx electron-builder ${{ matrix.target }} --publish never && break; [ $i = 3 ] && exit 1; echo "retrying in 30 s"; sleep 30; done
 
       # The update signature installed copies require before installing (src/shared/updatesig.ts). Fails without the
       # key, so no unsigned release goes out.
