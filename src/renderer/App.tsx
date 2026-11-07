@@ -1,15 +1,25 @@
-import { type FormEvent, type KeyboardEvent, type ReactNode, memo, useEffect, useReducer, useRef, useState } from 'react'
+import { type FormEvent, type KeyboardEvent, useEffect, useReducer, useRef, useState } from 'react'
 import { type Offset, clampOffset, cropRect } from '../shared/crop'
 import { type Group, type Key, type Profile, type State, dmId, keyTail } from '../shared/protocol'
 import * as call from './call'
 import { Avatar, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Splitter, Wordmark, useWidth } from './ui'
 import { Chat } from './Chat'
-import { CameraDialog, Oculus, PersonVolume, RingBar, STATE_WORDS, ShareDialog, Stage, VoiceMark, VoiceSignal, useSpeaking } from './Media'
+import { CameraDialog, Oculus, PersonVolume, RingBar, STATE_WORDS, ShareDialog, Stage, VoiceMark, VoiceSignal } from './Media'
 import { DeleteAccount, ReportDialog, SettingsDialog } from './Settings'
 import { ActivityLine, ProfileActivity } from './Activity'
+import { MemberRow, Server, Speaking, channelOf, newId } from './Server'
 import { ProfileBanner, ProfilePop } from './Profile'
 import { type Modal, NOBODY, type People, type Run, api, card, groupName, labelOf } from './common'
 import { Rail } from './Rail'
+
+type Poke = { from: Key; server: string; channel: string }
+// "Ann invites you to Lounge in Ashen Vanguard", or null when that is not a channel we can see.
+function pokeText(s: State | null, p: Poke) {
+  const sv = s?.servers[p.server]
+  const ch = sv?.channels.find((c) => c.id === p.channel)
+  if (!s || !sv || !ch) return null
+  return `${s.settings.nicknames?.[p.from] || sv.members[p.from]?.nick || labelOf(s.profiles[p.from] ?? NOBODY, p.from)} invites you to ${ch.name} in ${sv.name}`
+}
 
 export default function App() {
   const [st, setSt] = useState<State | null>(null)
@@ -18,6 +28,8 @@ export default function App() {
   const [editing, setEditing] = useState(false)
   const [err, setErr] = useState('')
   const [update, setUpdate] = useState<string | null>(null) // a downloaded version waiting for a restart
+  const [poke, setPoke] = useState<Poke | null>(null) // the latest poke into a voice channel, for 2 minutes
+  const latest = useRef<State | null>(null) // for events, which arrive outside a render
   const [, tick] = useReducer((n: number) => n + 1, 0)
   // Where you have been, for the mouse's back and forward buttons (mouse 4 and 5).
   const trail = useRef({ back: [] as (string | null)[], forward: [] as (string | null)[], at: null as string | null })
@@ -54,8 +66,18 @@ export default function App() {
 
   useEffect(() => {
     const got = (s: State) => {
+      latest.current = s
       setSt(s)
       call.onState(s)
+    }
+    const poked = (p: Poke) => {
+      const text = pokeText(latest.current, p)
+      if (!text) return
+      setPoke(p)
+      setTimeout(() => setPoke((x) => (x === p ? null : x)), 120000)
+      // The toast shows while the window has focus; the desktop notice is for when it has not, unless muted
+      const muted = latest.current!.settings.muted
+      if (!document.hasFocus() && !muted?.[p.server] && !muted?.[`${p.server}.${p.channel}`]) new Notification('Eleusinia', { body: text })
     }
     api.call('state').then(got)
     call.onChange(tick)
@@ -64,6 +86,7 @@ export default function App() {
       if (e.type === 'call') call.onSignal(e.from, e.conv, e.data)
       if (e.type === 'hotkey') call.onHotkey(e.action, e.down)
       if (e.type === 'update') setUpdate(e.version)
+      if (e.type === 'poke') poked({ from: e.from, server: e.server, channel: e.channel })
     })
   }, [])
 
@@ -101,21 +124,32 @@ export default function App() {
     // Clicking the same person again closes their panel.
     show: (k, from) => setModal((m) => (!from ? { kind: 'card', k } : m?.kind === 'pop' && m.k === k && m.from === from ? null : { kind: 'pop', k, from })),
   }
-  // A conversation that no longer exists (friend removed) falls back to Home.
-  const open = sel && (st.groups[sel] || st.friends[sel.split('_').find((k) => k !== st.me)!] === 'friend') ? sel : null
+  // A server is open as its id, or as `${server}.${channel}` (also that channel's conversation and call).
+  const serverOf = (c: string) => st.servers?.[c.split('.')[0]]
+  const sv = sel ? serverOf(sel) : undefined
+  // A conversation that no longer exists (friend removed, server left) falls back to Home.
+  const open = sel && (st.groups[sel] || sv || st.friends[sel.split('_').find((k) => k !== st.me)!] === 'friend') ? sel : null
+  const other = (c: string) => c.split('_').find((k) => k !== st.me)!
+  const convName = (c: string) => {
+    const s = serverOf(c)
+    const ch = s?.channels.find((x) => x.id === (c.split('.')[1] ?? channelOf(s)))
+    if (s) return ch ? `${s.name} · ${ch.kind === 'text' ? '#' : ''}${ch.name}` : s.name
+    return st.groups[c] ? groupName(st.groups[c]) : people.name(other(c))
+  }
 
-  const place = open ? (st.groups[open] ? groupName(st.groups[open]) : people.name(open.split('_').find((k) => k !== st.me)!)) : 'Friends'
+  const place = open ? convName(open) : 'Friends'
   const callAway = call.conv && call.conv !== open ? call.conv : null
   // Direct calls ringing for us, shown wherever we are (the open conversation shows its own); joining one opens it.
-  const other = (c: string) => c.split('_').find((k) => k !== st.me)!
   const incoming = call.ringingCalls().filter((c) => c !== open && st.friends[other(c)] === 'friend')
-  const callName = callAway && (st.groups[callAway] ? groupName(st.groups[callAway]) : people.name(callAway.split('_').find((k) => k !== st.me)!))
+  const callName = callAway && convName(callAway)
   return (
     <>
     <TitleBar place={place} call={callAway ? { name: callName!, back: () => go(callAway) } : undefined} />
     <div className="app">
       <Rail st={st} people={people} open={open} go={go} show={setModal} run={run} />
-      {open ? (
+      {sv ? (
+        <Server key={sv.id} st={st} sv={sv} channel={open!.split('.')[1]} people={people} run={run} go={go} />
+      ) : open ? (
         <Conversation key={open} st={st} conv={open} people={people} run={run} home={() => go(null)} />
       ) : (
         <Home st={st} people={people} run={run} open={go} ring={(c) => (go(c), run(call.join(c)))} newGroup={() => setModal({ kind: 'group' })} />
@@ -137,6 +171,17 @@ export default function App() {
           </button>
           <button className="button subtle" onClick={() => setUpdate(null)}>
             Later
+          </button>
+        </div>
+      )}
+      {poke && pokeText(st, poke) && (
+        <div role="status" className="toast poke-toast">
+          <span>{pokeText(st, poke)}</span>
+          <button className="button primary" onClick={() => (setPoke(null), go(`${poke.server}.${poke.channel}`), call.conv !== `${poke.server}.${poke.channel}` && run(call.join(`${poke.server}.${poke.channel}`)))}>
+            Join
+          </button>
+          <button className="icon-button" aria-label="Dismiss" onClick={() => setPoke(null)}>
+            <Icon name="close" size={16} />
           </button>
         </div>
       )}
@@ -177,6 +222,8 @@ export default function App() {
       {modal?.kind === 'settings' && <SettingsDialog st={st} close={() => setModal(null)} edit={() => setEditing(true)} remove={() => setModal({ kind: 'delete' })} />}
       {modal?.kind === 'delete' && <DeleteAccount st={st} close={() => setModal(null)} />}
       {modal?.kind === 'group' && <NewGroup st={st} people={people} run={run} close={() => setModal(null)} open={go} />}
+      {modal?.kind === 'server' && <NewServer run={run} close={() => setModal(null)} open={go} />}
+      {modal?.kind === 'join' && <JoinServer close={() => setModal(null)} open={go} />}
       {modal?.kind === 'menu' && <Menu st={st} people={people} close={() => setModal(null)} go={go} report={() => setModal({ kind: 'report' })} />}
       {modal?.kind === 'report' && <ReportDialog st={st} close={() => setModal(null)} />}
     </div>
@@ -837,6 +884,106 @@ function NewGroup({ st, people, run, close, open }: { st: State; people: People;
   )
 }
 
+// A new server: a name and an optional picture; it starts with a text channel and a voice channel.
+function NewServer({ run, close, open }: { run: Run; close: () => void; open: (c: string) => void }) {
+  const [name, setName] = useState('')
+  const [avatar, setAvatar] = useState('')
+  const [picking, setPicking] = useState<File | null>(null)
+  const [err, setErr] = useState('')
+  const create = async () => {
+    const id: string = await api.call('createServer', name.trim())
+    for (const [n, kind] of [['general', 'text'], ['Lounge', 'voice']]) await api.call('serverAct', id, 'channel.add', { id: newId(), kind, name: n })
+    if (avatar) await api.call('serverAct', id, 'server.edit', { avatar })
+    open(id)
+  }
+  return (
+    <Dialog label="Create a server" close={close}>
+      <form className="new-group" onSubmit={(e) => (e.preventDefault(), run(create()), close())}>
+        <h1>Create a server</h1>
+        <div className="settings-row">
+          <GroupEmblem g={{ id: '0000', name: name || '?', avatar }} size={56} />
+          <span className="row-text">
+            <span className="row-title">Server picture</span>
+            <span className="row-sub">Square, PNG, JPEG or WebP</span>
+          </span>
+          <label className="button file-button">
+            {avatar ? 'Change picture' : 'Choose picture'}
+            <input
+              type="file"
+              accept="image/png,image/jpeg,image/webp"
+              className="visually-hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0]
+                e.target.value = '' // so the same file can be chosen again
+                if (f) setPicking(f)
+              }}
+            />
+          </label>
+        </div>
+        <label className="field-label">
+          Server name
+          <input name="name" value={name} onChange={(e) => setName(e.target.value)} required maxLength={100} pattern=".*\S.*" />
+        </label>
+        <p className="hint">
+          You will be its owner. It starts with a text channel, general, and a voice channel, Lounge. A server lives on its members' computers: while nobody is online, nobody new can join.
+        </p>
+        {err && (
+          <p role="alert" className="form-error">
+            {err}
+          </p>
+        )}
+        {picking && <Cropper file={picking} done={(url) => (setPicking(null), setAvatar(url))} close={(e) => (setPicking(null), e && setErr(e))} />}
+        <div className="form-actions">
+          <button type="button" className="button" onClick={close}>
+            Cancel
+          </button>
+          <button className="button primary">Create server</button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}
+
+// Joining by a pasted invite link: the members' refusal shows here.
+function JoinServer({ close, open }: { close: () => void; open: (c: string) => void }) {
+  const [link, setLink] = useState('')
+  const [err, setErr] = useState('')
+  const [busy, setBusy] = useState(false)
+  const join = () => {
+    setErr('')
+    setBusy(true)
+    api.call('joinServer', link).then(
+      (r?: { server: string }) => (close(), r?.server && open(r.server)),
+      (e: Error) => (setErr(String(e.message ?? e).replace(/^.*Error: /, '')), setBusy(false)),
+    )
+  }
+  return (
+    <Dialog label="Join a server" close={close}>
+      <form className="new-group" onSubmit={(e) => (e.preventDefault(), join())}>
+        <h1>Join a server</h1>
+        <label className="field-label">
+          Invite link
+          <input className="invite-input" value={link} onChange={(e) => setLink(e.target.value)} required spellCheck={false} autoComplete="off" placeholder="eleusinia://invite/…" />
+        </label>
+        <p className="hint">Paste the link someone sent you. Someone in the server has to be online to let you in.</p>
+        {err && (
+          <p role="alert" className="form-error">
+            {err}
+          </p>
+        )}
+        <div className="form-actions">
+          <button type="button" className="button" onClick={close}>
+            Cancel
+          </button>
+          <button className="button primary" disabled={busy}>
+            {busy ? 'Joining…' : 'Join server'}
+          </button>
+        </div>
+      </form>
+    </Dialog>
+  )
+}
+
 // What the Eleusinia emblem opens (also Ctrl K): go anywhere by typing, copy your ID, updates, a problem report, quit.
 function Menu({ st, people, close, go, report }: { st: State; people: People; close: () => void; go: (c: string | null) => void; report: () => void }) {
   const [q, setQ] = useState('')
@@ -948,42 +1095,6 @@ function GroupName({ g, run }: { g: Group; run: Run }) {
       />
     </h1>
   )
-}
-
-type MemberProps = { k: Key; p: Profile; name: string; you: boolean; online: boolean; speaking: boolean; a?: State['activity'][Key]; show: People['show'] }
-// One row of the members list. Kept from redrawing unless it changed: every state push builds new profile and activity
-// objects, and a server's list has a couple of hundred rows. show only opens things, so it is left out.
-const MemberRow = memo(
-  function MemberRow({ k, p, name, you, online, speaking, a, show }: MemberProps) {
-    return (
-      <button className={`member${speaking ? ' speaking' : ''}`} onClick={(e) => show(k, e.currentTarget)} onContextMenu={card(show, k)} aria-label={`${name}${you ? ' (you)' : ''}: open profile`}>
-        <Avatar k={k} p={p} size={32} online={online} />
-        <span className="row-text">
-          <span className="row-title">
-            <span className="user">{name}</span>
-            {you && <span className="row-sub"> (you)</span>}
-          </span>
-          <span className="row-sub">{a?.game ? <ActivityLine a={a} /> : p.handle}</span>
-        </span>
-      </button>
-    )
-  },
-  (x, y) =>
-    x.k === y.k &&
-    x.name === y.name &&
-    x.you === y.you &&
-    x.online === y.online &&
-    x.speaking === y.speaking &&
-    x.p.name === y.p.name &&
-    x.p.handle === y.p.handle &&
-    x.p.avatar === y.p.avatar &&
-    JSON.stringify(x.a?.game ?? null) === JSON.stringify(y.a?.game ?? null),
-)
-
-// What shows speaking rings redraws by itself when someone starts or stops speaking, not the conversation around it.
-function Speaking({ children }: { children: () => ReactNode }) {
-  useSpeaking()
-  return <>{children()}</>
 }
 
 function Conversation({ st, conv, people, run, home }: ConvProps) {

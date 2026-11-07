@@ -111,6 +111,23 @@ const ICONS: Record<string, ReactNode> = {
   attach: <path d="M20 11.5 12.2 19.3a5 5 0 0 1-7.1-7.1l8.1-8.1a3.3 3.3 0 0 1 4.7 4.7l-8.1 8.1a1.7 1.7 0 0 1-2.4-2.4L14.8 7" />,
   file: <path d="M13.5 3.5H7a1.5 1.5 0 0 0-1.5 1.5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5zM13.5 3.5v5h5" />,
   download: <path d="M12 4v11M7 10.5l5 5 5-5M5 19.5h14" />,
+  hash: <path d="M5 9h15M4 15h15M10 3.5 8 20.5M16 3.5l-2 17" />,
+  lock: (
+    <>
+      <rect x="5" y="11" width="14" height="9.5" rx="1.5" />
+      <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+    </>
+  ),
+  grip: (
+    <>
+      <circle cx="9" cy="6" r="1" />
+      <circle cx="15" cy="6" r="1" />
+      <circle cx="9" cy="12" r="1" />
+      <circle cx="15" cy="12" r="1" />
+      <circle cx="9" cy="18" r="1" />
+      <circle cx="15" cy="18" r="1" />
+    </>
+  ),
   folder: <path d="M3.5 7V18a1.5 1.5 0 0 0 1.5 1.5h14a1.5 1.5 0 0 0 1.5-1.5V9a1.5 1.5 0 0 0-1.5-1.5h-7L10 5H5A1.5 1.5 0 0 0 3.5 6.5z" />,
 }
 
@@ -168,8 +185,8 @@ export function Avatar({ k, p, size = 32, online }: { k: Key; p: Profile; size?:
   )
 }
 
-// A group's tile: its first letter on a tinted stone square, coloured from the group id.
-export function GroupEmblem({ g, size = 32 }: { g: Group; size?: number }) {
+// A group's (or server's) tile: its first letter on a tinted stone square, coloured from the group id.
+export function GroupEmblem({ g, size = 32 }: { g: Pick<Group, 'id' | 'name' | 'avatar'>; size?: number }) {
   const hue = 190 + (parseInt(g.id.slice(0, 4), 16) % 80)
   if (g.avatar) return <img className="crest" src={g.avatar} alt="" style={{ width: size, height: size }} />
   return (

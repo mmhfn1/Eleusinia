@@ -14,12 +14,13 @@ const dayLabel = (ts: number) =>
 const iso = (ts: number) => (Number.isFinite(new Date(ts).getTime()) ? new Date(ts).toISOString() : undefined)
 const clock = (ts: number) => new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 
-type ChatProps = { st: State; conv: string; title: string; people: People; run: Run; home: () => void; stage: ReactNode }
+// head and about: a server channel's own header (name and topic) and empty-chat line, in place of a group's or person's
+type ChatProps = { st: State; conv: string; title: string; people: People; run: Run; home: () => void; stage: ReactNode; head?: ReactNode; about?: string }
 
 // Messages a conversation opens with; older ones load on request, so a long history costs nothing until wanted.
 const PAGE = 200
 
-export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
+export function Chat({ st, conv, title, people, run, home, stage, head, about }: ChatProps) {
   const [leaving, setLeaving] = useState(false)
   const [removing, setRemoving] = useState<Key | null>(null)
   const [msgs, setMsgs] = useState<Msg[]>([])
@@ -186,7 +187,7 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
   return (
     <main className="workspace chat" onDragOver={(e) => e.dataTransfer.types.includes('Files') && e.preventDefault()} onDrop={drop}>
       <header className="chat-head">
-        {group ? (
+        {head ?? (group ? (
           <>
             <GroupEmblem g={group} size={32} />
             <div className="row-text">
@@ -204,7 +205,7 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
               </span>
             </span>
           </button>
-        )}
+        ))}
         {addable.length > 0 && (
           <label className="add-member">
             <Icon name="userPlus" size={16} />
@@ -292,9 +293,9 @@ export function Chat({ st, conv, title, people, run, home, stage }: ChatProps) {
             <Emblem size={84} className="faint" />
             <p className="empty-title">No messages yet</p>
             <p className="quiet">
-              {group
+              {about ?? (group
                 ? `Messages here travel directly between the members of ${title}. Members who are offline receive them when they return.`
-                : `Messages travel directly between you and ${title}. If they are offline, yours wait and arrive when you are both online.`}
+                : `Messages travel directly between you and ${title}. If they are offline, yours wait and arrive when you are both online.`)}
             </p>
           </div>
         )}

@@ -165,7 +165,9 @@ const sendInCall = (to: Key | null, data: unknown) => {
 // The app's sounds follow both the master volume and their own (Settings: Sound volume).
 const soundLevel = () => outVolume() * soundVolume()
 const sound = (name: Jingle) => (log(`sound: ${name}`), play(name, soundLevel(), outId || state.settings.out || ''))
-const isDm = (c: string) => !state.groups[c]
+// A server's voice channel (`${server}.${channel}`) calls like a group: no ringing, no missed calls.
+const serverOf = (c: string) => state.servers?.[c.split('.')[0]]
+const isDm = (c: string) => !state.groups[c] && !serverOf(c)
 // Ringing: direct calls we are not in, since when each started. Calling: since when we have waited alone in a direct
 // call. Both repeat for 40 s at most (loopNow); after that the call carries on silently, it is never ended for it.
 const ringing = new Map<string, number>()
@@ -191,7 +193,8 @@ function loops() {
   }
   loopTimer ??= setInterval(loops, 250)
 }
-const membersOf = (c: string) => state.groups[c]?.members ?? c.split('_')
+// A voice channel's members: everyone on its server (the node drops signals from whoever may not connect there)
+const membersOf = (c: string) => state.groups[c]?.members ?? (serverOf(c) ? Object.keys(serverOf(c)!.members) : c.split('_'))
 // People on a call version that cannot work with ours are never connected; the call panel says who must update.
 export const callVersionOf = (k: Key) => state.versions?.[k]?.call ?? 1
 const compatible = (k: Key) => callVersionOf(k) === CALL_VERSION
@@ -965,7 +968,7 @@ export async function join(c: string) {
   leave()
   const my = ++joinSeq
   const stale = () => my !== joinSeq
-  log(`joining a ${state.groups[c] ? 'group' : 'direct'} call, ${active.get(c)?.size ?? 0} already in it`)
+  log(`joining a ${isDm(c) ? 'direct' : serverOf(c) ? 'voice channel' : 'group'} call, ${active.get(c)?.size ?? 0} already in it`)
   const list = await navigator.mediaDevices.enumerateDevices()
   if (stale()) return
   const out = usable(state.settings.out, 'audiooutput', list, state.settings.outLabel)
@@ -1106,9 +1109,10 @@ async function handle(from: Key, c: string, d: any) {
   const resumed = blips.has(c)
   clearTimeout(blips.get(c))
   blips.delete(c)
-  if (c !== conv && !set.size && !resumed) unjoined.add(c)
-  // At most one a minute per conversation, so leaving and joining over and over cannot flood the notifications
-  if (!set.size && !conv && !state.settings.muted?.[c] && (announced.get(c) ?? 0) < Date.now() - 60000) {
+  if (c !== conv && !set.size && !resumed && !serverOf(c)) unjoined.add(c)
+  // At most one a minute per conversation, so leaving and joining over and over cannot flood the notifications;
+  // none for voice channels, where people come and go all day
+  if (!set.size && !conv && !serverOf(c) && !state.settings.muted?.[c] && (announced.get(c) ?? 0) < Date.now() - 60000) {
     announced.set(c, Date.now())
     new Notification('Eleusinia', { body: `${state.profiles[from]?.name || 'Someone'} started a call` })
   }

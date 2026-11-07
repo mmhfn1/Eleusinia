@@ -1045,7 +1045,8 @@ try {
   console.log('--- Groups')
   await a.ev(`document.querySelector('.rail-mark').click()`)
   for (const g of ['Trio', 'Second']) {
-    await a.ev(`document.querySelector('.rail-item[aria-label="Create a group"]').click()`)
+    await a.ev(`document.querySelector('.rail-add').click()`)
+    await a.ev(`[...document.querySelectorAll('.context-menu [role=menuitem]')].find((i) => i.textContent === 'Create a group').click()`)
     await a.ev(`(() => { const f = document.querySelector('form.new-group'); f.elements.name.value = '${g}'; f.querySelectorAll('[name=member]').forEach(x => x.checked = true); f.requestSubmit() })()`)
     await sleep(500)
     await a.ev(`document.querySelector('.rail-mark')?.click()`)
@@ -1199,6 +1200,78 @@ try {
     ws.close()
     return back
   }, 20)
+
+  console.log('--- Servers')
+  await a.ev(`document.querySelectorAll('dialog[open]').forEach((d) => d.close())`)
+  const menuItem = (label) => `[...document.querySelectorAll('.context-menu [role^=menuitem]')].find((i) => i.textContent === '${label}').click()`
+  const typeIn = (sel, v) => `(() => { const i = document.querySelector('${sel}'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(v)}); i.dispatchEvent(new Event('input', { bubbles: true })); i.form.requestSubmit() })()`
+  const channel = (name) => `[...document.querySelectorAll('.channel')].find((x) => x.querySelector('.channel-name')?.textContent === '${name}')`
+  const headIs = (name) => `document.querySelector('.chat-head h1')?.textContent === '${name}'`
+  await a.ev(`document.querySelector('.rail-add').click()`)
+  await until('the rail\'s + opens a menu: Create a server, Join with an invite | Create a group', () =>
+    a.ev(`JSON.stringify([...document.querySelectorAll('.context-menu .context-section')].map((s) => [...s.querySelectorAll('[role=menuitem]')].map((i) => i.textContent))) === '[["Create a server","Join with an invite"],["Create a group"]]'`), 5)
+  await sleep(200) // past the menu's opening animation
+  await a.shot('rail-add-menu')
+  await a.ev(menuItem('Create a server'))
+  await a.ev(typeIn('dialog[open] input[name=name]', 'Smoke Server'))
+  await until('Ann creates a server; it opens on #general, with a voice channel, Lounge', () =>
+    a.ev(`document.querySelector('.server-name')?.textContent === 'Smoke Server' && ${headIs('general')} && !!${channel('Lounge')} && !!document.querySelector('.rail-server.active')`), 15)
+  await a.ev(`document.querySelector('.server-head').click()`)
+  await a.ev(menuItem('Create a channel'))
+  await a.ev(typeIn('dialog[open] input[name=name]', 'plans'))
+  await until('Ann adds a text channel, #plans, listed before the voice channel, and it opens', () =>
+    a.ev(`${headIs('plans')} && [...document.querySelectorAll('.channel-name')].map((x) => x.textContent).join() === 'general,plans,Lounge'`), 15)
+  await a.ev(`document.querySelector('.server-head').click()`)
+  await a.ev(menuItem('Invite people'))
+  await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Create link').click()`)
+  const link = await until('Ann makes an invite link', () => a.ev(`document.querySelector('dialog[open] .invite-link b')?.textContent`), 10)
+  await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Done').click()`)
+  await b.ev(`document.querySelector('.rail-add').click()`)
+  await b.ev(menuItem('Join with an invite'))
+  await b.ev(typeIn('dialog[open] .invite-input', link))
+  await until('Bob joins with the link, and the server opens for him', () => b.ev(`document.querySelector('.server-name')?.textContent === 'Smoke Server'`), 60)
+  await until('Bob sees #plans', () => b.ev(`!!${channel('plans')}`), 30)
+  await b.ev(`${channel('plans')}.click()`)
+  await b.ev(say('hello server'))
+  await until("Ann sees Bob's message in #plans", () => a.ev(shows('hello server')), 30)
+  await a.ev(say('welcome bob'))
+  await until("Bob sees Ann's answer", () => b.ev(shows('welcome bob')), 30)
+  await until('both are listed online in the members list', () => a.ev(`(() => { const m = document.querySelector('aside.members'); return !!m && m.textContent.includes('Online — 2') && ['Ann', 'Bob'].every((n) => m.textContent.includes(n)) })()`), 30)
+  await until("Ann's message shows delivered once Bob's receipt is back", () => a.ev(`!!document.querySelector('.msgs .msg') && !document.querySelector('.msgs .msg-status.pending')`), 20)
+  await a.shot('server')
+  await b.ev(`document.querySelector('.channel-tools button[aria-label^="Open Lounge"]').click()`)
+  await until("Bob opens Lounge's own text chat without joining its call", () =>
+    b.ev(`${headIs('Lounge')} && document.querySelector('.msgs').textContent.includes("Lounge's text chat is new") && !document.querySelector('.voice-dock')`), 5)
+  await b.ev(`${channel('Lounge')}.click()`)
+  await until('clicking Lounge joins its call: Bob gets the Voice connected panel and is listed under it', () =>
+    b.ev(`!!document.querySelector('.voice-dock') && !!document.querySelector('.voice-people')?.textContent.includes('Bob')`), 15)
+  await until('Ann sees Bob in Lounge, with no ringing as for a direct call', () =>
+    a.ev(`!!document.querySelector('.voice-people')?.textContent.includes('Bob') && !document.querySelector('.incoming-calls')`), 30)
+  await b.shot('server-voice')
+  await b.ev(`document.querySelector('.voice-dock button[title="Leave call"]').click()`)
+  await until('Bob leaves; Lounge is empty again for Ann', () => a.ev(`!document.querySelector('.voice-people')`), 30)
+  // Invite to voice channel is a poke to a member, not a link: Bob gets a toast to join
+  await a.ev(`document.querySelector('.channel-tools button[aria-label="Invite to voice channel"]').click()`)
+  await a.ev(`[...document.querySelectorAll('dialog[open] .poke-row')].find((r) => r.textContent.includes('Bob')).querySelector('button').click()`)
+  await a.shot('poke-picker')
+  await until('Ann pokes Bob into Lounge from its hover button', () => a.ev(`!!document.querySelector('dialog[open] .poke-row [role=status]')?.textContent.includes('Poked Bob')`), 20)
+  await until('Bob sees the poke as a toast with Join', () => b.ev(`document.querySelector('.poke-toast span')?.textContent === 'Ann invites you to Lounge in Smoke Server' && [...document.querySelectorAll('.poke-toast button')].some((x) => x.textContent === 'Join')`), 20)
+  await sleep(300) // past the toast's rising animation
+  await b.shot('poke-toast')
+  await b.ev(`document.querySelector('.poke-toast button[aria-label=Dismiss]').click()`)
+  await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Done').click()`)
+  // Server settings opens from the server menu, and every page draws without an error
+  await a.ev(`document.querySelector('.server-head').click()`)
+  await a.ev(`[...document.querySelectorAll('.context-menu [role^=menuitem]')].find((x) => x.textContent === 'Server settings').click()`)
+  await until('Server settings opens from the server menu', () => a.ev(`!!document.querySelector('dialog[open] .settings-nav')`), 10)
+  for (const page of ['Overview', 'Roles', 'Members', 'Channels', 'Invites', 'Bans', 'Audit log']) {
+    await a.ev(`[...document.querySelectorAll('dialog[open] .settings-page')].find((x) => x.textContent.trim() === '${page}').click()`)
+    await until(`its ${page} page shows`, () => a.ev(`document.querySelector('dialog[open] .settings-page.active')?.textContent.trim() === '${page}'`), 5)
+    if (page === 'Roles' || page === 'Channels') await sleep(200), await a.shot('server-settings-' + page.toLowerCase())
+  }
+  await until('the audit log lists the server being made', () => a.ev(`(document.querySelector('dialog[open]')?.textContent ?? '').includes('Ann')`), 10)
+  await a.shot('server-settings')
+  await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
   }
 } catch (e) {
   failed = true
