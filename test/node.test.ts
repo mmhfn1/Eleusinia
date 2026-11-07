@@ -8,6 +8,8 @@ import { afterAll, beforeAll, expect, onTestFailed, test } from 'vitest'
 import { createNode } from '../src/main/node'
 import { type RelayLimits, createNet, relayKeyPair } from '../src/main/network'
 import { CALL_VERSION, type Group, type Msg, cleanProfile, dmId, identicon, isHandle, keyTail, normHandle, stack, versionOf } from '../src/shared/protocol'
+import { inviteKeyPair, joinProof, signOp } from '../src/shared/server'
+import { makeInvite, parseInvite } from '../src/shared/invite'
 import { heldFrom, mergeGroup, missing, signAdd, signLeft, signMsg, signPresence, validGroup, verifyAdd, verifyMsg, verifyPresence } from '../src/shared/sync'
 
 test('a tampered or re-attributed message fails verification', () => {
@@ -29,6 +31,9 @@ test('a presence note verifies only as signed, by its author, and not dated far 
   expect(verifyPresence({ ...p, key: DHT.keyPair().publicKey.toString('hex') }, 1000)).toBe(false)
   expect(verifyPresence(signPresence(1000 + 61000, null, 'ab12ab12ab12ab12', kp), 1000)).toBe(false)
   expect(verifyPresence(signPresence(1000, 'not a group', 'ab12ab12ab12ab12', kp), 1000)).toBe(false)
+  const vc = 'ab'.repeat(16) + '.' + 'cd'.repeat(16) // a server voice channel's call
+  expect(verifyPresence(signPresence(1000, vc, 'ab12ab12ab12ab12', kp), 1000)).toBe(true)
+  for (const bad of [vc + '.', vc.toUpperCase(), 'ab'.repeat(16) + '.', vc.replace('.', '_')]) expect(verifyPresence(signPresence(1000, bad, 'ab12ab12ab12ab12', kp), 1000)).toBe(false)
 })
 
 test('a message must carry a time a date can show', () => {
@@ -1396,3 +1401,254 @@ test('a group can have at most 100 members, whether made with them or added one 
   expect(a.node.state().groups[gid].members).toHaveLength(100)
   expect(() => a.node.addToGroup(gid, friends[100])).toThrow('A group can have at most 100 members')
 })
+
+// Servers (main/servers.ts): the owner writes the joiner's join with their proof from an invite, as invite links will.
+async function letIn(owner: N, joiner: N, id: string) {
+  const secret = randomBytes(32)
+  const invite = randomBytes(16).toString('hex')
+  owner.node.serverAct(id, 'invite.add', { id: invite, pub: inviteKeyPair(secret).publicKey.toString('hex') })
+  owner.node.serverAct(id, 'join', { invite, key: joiner.key, proof: joinProof(id, invite, joiner.key, secret) })
+  // The join is already written, so the owner answers the link's ask with ok and the log follows
+  await joiner.node.joinServer(makeInvite({ server: id, invite, secret, contacts: [owner.key] }))
+  await until(() => !!joiner.node.state().servers[id])
+}
+const chan = () => randomBytes(16).toString('hex')
+const lines = (f: string) => (existsSync(f) ? readFileSync(f, 'utf8').split('\n').filter(Boolean).length : 0)
+
+test('a server: the owner makes a text channel, a member let in gets the whole log, and messages cross the channel', async () => {
+  const a = start()
+  const b = start()
+  const id = a.node.createServer('Hall')
+  const general = chan()
+  a.node.serverAct(id, 'channel.add', { id: general, kind: 'text', name: 'general' })
+  expect(() => a.node.serverAct(id, 'kick', { key: a.key })).toThrow() // the replay refuses it, so it is never written
+  await letIn(a, b, id)
+  await until(() => JSON.stringify(b.node.servers()) === JSON.stringify(a.node.servers()))
+  expect(b.node.state().servers[id]).toMatchObject({ name: 'Hall', owner: a.key, channels: [{ id: general, name: 'general', kind: 'text' }] })
+  expect(Object.keys(b.node.state().servers[id].members).sort()).toEqual([a.key, b.key].sort())
+  expect(b.node.state().chats).toEqual({}) // channels are not direct messages on the rail
+  const conv = `${id}.${general}`
+  a.node.send(conv, 'welcome')
+  await until(() => texts(b, conv).includes('welcome'))
+  b.node.send(conv, 'thanks')
+  await until(() => texts(a, conv).includes('thanks'))
+  expect(() => a.node.send(`${id}.${chan()}`, 'nowhere')).toThrow()
+}, 60000)
+
+test('a member denied a channel never gets its messages, and a kicked member gets no new ops or messages', async () => {
+  const a = start()
+  const b = start()
+  const id = a.node.createServer('Keep')
+  const [general, secret] = [chan(), chan()]
+  a.node.serverAct(id, 'channel.add', { id: general, kind: 'text', name: 'general' })
+  const [hide, show] = [chan(), chan()] // a category holding only the denied channel, and an empty one we may view
+  a.node.serverAct(id, 'channel.add', { id: hide, kind: 'category', name: 'staff', overrides: { [id]: { allow: [], deny: ['viewChannel'] } } })
+  a.node.serverAct(id, 'channel.add', { id: show, kind: 'category', name: 'lobby' })
+  a.node.serverAct(id, 'channel.add', { id: secret, kind: 'text', name: 'secret', parent: hide, overrides: { [id]: { allow: [], deny: ['viewChannel'] } } })
+  await letIn(a, b, id)
+  await until(() => b.node.state().servers[id].channels.length === 2)
+  // What the window gets: every channel and all rights for the owner; the member only what they may view, and @everyone's rights
+  const [va, vb] = [a.node.state().servers[id], b.node.state().servers[id]]
+  expect(va.channels.map((c) => c.id)).toEqual([general, hide, show, secret])
+  expect(va.mine.rank).toBe(1e9)
+  expect(va.mine.perms).toContain('administrator')
+  expect(va.mine.channels[secret]).toContain('viewChannel')
+  expect(vb.channels.map((c) => c.id)).toEqual([general, show])
+  expect(vb.mine).toEqual({ rank: 0, perms: ['createInvites', 'changeNickname', 'viewChannel', 'sendMessages', 'connect', 'speak'], channels: { [general]: expect.any(Array), [show]: expect.any(Array) } })
+  expect(vb.mine.channels[general]).toContain('sendMessages')
+  expect(vb.roles).toEqual([{ id, name: '@everyone', color: 0, hoist: false, perms: vb.mine.perms }])
+  expect(Object.values(vb.invites)[0]).not.toHaveProperty('pub')
+  expect(b.node.serverAudit(id)).toEqual([]) // no viewAuditLog
+  expect(a.node.serverAudit(id)[0]).toMatchObject({ author: a.key, kind: 'join' }) // newest first
+  a.node.send(`${id}.${secret}`, 'hidden')
+  a.node.send(`${id}.${general}`, 'open')
+  await until(() => texts(b, `${id}.${general}`).includes('open'))
+  await wait(1000)
+  expect(existsSync(join(b.dir, 'msgs', `${id}.${secret}.jsonl`))).toBe(false)
+  expect(() => b.node.send(`${id}.${secret}`, 'let me in')).toThrow()
+
+  a.node.serverAct(id, 'kick', { key: b.key })
+  await until(() => !b.node.state().servers[id]) // the kick reaches them, then nothing more does
+  const log = join(b.dir, 'servers', id + '.jsonl')
+  const held = lines(log)
+  a.node.serverAct(id, 'channel.add', { id: chan(), kind: 'text', name: 'later' })
+  a.node.send(`${id}.${general}`, 'after the kick')
+  await wait(3000)
+  expect(lines(log)).toBe(held)
+  expect(readFileSync(join(b.dir, 'msgs', `${id}.${general}.jsonl`), 'utf8')).not.toContain('after the kick')
+  expect(Object.keys(a.node.state().servers[id].members)).toEqual([a.key])
+}, 60000)
+
+test('a channel message written just before its author lost the right to write is stepped over, and later ones still arrive', async () => {
+  const a = start()
+  let b = start()
+  const id = a.node.createServer('Quiet')
+  const general = chan()
+  const conv = `${id}.${general}`
+  a.node.serverAct(id, 'channel.add', { id: general, kind: 'text', name: 'general' })
+  await letIn(a, b, id)
+  await until(() => b.node.state().servers[id]?.channels.length === 1)
+  // While B is away, A takes writing away; B, not yet told, writes one message on coming back
+  await b.node.destroy()
+  a.node.serverAct(id, 'channel.edit', { id: general, overrides: { [id]: { allow: [], deny: ['sendMessages'] } } })
+  b = restart(b)
+  b.node.send(conv, 'written before I knew')
+  await until(() => a.node.state().online.includes(b.key))
+  await wait(3000)
+  expect(texts(a, conv)).not.toContain('written before I knew')
+  // Writing allowed again: B's next message is not held behind the refused one
+  a.node.serverAct(id, 'channel.edit', { id: general, overrides: {} })
+  await until(() => { try { b.node.send(conv, 'allowed again'); return true } catch { return false } })
+  await until(() => texts(a, conv).includes('allowed again'))
+}, 90000)
+
+test('server ops that arrive out of order or past a gap are asked for again and end up complete', async () => {
+  const a = start()
+  const x = DHT.keyPair()
+  const xk = x.publicKey.toString('hex')
+  const id = a.node.createServer('Order')
+  await letIn(a, { node: { joinServer() {}, state: () => ({ servers: { [id]: 1 } }) } as any, key: xk, dir: '', keyPair: x }, id)
+  const ops = [1, 2, 3].map((seq) => signOp({ server: id, seq, n: 100 + seq, ts: Date.now(), kind: 'nickname', body: { key: xk, nick: 'x' + seq } }, x))
+  let armed = false
+  let greeted = false
+  let asks = 0
+  const raw = createNet(
+    x,
+    {
+      open() {},
+      close() {},
+      msg(k, w: any) {
+        if (w.t !== 'sops' || w.server !== id || w.re) return
+        if (!armed) return void (greeted = true) // the greeting's ask, which would hand over everything without a gap
+        asks++
+        for (const o of ops) if (o.seq > (w.have[xk] ?? 0)) raw.send(k, { t: 'sop', op: o })
+      },
+    },
+    { bootstrap: testnet.bootstrap },
+  )
+  raw.dial(a.key)
+  await until(() => greeted)
+  raw.send(a.key, { t: 'sop', op: ops[2] })
+  raw.send(a.key, { t: 'sop', op: ops[0] })
+  armed = true
+  await until(() => a.node.servers().find((s: any) => s.id === id)?.members[xk]?.nick === 'x3')
+  expect(asks).toBeGreaterThan(0)
+  expect(lines(join(a.dir, 'servers', id + '.jsonl'))).toBe(6) // create, invite, join and x's three, each once
+  await raw.destroy()
+}, 60000)
+
+test('a stranger joins with an invite link while only one member is online, and gets the log', async () => {
+  const a = start()
+  const b = start()
+  const id = a.node.createServer('Door')
+  const general = chan()
+  a.node.serverAct(id, 'channel.add', { id: general, kind: 'text', name: 'general' })
+  const link = a.node.createInvite(id, { maxUses: 5 })
+  expect(link.startsWith('eleusinia://invite/')).toBe(true)
+  await expect(b.node.joinServer('not a link')).rejects.toThrow('That is not an invite link')
+  expect(await b.node.joinServer(link.slice(0, 40) + '\n' + link.slice(40))).toEqual({ server: id }) // pasted across two lines
+  expect(b.node.state().servers[id]).toMatchObject({ name: 'Door' })
+  expect(Object.keys(b.node.state().servers[id].members)).toHaveLength(2)
+  await until(() => b.node.state().servers[id].channels.length === 1)
+  expect(a.node.servers()[0].invites[Object.keys(a.node.servers()[0].invites)[0]].uses).toBe(1)
+  a.node.send(`${id}.${general}`, 'hi stranger')
+  await until(() => texts(b, `${id}.${general}`).includes('hi stranger'))
+  expect(await b.node.joinServer(link)).toEqual({ server: id }) // already in: nothing to do
+}, 60000)
+
+test('with the link\'s contact offline, a joiner finds another member on the server topic', async () => {
+  const a = start()
+  const [c, b] = [start(), start()]
+  const id = a.node.createServer('Topic')
+  await letIn(a, c, id)
+  const link = parseInvite(a.node.createInvite(id))!
+  await a.node.destroy()
+  await b.node.joinServer(makeInvite({ ...link, contacts: [a.key] }))
+  expect(Object.keys(b.node.state().servers[id].members)).toHaveLength(3)
+}, 90000)
+
+test('an expired or revoked invite, and a banned key, are refused with their reason', async () => {
+  const a = start()
+  const [b, c] = [start(), start()]
+  const id = a.node.createServer('Shut')
+  const old = a.node.createInvite(id, { expires: Date.now() + 1500 })
+  const gone = a.node.createInvite(id)
+  const servers = () => a.node.servers().find((s: any) => s.id === id)!
+  const goneId = Object.keys(servers().invites).find((k) => servers().invites[k].expires === undefined)!
+  a.node.serverAct(id, 'invite.revoke', { id: goneId })
+  a.node.serverAct(id, 'ban', { key: c.key })
+  const fine = a.node.createInvite(id)
+  await wait(1600)
+  await expect(b.node.joinServer(old)).rejects.toThrow('That invite has expired')
+  await expect(b.node.joinServer(gone)).rejects.toThrow('That invite was revoked')
+  await expect(c.node.joinServer(fine)).rejects.toThrow('You are banned from that server')
+  expect(servers().members[b.key]).toBeUndefined()
+  expect(servers().members[c.key]).toBeUndefined()
+}, 90000)
+
+test('a voice channel has its own text chat, and a call signal from a member who may not connect is refused', async () => {
+  const heard: any[] = []
+  const a = start(undefined, undefined, { emit: (e: any) => e.type === 'call' && heard.push(e) })
+  const b = start()
+  const id = a.node.createServer('Voices')
+  const [open, shut] = [chan(), chan()]
+  a.node.serverAct(id, 'channel.add', { id: open, kind: 'voice', name: 'open' })
+  a.node.serverAct(id, 'channel.add', { id: shut, kind: 'voice', name: 'shut', overrides: { [id]: { allow: [], deny: ['connect'] } } })
+  await letIn(a, b, id)
+  await until(() => b.node.state().servers[id]?.channels.length === 2)
+  expect(b.node.state().servers[id].mine.channels[shut]).not.toContain('connect')
+  a.node.send(`${id}.${shut}`, 'chat beside the call')
+  await until(() => texts(b, `${id}.${shut}`).includes('chat beside the call'))
+  b.node.send(`${id}.${shut}`, 'heard you')
+  await until(() => texts(a, `${id}.${shut}`).includes('heard you'))
+
+  // A raw member skips its own node's check: A takes its join into the open channel's call, never the shut one's
+  const x = DHT.keyPair()
+  const xk = x.publicKey.toString('hex')
+  await letIn(a, { node: { joinServer() {}, state: () => ({ servers: { [id]: 1 } }) } as any, key: xk, dir: '', keyPair: x }, id)
+  let linked = false
+  const raw = createNet(x, { open: () => void (linked = true), close() {}, msg() {} }, { bootstrap: testnet.bootstrap })
+  raw.dial(a.key)
+  await until(() => linked)
+  raw.send(a.key, { t: 'call', conv: `${id}.${shut}`, data: { k: 'join' } })
+  raw.send(a.key, { t: 'call', conv: `${id}.${open}`, data: { k: 'join' } })
+  await until(() => heard.some((e) => e.from === xk && e.conv === `${id}.${open}`))
+  expect(heard.some((e) => e.conv === `${id}.${shut}`)).toBe(false)
+  await raw.destroy()
+}, 90000)
+
+test('a poke into a voice channel reaches a fellow member; from a non-member, into a text channel or past the limit it is dropped', async () => {
+  const pokes: any[] = []
+  const a = start(undefined, undefined, { emit: (e: any) => e.type === 'poke' && pokes.push(e) })
+  const b = start()
+  const id = a.node.createServer('Pokes')
+  const other = a.node.createServer('Elsewhere')
+  const [lounge, text, far, farText] = [chan(), chan(), chan(), chan()]
+  a.node.serverAct(id, 'channel.add', { id: lounge, kind: 'voice', name: 'Lounge' })
+  a.node.serverAct(id, 'channel.add', { id: text, kind: 'text', name: 'general' })
+  a.node.serverAct(other, 'channel.add', { id: far, kind: 'voice', name: 'Far' })
+  a.node.serverAct(other, 'channel.add', { id: farText, kind: 'text', name: 'chat' })
+  await letIn(a, b, id)
+  await until(() => b.node.state().servers[id]?.channels.length === 2)
+  expect(() => b.node.poke(id, text, a.key)).toThrow()
+  expect(await b.node.poke(id, lounge, a.key)).toBe(true)
+  await until(() => pokes.length === 1)
+  expect(pokes[0]).toEqual({ type: 'poke', from: b.key, server: id, channel: lounge })
+
+  // A raw member of the other server skips its own node's checks
+  const x = DHT.keyPair()
+  const xk = x.publicKey.toString('hex')
+  await letIn(a, { node: { joinServer() {}, state: () => ({ servers: { [other]: 1 } }) } as any, key: xk, dir: '', keyPair: x }, other)
+  let linked = false
+  const raw = createNet(x, { open: () => void (linked = true), close() {}, msg() {} }, { bootstrap: testnet.bootstrap })
+  raw.dial(a.key)
+  await until(() => linked)
+  raw.send(a.key, { t: 'poke', server: id, channel: lounge }) // not a member of that server
+  raw.send(a.key, { t: 'poke', server: other, channel: farText })
+  raw.send(a.key, { t: 'poke', server: other, channel: far })
+  raw.send(a.key, { t: 'poke', server: other, channel: far }) // within 30 s of the last
+  await until(() => pokes.length === 2)
+  await wait(500)
+  expect(pokes.slice(1)).toEqual([{ type: 'poke', from: xk, server: other, channel: far }])
+  await raw.destroy()
+}, 90000)

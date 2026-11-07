@@ -16,6 +16,7 @@ import {
   MAX_TEXT,
   cleanProfile,
   dmId,
+  isGroupId,
   isHandle,
   isKey,
   isPicture,
@@ -33,6 +34,9 @@ import { EDIT_AHEAD_MS, groupIdOf, heldFrom, mergeGroup, missing, ownerOf, signA
 import { openRequest, requestSeed, sealRequest } from '../shared/sealed'
 import { createImpairment, parseNetSim } from '../shared/netsim'
 import { createPresence } from './presence'
+import { createServers } from './servers'
+import { type InviteLink, type JoinReason, askOrder, checkJoinAsk, isJoinAnswer, isJoinAsk, joinTopic, limiter, makeInvite, newInvite, parseInvite, serverTopic } from '../shared/invite'
+import { joinProof } from '../shared/server'
 import { createFiles } from './files'
 import { type Activity, type Game, cleanActivity, shareable } from '../shared/activity'
 import { type RelayLimits, RELAY_LIMITS, createNet } from './network'
@@ -181,17 +185,21 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     }
     return mates.has(key)
   }
-  const known = (key: Key) => s.friends[key] === 'friend' || inGroupWith(key)
+  const known = (key: Key) => s.friends[key] === 'friend' || inGroupWith(key) || servers.knows(key)
   const wants = (key: Key) => known(key) || s.friends[key] === 'outgoing'
 
   // Members of a conversation; empty means it is not a conversation we take part in.
   function members(conv: unknown): Key[] {
     if (typeof conv !== 'string') return []
     if (Object.hasOwn(s.groups, conv)) return s.groups[conv].members.includes(me) ? s.groups[conv].members : []
+    const channel = servers.channelMembers(conv)
+    if (channel) return channel
     const [a, b] = conv.split('_')
     const other = a === me ? b : a
     return isKey(other) && conv === dmId(me, other) && s.friends[other] === 'friend' ? [me, other] : []
   }
+  // Who takes part in a conversation's call: a server channel's are those who may connect to that voice channel
+  const callers = (conv: unknown): Key[] => servers.callMembers(conv) ?? members(conv)
 
   // Activity (shared/activity.ts): ours as found by main/activity.ts, and each linked contact's as they last sent it.
   // Memory only. Ours goes to friends and group members, minus anyone hidden, at most every 2 s, only when it changed.
@@ -225,9 +233,10 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     versions: Object.fromEntries([...versions].filter(([k]) => known(k))),
     relayed: net.keys().filter((k) => known(k) && relayedVia.has(k)),
     activity: { ...Object.fromEntries([...theirs].filter(([k]) => known(k) && net.linked(k))), [me]: ourActivity() },
-    chats: Object.fromEntries(Object.entries(s.lastAt ?? {}).filter(([c]) => members(c).length).map(([c, at]) => [c, { unread: s.unread?.[c] ?? 0, at }])),
+    chats: Object.fromEntries(Object.entries(s.lastAt ?? {}).filter(([c]) => members(c).length && !servers.isChannel(c)).map(([c, at]) => [c, { unread: s.unread?.[c] ?? 0, at }])),
     blocked: Object.keys(s.blocked ?? {}),
     present: presence.online().filter(known),
+    servers: servers.summary(),
   })
   const push = () => emit({ type: 'state', state: state() })
   // For frequent small changes (receipts in a busy group): written within 2 s rather than once per message.
@@ -365,7 +374,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     hi(key)
     if (s.friends[key] === 'friend') sendHave(key, dmId(me, key))
     for (const g of shared) sendHave(key, g.id)
-    if (shared.length) net.send(key, { t: 'presence', p: presence.note() })
+    servers.greet(key)
+    for (const conv of servers.channelsWith(key)) sendHave(key, conv)
+    if (shared.length || servers.shares(key)) net.send(key, { t: 'presence', p: presence.note() })
     sendActivity(key)
   }
   function reach(key: Key) {
@@ -451,7 +462,11 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       for (const k of few(merged.members.filter((k) => k !== me && k !== key && net.linked(k)), 3)) net.send(k, { t: 'group', g: merged })
       return
     }
+    // Join asks come from strangers (let in by lookJoiner) and answers from members we asked, so before the gate
+    if (w.t === 'joinAsk') return answerJoin(key, w)
+    if (w.t === 'joinOk' || w.t === 'joinNo') return joinAnswered(key, w)
     if (!known(key)) return
+    if (w.t === 'poke') return takePoke(key, w)
     if (w.t === 'activity') {
       const a = cleanActivity(w.a)
       if (a?.game) theirs.set(key, a)
@@ -459,6 +474,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       return pushSoon()
     }
 
+    if (w.t === 'sops' || w.t === 'sop') return servers.receive(key, w)
     if (w.t === 'get') return files.onGet(key, w.h, w.off)
     if (w.t === 'part') return files.onPart(key, w.h, w.off, w.d)
     if (w.t === 'nope') return files.onNope(key, w.h)
@@ -526,6 +542,13 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const ms = members(m?.conv)
       if (!ms.includes(key) || !ms.includes(m.author)) return
       const next = (haveOf(m.conv)[m.author] ?? 0) + 1
+      // A channel message from someone who may no longer write there (it may have been written just before they lost
+      // the right) is not kept, but stepped over as a skip line: refusing it would leave their later messages waiting
+      // behind a gap that never fills.
+      if (!servers.maySend(m.conv, m.author)) {
+        if (m.seq === next && verifyMsg(m)) appendFileSync(logFile(m.conv), JSON.stringify({ skip: { [m.author]: m.seq } }) + '\n'), (haveOf(m.conv)[m.author] = m.seq), sendHave(key, m.conv, true)
+        return
+      }
       const t = Number.isSafeInteger(m.seq) ? tailOf(m.conv)[m.author] : undefined
       const old = !!t && m.seq === t // the next older one, asked for with `older`
       if (m.seq < next && !old) return // already have it
@@ -554,14 +577,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (m.seq > next) setTail(m.conv, m.author, m.seq - 1), (haveOf(m.conv)[m.author] = m.seq - 1)
       append(m)
       sendHave(key, m.conv, true) // delivery receipt
-      if (Object.hasOwn(s.groups, m.conv)) receipts.add(m.conv)
+      if (Object.hasOwn(s.groups, m.conv) || servers.isChannel(m.conv)) receipts.add(m.conv)
       // Passed on to a few linked members, not all: in a big group that would be members² sends per message. Anyone
       // it misses learns of it from the receipts within 5 s and asks (see `have`).
       const on = ms.filter((k) => k !== me && k !== key && k !== m.author && net.linked(k))
       for (const k of few(on)) net.send(k, { t: 'msg', m })
     } else if (w.t === 'call') {
       used.set(key, Date.now())
-      if (members(w.conv).includes(key)) emit({ type: 'call', from: key, conv: w.conv, data: w.data })
+      if (callers(w.conv).includes(key)) emit({ type: 'call', from: key, conv: w.conv, data: w.data })
     } else if (w.t === 'gone') {
       delete s.friends[key]
       s.declined = { ...s.declined, [key]: Date.now() } // their old request, still announced for a while, must not come back
@@ -715,6 +738,91 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     for (const k of net.keys()) if (wants(k)) hi(k)
   }
 
+  // Joining a server by invite link (shared/invite.ts). The joiner is a stranger to every member, so they announce
+  // themselves on the server's join topic, then dial; a member they knock on looks there and, finding them, lets them
+  // link for 2 minutes to ask (a banned key too, so it hears why). Only the server id gets them that far: anyone holding
+  // it already sees members online on serverTopic. The proof is checked on the ask, and nothing else from them is taken.
+  const JOIN_WAIT = 60000
+  const JOIN_NO: Record<JoinReason, string> = {
+    server: 'That invite is for another server',
+    unknown: 'That invite is not known to the server',
+    proof: 'That invite link is not valid',
+    revoked: 'That invite was revoked',
+    expired: 'That invite has expired',
+    used: 'That invite has been used up',
+    banned: 'You are banned from that server',
+    member: 'You are already a member',
+    full: 'That server is full',
+    busy: 'The server is busy, try again',
+  }
+  type Joining = { link: InviteLink; to: Key[]; no: Map<Key, JoinReason>; why?: JoinReason; done: (err?: Error) => void }
+  const pending = new Map<string, Joining>() // servers we are joining, by id
+  const joiners = new Map<Key, number>() // strangers found on a join topic, and when
+  const joining = (k: Key) => (joiners.get(k) ?? 0) > Date.now() - 120000
+  const lookEach = limiter(5000)
+  const lookAny = limiter(500) // DHT looks cost: a flood of fresh keys knocking gets two a second, whoever they are
+  const askEach = limiter(2000)
+  async function lookJoiner(k: Key) {
+    if (joining(k) || !lookEach(k, Date.now()) || !lookAny('', Date.now())) return
+    const ours = servers.list().slice(0, 10)
+    const found = await Promise.all(ours.map((v) => net.lookup(joinTopic(v.id)).catch(() => [] as Key[])))
+    if (!found.some((ks) => ks.includes(k)) || s.blocked?.[k]) return
+    if (joiners.size > 1000) joiners.clear()
+    joiners.set(k, Date.now())
+    setTimeout(() => !known(k) && net.drop(k), 120000).unref?.() // a stranger who never joins does not stay linked
+  }
+  function askJoin(j: Joining, k: Key) {
+    if (!net.linked(k)) return void net.dial(k)
+    const { server, invite, secret } = j.link
+    net.send(k, { t: 'joinAsk', server, invite, key: me, proof: joinProof(server, invite, me, secret) })
+  }
+  // A member writes the join only when the replay would accept it; otherwise the asker hears why.
+  function answerJoin(k: Key, w: unknown) {
+    if (!isJoinAsk(w) || w.key !== k || s.blocked?.[k]) return
+    const sv = servers.state(w.server)
+    if (!sv || !Object.hasOwn(sv.members, me)) return // not a server of ours: nothing said about it
+    const no = (why: JoinReason) => net.send(k, { t: 'joinNo', server: w.server, why })
+    if (!askEach(k, Date.now())) return no('busy')
+    let why = checkJoinAsk(sv, w, Date.now())
+    if (why === 'ok') {
+      try {
+        servers.act(w.server, 'join', { invite: w.invite, key: k, proof: w.proof })
+        diag('network', `…${k.slice(-6)} joined a server through an invite`)
+      } catch {
+        why = 'busy'
+      }
+    }
+    if (why !== 'ok' && why !== 'member') return no(why)
+    net.send(k, { t: 'joinOk', server: w.server })
+    greet(k)
+    pushSoon()
+  }
+  // Pokes (Invite to voice channel): ephemeral, from a fellow member we may both call with in that voice channel.
+  // A peer could send them in a loop, so one per sender per 30 s and 10 a minute in all; anything else is dropped.
+  const POKE_WAIT = 120000
+  const pokeEach = limiter(30000)
+  const poked: number[] = []
+  const toPoke = new Map<Key, { w: Wire; sent: () => void }[]>() // waiting for a link with their recipient
+  function takePoke(k: Key, w: { server: unknown; channel: unknown }) {
+    const now = Date.now()
+    while (poked.length && now - poked[0] > 60000) poked.shift()
+    if (!isGroupId(w.server) || !isGroupId(w.channel) || s.blocked?.[k] || !servers.callMembers(`${w.server}.${w.channel}`)?.includes(k)) return
+    if (poked.length >= 10 || !pokeEach(k, now)) return
+    poked.push(now)
+    emit({ type: 'poke', from: k, server: w.server, channel: w.channel })
+  }
+  function joinAnswered(k: Key, w: unknown) {
+    const j = isJoinAnswer(w) ? pending.get(w.server) : undefined
+    if (!j || !isJoinAnswer(w) || !j.to.includes(k)) return
+    if (w.t === 'joinOk') {
+      servers.expect(j.link.server, k)
+      return reach(k)
+    }
+    if (w.why === 'busy') return // asked again on the next tick
+    j.no.set(k, (j.why = w.why))
+    if (j.to.every((x) => j.no.has(x))) j.done(new Error(JOIN_NO[w.why]))
+  }
+
   const net = createNet(
     keyPair,
     {
@@ -723,10 +831,11 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       // Someone we asked dialing us has most likely accepted: look now, which matters when the link itself cannot form
       // (two strict routers) and the acceptance only travels through the DHT. They dial as they accept, so their
       // announcement may land a moment later: one more look follows in 3 s.
-      admit: (key) => !s.blocked?.[key] && (s.friends[key] === 'outgoing' && ring(key, 3000), known(key) || s.friends[key] === 'outgoing'),
+      // Also someone found on one of our servers' join topics a moment ago (lookJoiner), so they can ask to join.
+      admit: (key) => !s.blocked?.[key] && (s.friends[key] === 'outgoing' && ring(key, 3000), known(key) || s.friends[key] === 'outgoing' || joining(key)),
       // A stranger dialing is how a new request rings: they announce it first, then dial, so looking now finds it at
       // once instead of at the next 30 s check.
-      knock: (key) => !s.friends[key] && !declinedRecently(key) && ring(key),
+      knock: (key) => !s.friends[key] && !declinedRecently(key) && (ring(key), lookJoiner(key)),
       open(key, replaced) {
         const by = pendingVia.get(key)
         if (by) {
@@ -741,12 +850,16 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         diag('network', `linked with …${key.slice(-6)}${replaced ? ' again, replacing its old link' : ''}${by ? ' through a friend' : ''}${known(key) ? '' : key === inbox ? ' (developers inbox)' : ' (not a friend)'}`)
         if (key === inbox) deliver()
         if (wants(key)) greet(key)
+        for (const j of pending.values()) if (j.to.includes(key)) askJoin(j, key)
+        for (const p of toPoke.get(key) ?? []) net.send(key, p.w), p.sent()
+        toPoke.delete(key)
         if (known(key)) files.opened(key)
         push()
       },
       close(key) {
         diag('network', `link closed with …${key.slice(-6)}`)
         presence.closed(key)
+        servers.closed(key)
         for (const k of sentUpTo.keys()) if (k.startsWith(key)) sentUpTo.delete(k)
         theirs.delete(key)
         sentActivity.delete(key)
@@ -784,9 +897,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     few,
     tell,
     ownProfile: () => s.profile,
-    around: (k) => new Set(ours().filter((g) => g.members.includes(k)).flatMap((g) => g.members)),
-    inCall: (conv, k) => members(conv).includes(k),
-    accepts: (k) => inGroupWith(k) && !s.blocked?.[k],
+    around: (k) => new Set([...ours().filter((g) => g.members.includes(k)).flatMap((g) => g.members), ...servers.around(k)]),
+    inCall: (conv, k) => callers(conv).includes(k),
+    accepts: (k) => (inGroupWith(k) || servers.knows(k)) && !s.blocked?.[k],
     version: (k) => s.profileV?.[k],
     async card(k, v) {
       const c = await fetchCard(k)
@@ -798,6 +911,18 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       return 'stored'
     },
     changed: () => pushSoon(),
+  })
+  // Servers' op logs and their sync (servers.ts). A channel we can newly read is asked for from members we are linked with.
+  const servers = createServers({
+    dir,
+    keyPair,
+    net,
+    few,
+    changed(convs) {
+      for (const conv of convs) for (const k of members(conv)) if (k !== me && net.linked(k)) sendHave(k, conv)
+      for (const j of pending.values()) if (servers.members(j.link.server).includes(me)) net.announce(serverTopic(j.link.server)), j.done()
+      pushSoon()
+    },
   })
   // Testing only: a simulated bad line on the relayed call path (shared/netsim.ts).
   const sim = parseNetSim(netsim)
@@ -836,8 +961,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   // Down that list until groupLinks of them are linked or still being tried for the first time, so offline picks (a
   // dial that failed) do not leave us cut off; at most 3 times as many, each backing off while offline. Counting
   // first tries keeps a burst of dials at start from reaching 3 × groupLinks.
-  function linkPick(g: Group) {
-    const order = g.members
+  function linkPick(list: Key[]) {
+    const order = list
       .filter((k) => k !== me)
       .map((k) => [createHash('sha256').update(me + k).digest('hex'), k])
       .sort()
@@ -867,7 +992,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     let gone = false
     const leavers = new Set(ours().flatMap((g) => [...Object.keys(g.left ?? {}), ...Object.keys(g.removed ?? {})]))
     for (const k of Object.keys(s.profiles))
-      if (!s.friends[k] && !inGroupWith(k) && !leavers.has(k) && !s.blocked?.[k]) delete s.profiles[k], delete s.profileV?.[k], presence.forget(k), (gone = true)
+      if (!s.friends[k] && !inGroupWith(k) && !servers.knows(k) && !leavers.has(k) && !s.blocked?.[k]) delete s.profiles[k], delete s.profileV?.[k], presence.forget(k), (gone = true)
     for (const [conv, peers] of Object.entries(s.confirmed ?? {})) {
       const ms = members(conv)
       if (!ms.length) delete s.confirmed![conv], rmSync(confFile(conv), { force: true })
@@ -886,7 +1011,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     relayTick()
     presence.expire()
     prune()
-    const picked = new Set(ours().flatMap(linkPick))
+    const picked = new Set([...ours().map((g) => g.members), ...servers.lists()].flatMap(linkPick))
     closeIdle(picked)
     const keys = new Set([...picked, ...demand.keys()])
     for (const [k, st] of Object.entries(s.friends)) if (st !== 'incoming') keys.add(k)
@@ -1045,7 +1170,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     // Our ID card is now the only way search finds us, so it is written before startup counts as ready.
     const card = Date.now() - idPublished > 6 * 3600e3 ? publishId().catch(() => {}) : null
     card?.then(keepFriendsFindable).catch(() => {})
-    await Promise.all([card,...topicsOf(s.profile.handle).map((t) => net.announce(t)), ...requesting().map(announceRequest)])
+    await Promise.all([card,...topicsOf(s.profile.handle).map((t) => net.announce(t)), ...requesting().map(announceRequest), ...servers.list().map((v) => net.announce(serverTopic(v.id)))])
   }
   const ready = Promise.all([applyRelay(), announce().then(checkRequests)])
   const announcer = setInterval(announce, 5 * 60000)
@@ -1055,7 +1180,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   // names them. A few at a time, each at most hourly.
   const carded = new Map<Key, number>()
   async function nameUnlinked() {
-    const keys = [...new Set(ours().flatMap((g) => g.members))].filter((k) => k !== me && !s.profiles[k]?.name && !net.linked(k) && (carded.get(k) ?? 0) < Date.now() - 3600e3)
+    const keys = [...new Set([...ours().flatMap((g) => g.members), ...servers.list().flatMap((v) => Object.keys(v.members))])].filter((k) => k !== me && !s.profiles[k]?.name && !net.linked(k) && (carded.get(k) ?? 0) < Date.now() - 3600e3)
     for (const k of keys.slice(0, 5)) {
       carded.set(k, Date.now())
       const card = await fetchCard(k)
@@ -1246,7 +1371,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const ms = members(conv)
       const withFiles = refs !== undefined && refs.length > 0
       if (withFiles && (!validFiles(refs) || refs.some((f) => files.status(f.h).state !== 'done'))) throw new Error('Cannot send those files')
-      if (!ms.length || typeof text !== 'string' || (!text && !withFiles) || text.length > MAX_TEXT) throw new Error('Cannot send that')
+      if (!ms.length || !servers.maySend(conv, me) || typeof text !== 'string' || (!text && !withFiles) || text.length > MAX_TEXT) throw new Error('Cannot send that')
       // A friend confirmed more of ours than the log holds: it was lost. Carry on after those, or the next message
       // would take a number they already have and be dropped.
       const have = haveOf(conv)
@@ -1260,6 +1385,76 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const m = preview ? withLink(signed, preview, keyPair.secretKey) : signed
       append(m)
       for (const k of ms) if (k !== me) net.send(k, { t: 'msg', m }), used.set(k, Date.now()), need(k)
+    },
+    // Servers (servers.ts): ours, a new one, and any change to one as a signed op (shared/server.ts kinds and bodies).
+    // A channel's messages (text or voice) go through send and history with `${serverId}.${channelId}` as the conversation.
+    servers: () => servers.list(),
+    createServer(name: string) {
+      const id = servers.create(name)
+      net.announce(serverTopic(id))
+      return id
+    },
+    // Accepted ops, newest first (at most 500), for the settings page; empty without viewAuditLog
+    serverAudit: (id: string) => servers.audit(String(id)),
+    serverAct(id: string, kind: string, body: unknown) {
+      servers.act(String(id), String(kind), body)
+      pushSoon()
+    },
+    // A new invite in the log and its link: us and one other member we are linked with as the contacts.
+    createInvite(id: string, opts: { expires?: number; maxUses?: number } = {}) {
+      const { body, secret } = newInvite({ expires: opts?.expires, maxUses: opts?.maxUses })
+      servers.act(String(id), 'invite.add', body)
+      pushSoon()
+      const other = servers.members(String(id)).find((k) => k !== me && net.linked(k))
+      return makeInvite({ server: String(id), invite: body.id, secret, contacts: other ? [me, other] : [me] })
+    },
+    // Resolves once we are a member, or fails with why the members said no (or that nobody answered within a minute).
+    joinServer(text: string): Promise<{ server: string }> {
+      const link = parseInvite(text)
+      if (!link) return Promise.reject(new Error('That is not an invite link'))
+      const joined = { server: link.server }
+      if (servers.members(link.server).includes(me)) return Promise.resolve(joined)
+      if (pending.has(link.server)) return Promise.reject(new Error('Already joining that server'))
+      return new Promise((resolve, reject) => {
+        const tick = () => j.to.forEach((k) => !j.no.has(k) && askJoin(j, k))
+        const timer = setInterval(tick, 2000)
+        const stop = setTimeout(() => j.done(new Error(j.why ? JOIN_NO[j.why] : 'No member of that server answered')), JOIN_WAIT)
+        const j: Joining = {
+          link,
+          to: askOrder(link.contacts, [], me),
+          no: new Map(),
+          done(err) {
+            clearInterval(timer)
+            clearTimeout(stop)
+            pending.delete(link.server)
+            if (err) reject(err)
+            else resolve(joined)
+          },
+        }
+        pending.set(link.server, j)
+        // Announced before the first dial: the member we knock on looks for us there
+        net.announce(joinTopic(link.server)).then(tick)
+        net.lookup(serverTopic(link.server)).then((found) => ((j.to = askOrder(j.to, found, me)), tick()), () => {})
+      })
+    },
+    // Asks a fellow member to join a voice channel's call with us. True once sent; false when they could not be
+    // reached within 2 minutes (dialled like a call signal's recipient meanwhile).
+    poke(server: string, channel: string, key: Key): Promise<boolean> {
+      if (key === me || !servers.callMembers(`${server}.${channel}`)?.includes(key)) throw new Error('They cannot join that voice channel')
+      const w: Wire = { t: 'poke', server, channel }
+      if (net.linked(key)) return net.send(key, w), Promise.resolve(true)
+      return new Promise((resolve) => {
+        const p = { w, sent: () => (clearTimeout(timer), resolve(true)) }
+        const timer = setTimeout(() => {
+          const left = (toPoke.get(key) ?? []).filter((x) => x !== p)
+          if (left.length) toPoke.set(key, left)
+          else toPoke.delete(key)
+          resolve(false)
+        }, POKE_WAIT)
+        toPoke.set(key, [...(toPoke.get(key) ?? []), p])
+        demand.set(key, demand.get(key) ?? Date.now())
+        if (due(key)) net.dial(key)
+      })
     },
     // Only the owner can remove someone; like leaving, it is signed and permanent. Everyone, the removed member
     // included, is told, and anyone only they had added drops out with them until a member adds them again.
@@ -1288,20 +1483,22 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       for (const k of net.keys()) if (s.friends[k] === 'friend') net.send(k, { t: 'gone' })
       await new Promise((r) => setTimeout(r, 1500)) // let those notices leave before the links close
       await this.destroy()
-      for (const f of ['state.json', 'state.json.tmp', 'identity.json', 'msgs', 'files', 'pictures', 'confirmed']) rmSync(join(dir, f), { recursive: true, force: true })
+      for (const f of ['state.json', 'state.json.tmp', 'identity.json', 'msgs', 'files', 'pictures', 'confirmed', 'servers']) rmSync(join(dir, f), { recursive: true, force: true })
     },
     signal(conv: string, to: Key | null, data: unknown) {
       if (noDirect && (data as { k?: string })?.k === 'ice') return
-      for (const k of members(conv)) if (k !== me && (!to || to === k)) net.send(k, { t: 'call', conv, data }), used.set(k, Date.now()), need(k)
+      const ms = callers(conv)
+      if (!ms.includes(me)) return
+      for (const k of ms) if (k !== me && (!to || to === k)) net.send(k, { t: 'call', conv, data }), used.set(k, Date.now()), need(k)
       if (to) signalled.set(to, Date.now())
       // Whoever a signal is addressed to is in the call with us: sought out even when not a friend, and dialled now.
-      if (to && to !== me && members(conv).includes(to) && !net.linked(to)) {
+      if (to && to !== me && ms.includes(to) && !net.linked(to)) {
         demand.set(to, demand.get(to) ?? Date.now())
         if (due(to)) net.dial(to)
       }
-      // Our own group call, told in our presence note so members not linked with us see it too. Never a direct call.
+      // Our own group or voice channel call, told in our presence note so members not linked with us see it too. Never a direct call.
       const k = (data as { k?: string })?.k
-      if (!to && (k === 'join' || k === 'leave')) presence.inGroupCall(k === 'join' && Object.hasOwn(s.groups, conv) ? conv : null)
+      if (!to && (k === 'join' || k === 'leave')) presence.inGroupCall(k === 'join' && (Object.hasOwn(s.groups, conv) || servers.isChannel(conv)) ? conv : null)
     },
     // A UDP port on this machine that carries a call with `key` over the peer link (see relay.ts).
     relayOpen: (key: Key) => (known(key) ? relay.open(key) : null),
@@ -1377,6 +1574,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       clearInterval(presenceTimer)
       for (const t of floodRetry.values()) clearTimeout(t)
       presence.destroy()
+      servers.destroy()
+      for (const j of pending.values()) j.done(new Error('Closed'))
       clearInterval(watcher)
       clearInterval(namer)
       clearInterval(probeReset)
