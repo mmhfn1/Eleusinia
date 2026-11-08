@@ -5,7 +5,8 @@ import { filesBody, validFiles } from './media'
 import { type Add, type Group, type Have, type Key, type Msg, type Profile, MAX_TEXT, isGroupId, isKey, isPicture } from './protocol'
 
 // A signed "online" note, passed along between group members so they know who is online without a link to everyone.
-// call: the group whose call the author is in, if any, so members not linked with them still see the call.
+// call: the group or server voice channel (`${serverId}.${channelId}`) whose call the author is in, if any, so members
+// not linked with them still see the call.
 // v: their profile's version (profileVersion), so members not linked with them notice a new name or picture.
 export type Presence = { key: Key; at: number; call: string | null; v: string; sig: string }
 const presenceBody = (key: string, at: number, call: string | null, v: string) => Buffer.from(`presence:${key}:${at}:${call ?? ''}:${v}`)
@@ -20,7 +21,7 @@ export function verifyPresence(p: any, now = Date.now()): p is Presence {
     isKey(p.key) &&
     Number.isSafeInteger(p.at) &&
     p.at <= now + 60000 && // a note dated ahead cannot keep someone online for long after they left
-    (p.call === null || isGroupId(p.call)) &&
+    (p.call === null || isGroupId(p.call) || (typeof p.call === 'string' && /^[0-9a-f]{32}\.[0-9a-f]{32}$/.test(p.call))) &&
     typeof p.v === 'string' &&
     /^[0-9a-f]{16}$/.test(p.v) &&
     isSig(p.sig) &&

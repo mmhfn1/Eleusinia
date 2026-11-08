@@ -1592,6 +1592,12 @@ legend {
 .check-row:hover {
   background: var(--obsidian-3);
 }
+.poke-row {
+  cursor: default;
+}
+.poke-row > :last-child {
+  margin-left: auto;
+}
 .settings-section {
   display: grid;
   gap: 12px;
@@ -2190,6 +2196,12 @@ hr {
 .report-dialog textarea:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* A poke is an invitation, not an error. */
+.poke-toast {
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: var(--obsidian);
 }
 
 /* A downloaded update offered as a restart sits above an error message, if both show. */
@@ -4138,4 +4150,214 @@ button.member:hover .user {
   color: var(--mist-2);
   font-size: 12.5px;
   font-style: italic;
+}
+
+/* Servers (design/mockups/servers.html). The rail's + stays lit while its menu is open. */
+.rail-add.open {
+  border-style: solid;
+  border-color: var(--silver);
+  color: var(--silver);
+}
+/* The server column: name with its menu on top, then the channels, and the call at its foot. */
+aside.server-side {
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.server-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex: none;
+  height: 56px;
+  padding: 0 14px;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: none;
+  color: var(--silver);
+  text-align: left;
+  transition: background var(--t-fast);
+}
+.server-head:hover,
+.server-head.open {
+  background: var(--obsidian-3);
+}
+.server-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 16px/1.2 var(--display);
+  letter-spacing: 0.01em;
+}
+.server-head .icon {
+  color: var(--mist);
+}
+.channels {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: 14px 10px;
+}
+.channels details {
+  display: grid;
+  gap: 2px;
+  margin-top: 12px;
+}
+.channels summary {
+  padding: 0 6px 6px 4px;
+}
+.channels summary h2 {
+  display: inline;
+}
+.channel-row {
+  position: relative;
+}
+.channel {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 32px;
+  padding: 0 8px;
+  border: none;
+  border-radius: var(--r-md);
+  background: none;
+  color: var(--mist);
+  font: inherit;
+  text-align: left;
+  transition: background var(--t-fast), color var(--t-fast);
+}
+.channel:hover {
+  background: color-mix(in srgb, var(--obsidian-4) 55%, transparent);
+  color: var(--silver-2);
+}
+.channel.active {
+  background: var(--obsidian-3);
+  color: var(--silver);
+}
+.channel > .icon {
+  color: var(--mist-2);
+}
+.channel-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.channel-lock {
+  display: inline-grid;
+  color: var(--mist-2);
+}
+.channel .tail {
+  font-size: 11px;
+  color: var(--mist-2);
+}
+/* A voice channel's own text chat and its invite: shown on hover or while focused. */
+.channel-tools {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  display: none;
+  gap: 2px;
+}
+.channel-tools .icon-button {
+  width: 24px;
+  height: 24px;
+}
+.channel-row:hover .channel-tools,
+.channel-row:focus-within .channel-tools {
+  display: flex;
+}
+.channel-row:hover .channel .tail,
+.channel-row:focus-within .channel .tail {
+  visibility: hidden;
+}
+/* Who is in a voice channel, under it; the speaking ring is the member list's own (.member.speaking). */
+.voice-people {
+  display: grid;
+  gap: 1px;
+  padding: 2px 0 6px 24px;
+}
+.voice-person.member {
+  gap: 8px;
+  width: 100%;
+  padding: 3px 6px;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+.voice-person .row-title {
+  flex: 1;
+  min-width: 0;
+  font-weight: 400;
+}
+.voice-person .user {
+  font-weight: 500;
+}
+.voice-dock {
+  flex: none;
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px 14px;
+  border-top: 1px solid var(--line);
+  background: rgb(5 6 8 / 0.35);
+}
+.voice-live {
+  color: var(--cyan);
+}
+.voice-dock .call-controls {
+  justify-content: flex-start;
+}
+/* The channel topic beside its name in the chat header. */
+.chat-head > .icon {
+  flex: none;
+  color: var(--mist);
+}
+.chat-topic {
+  flex: 1;
+  min-width: 0;
+  padding-left: 12px;
+  border-left: 1px solid var(--line-strong);
+  color: var(--mist);
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chat-invite {
+  margin-left: auto;
+}
+.members .member.menu-for {
+  background: color-mix(in srgb, var(--obsidian-4) 45%, transparent);
+}
+.members section {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+.members section > h2 {
+  padding: 4px 6px 2px;
+}
+/* Role checkboxes in the right-click menu. */
+.context-item.has-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-left: 22px;
+}
+.check-space {
+  width: 14px;
+}
+.invite-input,
+.invite-link b {
+  font: 12.5px/1.3 var(--mono);
 }

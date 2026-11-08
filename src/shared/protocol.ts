@@ -75,6 +75,23 @@ export type State = {
   activity: Record<Key, Activity> // what contacts are doing now, memory only; ours as they see it, under our own key
   chats: Record<string, { unread: number; at: number }> // conversations with at least one message: unread messages and missed calls, last activity
   blocked: Key[]
+  servers: Record<string, ServerView> // servers we are in, for the window (main/servers.ts)
+}
+export type ServerPerm = string // a name from PERMS in src/shared/server.ts
+// What the window gets of a server we are in. roles: index = rank, @everyone (id = server id) at 0. channels: those
+// we may view (a category only with a visible child or when we may view it), or all of them with manageChannels.
+// mine: our rank (the owner's is 1e9), server-wide permissions, and per visible channel.
+export type ServerView = {
+  id: string
+  name: string
+  avatar: string
+  owner: Key
+  roles: { id: string; name: string; color: number; hoist: boolean; perms: ServerPerm[] }[]
+  members: Record<Key, { roles: string[]; nick?: string; joinedAt: number }>
+  channels: { id: string; name: string; kind: 'text' | 'voice' | 'category'; parent?: string; topic?: string; userLimit?: number; position: number; overrides: Record<string, { allow: ServerPerm[]; deny: ServerPerm[] }> }[]
+  invites: Record<string, { id: string; by: Key; expires?: number; maxUses?: number; uses: number; revoked: boolean }>
+  bans: Key[]
+  mine: { rank: number; perms: ServerPerm[]; channels: Record<string, ServerPerm[]> }
 }
 
 // How calls are set up (slot order and signals). Raised only by a change older copies cannot follow: copies on
@@ -112,6 +129,13 @@ export type Wire =
   | { t: 'nope'; h: string } // the sender does not have that file, or not for us
   | { t: 'activity'; a: unknown } // what the sender is doing (shared/activity.ts), checked by cleanActivity
   | { t: 'presence'; p: unknown } // someone's signed "I am online" note, passed along between group members (sync.ts)
+  | { t: 'sops'; server: string; have: Have; re?: boolean } // a server's ops we hold, per author (main/servers.ts); re: a reply or receipt, not an ask
+  | { t: 'sop'; op: unknown } // one signed server op (shared/server.ts)
+  // Joining a server by invite link (shared/invite.ts): a stranger's ask to a member, and the member's answer
+  | { t: 'joinAsk'; server: string; invite: string; key: Key; proof: string; profile?: Profile }
+  | { t: 'joinOk'; server: string }
+  | { t: 'joinNo'; server: string; why: string }
+  | { t: 'poke'; server: string; channel: string } // a member asks us to join that voice channel's call; never logged
 
 export type Event =
   | { type: 'state'; state: State }
@@ -122,6 +146,7 @@ export type Event =
   | { type: 'update'; version: string } // a newer version has downloaded and installs on restart
   | { type: 'window'; maximized: boolean } // the window was maximized or restored, for the title bar's button
   | { type: 'file'; file: FileState }
+  | { type: 'poke'; from: Key; server: string; channel: string } // a checked poke (Wire 'poke'), memory only
 
 export const MAX_TEXT = 4000
 

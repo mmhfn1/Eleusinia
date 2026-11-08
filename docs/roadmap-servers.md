@@ -1,6 +1,9 @@
 # Eleusinia servers: Discord-style communities, peer to peer
 
-Status: planned, not started.
+Status: phase 1 done: the signed log and its replay (`src/shared/server.ts`), storage and sync with text and voice
+channels on the node (`src/main/servers.ts`), invite links and joining (`src/shared/invite.ts`), and the screens
+(`src/renderer/Server.tsx`, `ServerSettings.tsx`, from the mockup in `design/mockups/`). Not yet: unread counts for
+channels, server mute, deafen and move, limited channels' encryption (phase 3).
 
 ## Context
 
@@ -82,6 +85,14 @@ Encryption uses sodium's sealed boxes, from `sodium-universal`, which is already
 dependency.
 
 ### Joining, membership and bans
+
+As built: a link is `eleusinia://invite/<base64url>` (version, server, invite, its secret, one or two members to
+contact). The joiner announces itself on the server's join topic and dials those members, or members found on the
+server topic if they are offline; a member who is knocked looks it up on that topic, lets it link for 2 minutes only to
+ask, checks the ask against the same rules as the replay (`checkJoinAsk`) and writes the join, or answers with the
+reason (expired, revoked, used up, banned, already a member, full, busy). Moderation ops record what their author had
+seen (`seen`), and anything written past that replays after them, so nobody acts before their own demotion; changes
+that wait on each other go highest rank first.
 
 - **Invites:** a member with Create invites adds an invite to the log. The log holds only a fingerprint of the invite's
   secret, its expiry and its use limit.

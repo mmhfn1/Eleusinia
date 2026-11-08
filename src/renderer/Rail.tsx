@@ -1,5 +1,5 @@
-// The rail down the left edge: the emblem (Home), groups, direct conversations with at least one message, and
-// a right-click menu for each conversation. Unread messages and missed calls show as a count on its picture.
+// The rail down the left edge: the emblem (Home), servers, groups, direct conversations with at least one message,
+// and a right-click menu for each conversation. Unread messages and missed calls show as a count on its picture.
 import { type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { type Key, type State } from '../shared/protocol'
@@ -8,7 +8,8 @@ import { type Modal, type People, type Run, api, groupName } from './common'
 import { Avatar, Dialog, Emblem, GroupEmblem, Icon } from './ui'
 
 type Props = { st: State; people: People; open: string | null; go: (c: string | null) => void; show: (m: Modal) => void; run: Run }
-type Item = { label: string; act: () => void; danger?: boolean; sub?: boolean }
+// checked: a checkable item, which keeps the menu open
+export type Item = { label: string; act: () => void; danger?: boolean; sub?: boolean; checked?: boolean }
 // A menu is sections of items; a divider goes between sections.
 type Menu = { x: number; y: number; for: string }
 type Ask = { title: string; body: string; yes: string; act: () => void } | { nickname: Key } | null
@@ -38,7 +39,8 @@ export function Rail({ st, people, open, go, show, run }: Props) {
   })
   const settings = (p: Partial<State['settings']>) => run(api.call('setSettings', p))
   const muted = (c: string) => !!st.settings.muted?.[c]
-  const inCall = (c: string) => !!call.active.get(c)?.size || call.conv === c
+  // A server counts as in a call when any of its channels is (their conversations are `${server}.${channel}`).
+  const inCall = (c: string) => [...call.active].some(([x, v]) => (x === c || x.startsWith(c + '.')) && v.size) || call.conv === c || !!call.conv?.startsWith(c + '.')
   const count = (c: string) => (muted(c) ? 0 : (st.chats[c]?.unread ?? 0))
   const badges = (c: string) => (
     <>
@@ -126,14 +128,22 @@ export function Rail({ st, people, open, go, show, run }: Props) {
     setInvite(false)
     setMenu({ ...at, for: c })
   }
-  const sections = menu ? (st.groups[menu.for] ? groupMenu(menu.for) : st.chats[menu.for] ? dmMenu(menu.for) : []) : []
+  const addMenu: Item[][] = [
+    [
+      { label: 'Create a server', act: () => show({ kind: 'server' }) },
+      { label: 'Join with an invite', act: () => show({ kind: 'join' }) },
+    ],
+    [{ label: 'Create a group', act: () => show({ kind: 'group' }) }],
+  ]
+  const sections = menu ? (menu.for === '+' ? addMenu : st.groups[menu.for] ? groupMenu(menu.for) : st.chats[menu.for] ? dmMenu(menu.for) : []) : []
+  const here = (c: string) => open === c || !!open?.startsWith(c + '.')
 
   const conv = (c: string, label: string, body: ReactNode, extra: string) => (
     <button
       key={c}
-      className={`rail-item ${extra} ${open === c ? 'active' : ''}`}
+      className={`rail-item ${extra} ${here(c) ? 'active' : ''}`}
       aria-label={label}
-      aria-current={open === c ? 'page' : undefined}
+      aria-current={here(c) ? 'page' : undefined}
       aria-haspopup="menu"
       onClick={() => go(c)}
       onContextMenu={openMenu(c)}
@@ -144,6 +154,7 @@ export function Rail({ st, people, open, go, show, run }: Props) {
     </button>
   )
   const dms = railDms(st)
+  const servers = Object.values(st.servers ?? {})
   return (
     <nav className="rail" aria-label="Main">
       <button
@@ -157,8 +168,20 @@ export function Rail({ st, people, open, go, show, run }: Props) {
         <Emblem size={42} />
       </button>
       <div className="rail-groups">
+        {servers.map((v) => conv(v.id, labelOf(v.id, v.name), <GroupEmblem g={v} size={34} />, 'rail-group rail-server'))}
+        {servers.length > 0 && <span className="rail-sep" aria-hidden="true" />}
         {Object.values(st.groups).map((g) => conv(g.id, labelOf(g.id, groupName(g)), <GroupEmblem g={g} size={34} />, 'rail-group'))}
-        <button className="rail-item rail-add" aria-label="Create a group" onClick={() => show({ kind: 'group' })} {...tipFor('Create a group')}>
+        <button
+          className={`rail-item rail-add ${menu?.for === '+' ? 'open' : ''}`}
+          aria-label="Create or join"
+          aria-haspopup="menu"
+          aria-expanded={menu?.for === '+'}
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect()
+            setMenu({ x: r.right + 8, y: r.top, for: '+' })
+          }}
+          {...tipFor('Create or join')}
+        >
           <Icon name="plus" size={20} />
         </button>
         {dms.length > 0 && <span className="rail-sep" aria-hidden="true" />}
@@ -201,7 +224,7 @@ export function Rail({ st, people, open, go, show, run }: Props) {
 }
 
 // A menu at the pointer, kept inside the window. Arrow keys move between items, Escape or a click elsewhere closes it.
-function ContextMenu({ x, y, sections, close }: { x: number; y: number; sections: Item[][]; close: () => void }) {
+export function ContextMenu({ x, y, sections, close }: { x: number; y: number; sections: Item[][]; close: () => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const [at, setAt] = useState({ left: x, top: y })
   useLayoutEffect(() => {
@@ -210,7 +233,7 @@ function ContextMenu({ x, y, sections, close }: { x: number; y: number; sections
   }, [x, y, sections.flat().length])
   useEffect(() => {
     const back = document.activeElement as HTMLElement | null
-    ref.current?.querySelector<HTMLElement>('[role=menuitem]')?.focus()
+    ref.current?.querySelector<HTMLElement>('[role^=menuitem]')?.focus()
     const away = (e: PointerEvent) => !ref.current?.contains(e.target as Node) && close()
     const blur = () => close()
     document.addEventListener('pointerdown', away, true)
@@ -222,7 +245,7 @@ function ContextMenu({ x, y, sections, close }: { x: number; y: number; sections
     }
   }, [])
   const key = (e: KeyboardEvent<HTMLDivElement>) => {
-    const items = [...ref.current!.querySelectorAll<HTMLElement>('[role=menuitem]')]
+    const items = [...ref.current!.querySelectorAll<HTMLElement>('[role^=menuitem]')]
     const i = items.indexOf(document.activeElement as HTMLElement)
     const to = ({ ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: items.length - 1 } as Record<string, number>)[e.key]
     if (e.key === 'Escape' || e.key === 'Tab') return e.preventDefault(), close()
@@ -239,11 +262,13 @@ function ContextMenu({ x, y, sections, close }: { x: number; y: number; sections
             {s.map((it) => (
               <button
                 key={it.label}
-                role="menuitem"
-                className={`context-item ${it.danger ? 'danger' : ''} ${it.sub === false ? 'nested' : ''}`}
-                // An item that unfolds more items keeps the menu open; every other one acts and closes it.
-                onClick={() => (it.act(), it.sub === undefined || it.sub === false ? close() : undefined)}
+                role={it.checked === undefined ? 'menuitem' : 'menuitemcheckbox'}
+                aria-checked={it.checked}
+                className={`context-item ${it.danger ? 'danger' : ''} ${it.sub === false ? 'nested' : ''} ${it.checked === undefined ? '' : 'has-check'}`}
+                // An item that unfolds more items, or a checkable one, keeps the menu open; every other one acts and closes it.
+                onClick={() => (it.act(), (it.sub === undefined || it.sub === false) && it.checked === undefined ? close() : undefined)}
               >
+                {it.checked !== undefined && (it.checked ? <Icon name="check" size={14} /> : <span className="check-space" />)}
                 {it.label}
               </button>
             ))}
