@@ -4032,13 +4032,6 @@ button.member:hover .user {
 .rail-dm:hover {
   border-radius: 50%;
 }
-.rail-sep {
-  flex: none;
-  width: 28px;
-  height: 1px;
-  margin: 2px 0;
-  background: var(--line-strong);
-}
 
 /* A group's name renames in place. */
 .group-name {

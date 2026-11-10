@@ -1,5 +1,5 @@
 // The rail down the left edge: the emblem (Home), servers, groups, direct conversations with at least one message,
-// and a right-click menu for each conversation. Unread messages and missed calls show as a count on its picture.
+// then at the foot + (create or join), Settings and our profile, and a right-click menu for each conversation. Unread messages and missed calls show as a count on its picture.
 import { type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { type Key, type State } from '../shared/protocol'
@@ -169,8 +169,13 @@ export function Rail({ st, people, open, go, show, run }: Props) {
       </button>
       <div className="rail-groups">
         {servers.map((v) => conv(v.id, labelOf(v.id, v.name), <GroupEmblem g={v} size={34} />, 'rail-group rail-server'))}
-        {servers.length > 0 && <span className="rail-sep" aria-hidden="true" />}
         {Object.values(st.groups).map((g) => conv(g.id, labelOf(g.id, groupName(g)), <GroupEmblem g={g} size={34} />, 'rail-group'))}
+        {dms.map((c) => {
+          const k = otherIn(c, st.me)
+          return conv(c, labelOf(c, people.name(k)), <Avatar k={k} p={people.prof(k)} size={34} online={people.isOnline(k)} />, 'rail-dm')
+        })}
+      </div>
+      <div className="rail-foot">
         <button
           className={`rail-item rail-add ${menu?.for === '+' ? 'open' : ''}`}
           aria-label="Create or join"
@@ -184,13 +189,6 @@ export function Rail({ st, people, open, go, show, run }: Props) {
         >
           <Icon name="plus" size={20} />
         </button>
-        {dms.length > 0 && <span className="rail-sep" aria-hidden="true" />}
-        {dms.map((c) => {
-          const k = otherIn(c, st.me)
-          return conv(c, labelOf(c, people.name(k)), <Avatar k={k} p={people.prof(k)} size={34} online={people.isOnline(k)} />, 'rail-dm')
-        })}
-      </div>
-      <div className="rail-foot">
         <button className="rail-item" aria-label="Settings" onClick={() => show({ kind: 'settings' })} {...tipFor('Settings')}>
           <Icon name="settings" size={20} />
         </button>
