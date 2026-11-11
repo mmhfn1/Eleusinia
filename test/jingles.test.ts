@@ -4,6 +4,7 @@ import { JINGLES, RING_MS, loopNow } from '../src/shared/jingles'
 test('every sound is different from every other', () => {
   const tunes = Object.values(JINGLES).map((n) => JSON.stringify(n))
   expect(new Set(tunes).size).toBe(tunes.length)
+  for (const name of ['stream', 'viewerJoin', 'viewerLeave', 'poke', 'moved'] as const) expect(JINGLES[name].length).toBeGreaterThan(0)
   for (const notes of Object.values(JINGLES)) for (const n of notes) expect(n.f > 20 && n.d > 0 && n.t >= 0).toBe(true)
 })
 

@@ -55,10 +55,17 @@ export type Settings = {
   suggest?: boolean // be suggested to people typing the start of our username (announced while online); off unless turned on
   activity?: ActivitySettings // what we are playing, shared with friends and group members (shared/activity.ts); off unless turned on
   nicknames?: Record<Key, string> // our own names for people, shown instead of theirs; never sent to anyone
-  muted?: Record<string, boolean> // conversations whose unread count and call notices are hidden
+  muted?: Record<string, boolean | number> // conversations whose unread count and call notices are hidden; a number is when the mute ends
   pinned?: string[] // direct conversations kept at the top of the rail's list
   closed?: Record<string, number> // direct conversations taken off the rail, and when: one comes back with a newer message
+  ignored?: Key[] // people whose DM notifications are silenced (unread off the rail badge, pokes and DM rings quiet); counted in the window
+  localMuted?: Key[] // people whose voice we stop playing, for us only
+  noVideo?: Key[] // people whose camera and screen we stop receiving
 }
+export const KEY_SETTINGS = ['ignored', 'localMuted', 'noVideo'] as const
+export const MAX_KEY_SETTING = 5000
+// A key list setting from the window: keys only, no repeats, capped
+export const isKeyList = (x: unknown): x is Key[] => Array.isArray(x) && x.length <= MAX_KEY_SETTING && x.every(isKey) && new Set(x).size === x.length
 
 export type State = {
   me: Key
@@ -91,6 +98,7 @@ export type ServerView = {
   channels: { id: string; name: string; kind: 'text' | 'voice' | 'category'; parent?: string; topic?: string; userLimit?: number; position: number; overrides: Record<string, { allow: ServerPerm[]; deny: ServerPerm[] }> }[]
   invites: Record<string, { id: string; by: Key; expires?: number; maxUses?: number; uses: number; revoked: boolean }>
   bans: Key[]
+  voice: Record<Key, { mute?: true; deafen?: true }> // server mute and deafen (voice.mute / voice.deafen ops)
   mine: { rank: number; perms: ServerPerm[]; channels: Record<string, ServerPerm[]> }
 }
 
@@ -136,6 +144,9 @@ export type Wire =
   | { t: 'joinOk'; server: string }
   | { t: 'joinNo'; server: string; why: string }
   | { t: 'poke'; server: string; channel: string } // a member asks us to join that voice channel's call; never logged
+  // An invite card for a link: asked of a linked contact named in it, with the join proof, so only link holders learn it
+  | { t: 'inviteInfo'; server: string; invite: string; key: Key; proof: string }
+  | { t: 'inviteCard'; server: string; card: unknown }
 
 export type Event =
   | { type: 'state'; state: State }
@@ -147,6 +158,8 @@ export type Event =
   | { type: 'window'; maximized: boolean } // the window was maximized or restored, for the title bar's button
   | { type: 'file'; file: FileState }
   | { type: 'poke'; from: Key; server: string; channel: string } // a checked poke (Wire 'poke'), memory only
+  // A voice.move or voice.disconnect aimed at us, accepted while we run (never from old history replayed at start)
+  | { type: 'voiceOrder'; server: string; kind: 'move' | 'disconnect'; channel?: string; by: Key }
 
 export const MAX_TEXT = 4000
 

@@ -6,8 +6,8 @@ import * as call from './call'
 import { ActivityLine } from './Activity'
 import { Chat } from './Chat'
 import { Oculus, ShareDialog, Stage, VoiceMark, useSpeaking } from './Media'
-import { type People, type Run, api, card } from './common'
-import { ContextMenu, type Item } from './Rail'
+import { type Modal, type People, type Run, api, card, isMuted } from './common'
+import { ContextMenu, type Item, useMenus } from './Rail'
 import { ServerSettings } from './ServerSettings'
 import { CopyButton, Dialog, GroupEmblem, Icon, Splitter, useWidth, Avatar } from './ui'
 
@@ -28,6 +28,8 @@ const rankOf = (sv: ServerView, k: Key) => (k === sv.owner ? Infinity : Math.max
 // A name takes the colour of the highest of its roles that has one, as on Discord.
 const colorOf = (sv: ServerView, k: Key) => hex([...sv.roles].reverse().find((r) => r.color && sv.members[k]?.roles.includes(r.id))?.color ?? 0)
 const locked = (sv: ServerView, c: Channel) => !!c.overrides[sv.id]?.deny.includes('viewChannel')
+// Someone we may act on: not ourselves, not the owner, and below our highest role (the owner is above everyone).
+export const below = (sv: ServerView, me: Key, k: Key) => k !== me && k !== sv.owner && (sv.owner === me || rankOf(sv, k) < sv.mine.rank)
 const voiceIn = (conv: string, me: Key) => [...(call.active.get(conv) ?? []), ...(call.conv === conv ? [me] : [])]
 
 // The channel a server opens on: the one asked for, else the last one open here, else its first text channel.
@@ -40,9 +42,9 @@ export function channelOf(sv: ServerView, asked?: string) {
   return (all.find((c) => c.kind === 'text') ?? all.find((c) => c.kind === 'voice'))?.id
 }
 
-type Props = { st: State; sv: ServerView; channel?: string; people: People; run: Run; go: (c: string | null) => void }
+type Props = { st: State; sv: ServerView; channel?: string; people: People; run: Run; go: (c: string | null) => void; show: (m: Modal) => void }
 
-export function Server({ st, sv, channel, people: everyone, run, go }: Props) {
+export function Server({ st, sv, channel, people: everyone, run, go, show }: Props) {
   const [left, setLeft] = useWidth('server', 260)
   const [right, setRight] = useWidth('members', 230)
   const [menu, setMenu] = useState<{ x: number; y: number; for: Key | null } | null>(null)
@@ -55,6 +57,7 @@ export function Server({ st, sv, channel, people: everyone, run, go }: Props) {
   // Our own nickname for someone wins, then their nickname on this server, then their name.
   const name = (k: Key) => st.settings.nicknames?.[k] || sv.members[k]?.nick || everyone.name(k)
   const people: People = { ...everyone, name }
+  const menus = useMenus({ st, people, open: `${sv.id}.${channelOf(sv, channel)}`, go, show, run })
   const cid = channelOf(sv, channel)
   if (cid) lastChannel.set(sv.id, cid)
   const ch = sv.channels.find((c) => c.id === cid)
@@ -63,9 +66,6 @@ export function Server({ st, sv, channel, people: everyone, run, go }: Props) {
   const act = (kind: string, body: unknown) => run(api.call('serverAct', sv.id, kind, body))
   const inCall = call.conv === conv
   const ourCall = call.conv?.startsWith(sv.id + '.') ? sv.channels.find((c) => `${sv.id}.${c.id}` === call.conv) : undefined
-
-  // Someone we may act on: not ourselves, not the owner, and below our highest role (the owner is above everyone).
-  const below = (k: Key) => k !== me && k !== sv.owner && (owner || rankOf(sv, k) < sv.mine.rank)
   function memberMenu(k: Key): Item[][] {
     const mine = sv.members[k]?.roles ?? []
     const grantable = sv.roles.map((r, i) => ({ r, i })).filter(({ i }) => i > 0 && (owner || i < sv.mine.rank))
@@ -75,19 +75,19 @@ export function Server({ st, sv, channel, people: everyone, run, go }: Props) {
       [
         { label: 'Profile', act: () => people.show(k) },
         ...(k !== me && st.friends[k] === 'friend' ? [{ label: 'Message', act: () => go(dmId(me, k)) }] : []),
-        ...((k === me ? perms.has('changeNickname') : perms.has('manageNicknames') && below(k)) ? [{ label: 'Change nickname', act: () => setAsk({ nick: k }) }] : []),
+        ...((k === me ? perms.has('changeNickname') : perms.has('manageNicknames') && below(sv, me, k)) ? [{ label: 'Change nickname', act: () => setAsk({ nick: k }) }] : []),
       ],
-      perms.has('manageRoles') && below(k) && grantable.length
+      perms.has('manageRoles') && below(sv, me, k) && grantable.length
         ? [
             { label: rolesOpen ? 'Roles ▾' : 'Roles ▸', act: () => setRolesOpen(!rolesOpen), sub: true },
             ...(rolesOpen ? grantable.reverse().map(({ r }) => ({ label: r.name, act: () => toggle(r.id), checked: mine.includes(r.id) })) : []),
           ]
         : [],
       [
-        ...(perms.has('kick') && below(k) && sv.members[k]
+        ...(perms.has('kick') && below(sv, me, k) && sv.members[k]
           ? [{ label: `Kick ${n}`, danger: true, act: () => setAsk({ title: `Kick ${n}?`, body: 'They leave the server. They can join again with an invite.', yes: 'Kick', act: () => act('kick', { key: k }) }) }]
           : []),
-        ...(perms.has('ban') && below(k)
+        ...(perms.has('ban') && below(sv, me, k)
           ? [{ label: `Ban ${n}`, danger: true, act: () => setAsk({ title: `Ban ${n}?`, body: 'They leave the server and cannot join again, not even with an invite, until they are unbanned.', yes: 'Ban', act: () => act('ban', { key: k }) }) }]
           : []),
       ],
@@ -130,8 +130,7 @@ export function Server({ st, sv, channel, people: everyone, run, go }: Props) {
     const here = voiceIn(`${sv.id}.${c.id}`, me)
     // A full voice channel is not joined (0 or none: no limit); its chat still opens
     const full = voice && !!c.userLimit && here.length >= c.userLimit && call.conv !== `${sv.id}.${c.id}`
-    const muted = st.settings.muted
-    const unread = muted?.[sv.id] || muted?.[`${sv.id}.${c.id}`] ? 0 : (st.chats[`${sv.id}.${c.id}`]?.unread ?? 0)
+    const unread = isMuted(st, sv.id) || isMuted(st, `${sv.id}.${c.id}`) ? 0 : (st.chats[`${sv.id}.${c.id}`]?.unread ?? 0)
     return (
       <div key={c.id} className="channel-row">
         <button
@@ -139,6 +138,8 @@ export function Server({ st, sv, channel, people: everyone, run, go }: Props) {
           aria-current={c.id === cid ? 'page' : undefined}
           aria-label={`${c.name}${voice ? `, voice channel${here.length ? `, ${here.length} in it` : ''}` : ''}${unread ? `, ${unread} unread` : ''}${voice ? (full ? ', full' : ': join') : ''}`}
           title={full ? 'This voice channel is full' : undefined}
+          aria-haspopup="menu"
+          onContextMenu={menus.open(`${sv.id}.${c.id}`)}
           onClick={() => (open(c.id), voice && !full && call.conv !== `${sv.id}.${c.id}` && run(call.join(`${sv.id}.${c.id}`)))}
         >
           <Icon name={voice ? 'volume' : 'hash'} size={16} />
@@ -165,7 +166,7 @@ export function Server({ st, sv, channel, people: everyone, run, go }: Props) {
             )}
           </span>
         )}
-        {voice && here.length > 0 && <VoicePeople sv={sv} keys={here} st={st} people={people} conv={`${sv.id}.${c.id}`} />}
+        {voice && here.length > 0 && <VoicePeople sv={sv} keys={here} st={st} people={people} conv={`${sv.id}.${c.id}`} menu={menus.open} />}
       </div>
     )
   }
@@ -185,12 +186,6 @@ export function Server({ st, sv, channel, people: everyone, run, go }: Props) {
     ['Offline', undefined, keys.filter((k) => !people.isOnline(k))],
   ]
 
-  const control = (label: string, icon: Parameters<typeof Icon>[0]['name'], onClick: () => void, pressed?: boolean, extra = '') => (
-    <button className={`round ${pressed ? 'on' : ''} ${extra}`} aria-pressed={pressed} title={label} onClick={onClick}>
-      <Icon name={icon} size={18} />
-      <span className="visually-hidden">{label}</span>
-    </button>
-  )
   const head: ReactNode = ch && (
     <>
       <Icon name={ch.kind === 'voice' ? 'volume' : 'hash'} size={22} />
@@ -206,7 +201,7 @@ export function Server({ st, sv, channel, people: everyone, run, go }: Props) {
 
   return (
     <>
-      <aside className="server-side" style={{ width: left }} aria-label={sv.name}>
+      <aside className="server-side side" style={{ width: left }} aria-label={sv.name}>
         <button className={`server-head ${menu?.for === null ? 'open' : ''}`} aria-haspopup="menu" aria-expanded={menu?.for === null} onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect()
           setMenu({ x: r.left + 8, y: r.bottom + 4, for: null })
@@ -229,23 +224,6 @@ export function Server({ st, sv, channel, people: everyone, run, go }: Props) {
             ))}
           {!all.length && <p className="quiet">No channels you can see yet.</p>}
         </nav>
-        {ourCall && (
-          <div className="voice-dock">
-            <span className="row-text">
-              <span className="row-title voice-live">Voice connected</span>
-              <span className="row-sub">
-                {ourCall.name} · {sv.name}
-              </span>
-            </span>
-            <div className="call-controls" role="toolbar" aria-label="Call controls">
-              {control(call.muted || call.deafened ? 'Unmute' : 'Mute', call.muted || call.deafened ? 'micOff' : 'mic', call.toggleMute, call.muted || call.deafened)}
-              {control(call.deafened ? 'Undeafen' : 'Deafen', call.deafened ? 'headphonesOff' : 'headphones', call.toggleDeafen, call.deafened)}
-              {control(call.sharing() ? 'Stream settings' : 'Share screen', 'screen', () => setShare(true), !!call.sharing())}
-              {call.sharing() && control('Stop sharing', 'screenOff', () => call.stopShare())}
-              {control('Leave call', 'phone', call.leave, undefined, 'leave')}
-            </div>
-          </div>
-        )}
       </aside>
       <Splitter label="Resize channels sidebar" width={left} set={setLeft} dir={1} />
 
@@ -258,6 +236,8 @@ export function Server({ st, sv, channel, people: everyone, run, go }: Props) {
           people={people}
           run={run}
           home={() => go(null)}
+          go={go}
+          menu={menus.open(conv)}
           head={head}
           about={
             ch.kind === 'voice'
@@ -316,6 +296,7 @@ export function Server({ st, sv, channel, people: everyone, run, go }: Props) {
 
       {menu && <ContextMenu x={menu.x} y={menu.y} sections={menu.for === null ? headMenu : memberMenu(menu.for)} close={() => setMenu(null)} />}
       {share && <ShareDialog close={() => setShare(false)} />}
+      {menus.node}
       {ask && 'invite' in ask && <InviteDialog sv={sv} close={() => setAsk(null)} />}
       {ask && 'poke' in ask && sv.channels.some((c) => c.id === ask.poke) && (
         <PokeDialog
@@ -348,12 +329,12 @@ export function Server({ st, sv, channel, people: everyone, run, go }: Props) {
 }
 
 // Who is in a voice channel, under it, with a speaking ring while they speak (in our own call).
-function VoicePeople({ sv, keys, st, people, conv }: { sv: ServerView; keys: Key[]; st: State; people: People; conv: string }) {
+function VoicePeople({ sv, keys, st, people, conv, menu }: { sv: ServerView; keys: Key[]; st: State; people: People; conv: string; menu: (target: string) => (e: MouseEvent<HTMLElement>) => void }) {
   useSpeaking()
   return (
     <div className="voice-people">
       {keys.map((k) => (
-        <button key={k} className={`voice-person member${call.conv === conv && call.speaking.has(k) ? ' speaking' : ''}`} onClick={(e) => people.show(k, e.currentTarget)} onContextMenu={card(people.show, k)}>
+        <button key={k} className={`voice-person member${call.conv === conv && call.speaking.has(k) ? ' speaking' : ''}`} onClick={(e) => people.show(k, e.currentTarget)} aria-haspopup="menu" onContextMenu={menu(`${k} ${conv}`)}>
           <Avatar k={k} p={people.prof(k)} size={24} />
           <span className="row-title">
             <span className="user" style={{ color: colorOf(sv, k) }}>
@@ -361,7 +342,10 @@ function VoicePeople({ sv, keys, st, people, conv }: { sv: ServerView; keys: Key
             </span>
             {k === st.me && <span className="row-sub"> (you)</span>}
           </span>
-          {k === st.me ? <VoiceMark muted={call.muted} deafened={call.deafened} /> : <VoiceMark {...call.voices.get(k)} />}
+          <VoiceMark
+            muted={(k === st.me ? call.muted : call.voices.get(k)?.muted) || !!sv.voice[k]?.mute}
+            deafened={(k === st.me ? call.deafened : call.voices.get(k)?.deafened) || !!sv.voice[k]?.deafen}
+          />
         </button>
       ))}
     </div>
@@ -437,7 +421,7 @@ const USES = [0, 1, 5, 10, 25, 100]
 
 // Asks members already in the server to join a voice channel: a poke, not a link. Those in it are not offered; the
 // node refuses anyone who may not view or connect to it, and says when someone could not be reached in 2 minutes.
-function PokeDialog({ sv, ch, keys, people, close }: { sv: ServerView; ch: Channel; keys: Key[]; people: People; close: () => void }) {
+export function PokeDialog({ sv, ch, keys, people, close }: { sv: ServerView; ch: Channel; keys: Key[]; people: People; close: () => void }) {
   const [said, setSaid] = useState<Record<Key, string>>({})
   const tell = (k: Key, text: string) => setSaid((s) => ({ ...s, [k]: text }))
   const poke = (k: Key) => {
@@ -482,7 +466,7 @@ function PokeDialog({ sv, ch, keys, people, close }: { sv: ServerView; ch: Chann
 }
 
 // An invite link to the server, with how long it works and how often.
-function InviteDialog({ sv, close }: { sv: ServerView; close: () => void }) {
+export function InviteDialog({ sv, close }: { sv: ServerView; close: () => void }) {
   const [expires, setExpires] = useState(7 * 86400e3)
   const [uses, setUses] = useState(0)
   const [link, setLink] = useState('')

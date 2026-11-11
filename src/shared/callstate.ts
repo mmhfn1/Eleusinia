@@ -179,3 +179,18 @@ export function rejoinFrom(saved: string | null, now: number): string | null {
     return null
   }
 }
+
+// Each window load joins with a random session id (`s` in `join`). A join from a session other than the one we
+// know (or the first we hear while a connection already exists) comes from a restarted copy: our connection to the
+// old one only looks alive until it times out, so it is dropped at once. Older copies send none and keep the old way.
+export const restarted = (known: string | undefined, got: unknown) =>
+  typeof got === 'string' && got.length > 0 && got.length <= 64 && got !== known
+
+// A viewer opening or closing our stream, from their `want` for our screen leaving or returning to `off` ('audio',
+// a joined stream in a hidden window, still counts as watching). Nothing while we share nothing: a stopped share
+// clears the wants, and the viewers' own `off` that follows is not someone leaving.
+export function viewerCue(was: string | undefined, now: string, sharing: boolean): 'viewerJoin' | 'viewerLeave' | null {
+  const watched = (was ?? 'off') !== 'off'
+  if (!sharing || watched === (now !== 'off')) return null
+  return watched ? 'viewerLeave' : 'viewerJoin'
+}

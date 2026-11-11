@@ -204,7 +204,8 @@ const seen = (cond, ms) => `new Promise((r) => { const t0 = Date.now(); const i 
 const pop = (fn) => `(() => { const p = document.querySelector('.profile-pop.placed'); return !!p && (${fn})(p) })()`
 const expandPop = `document.querySelector('.profile-pop .pop-expand').click()`
 const escape = `document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`
-const press = (label) => `[...document.querySelectorAll('aside.voice button')].find(x => x.textContent.includes('${label}')).click()`
+// Call controls live in the bars under the rail (mute, deafen, camera, share, Disconnect); joining in the left column
+const press = (label) => `[...document.querySelectorAll('.bars button'), ...document.querySelectorAll('aside.voice button')].find(x => x.textContent.includes('${label}')).click()`
 // Chromium's fake microphones beep the same tone at the same moments, so with both ends live Ann's echo canceller
 // can take her beep for an echo of Bob's and remove it. Bob stays muted while a check needs to hear Ann.
 async function bobQuiet(p, fn) {
@@ -224,7 +225,7 @@ async function relayedRun(ownTitles) {
   console.log('--- Relayed: Ann and Bob link only through Cy')
   // Only Cy relays: being reached through a friend needs no setting
   for (const [p, n] of [[c, 'Cy']]) {
-    await p.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
+    await p.ev(`document.querySelector('.user-bar button[title="Settings"]').click()`)
     await until(`${n} turns on relaying for friends in Settings`, () =>
       p.ev(`(() => { const l = [...document.querySelectorAll('dialog[open] label')].find((x) => x.textContent.includes('Relay for friends')); if (!l) return false; const i = l.querySelector('input'); if (!i.checked) i.click(); return i.checked })()`), 10)
     await p.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
@@ -288,7 +289,8 @@ const annGame = {
 }
 // And a folder standing in for CS2's cfg folder, where Settings → Set up writes the game's file.
 const annGsiCfg = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-gsi-')) // one subfolder per game
-const a = await launch(9231, undefined, { ...strictEnv, ELEUSINIA_TEST_ACTIVITY: JSON.stringify(annGame), ELEUSINIA_TEST_GSI_CFG: annGsiCfg })
+const annEnv = { ...strictEnv, ELEUSINIA_TEST_ACTIVITY: JSON.stringify(annGame), ELEUSINIA_TEST_GSI_CFG: annGsiCfg }
+let a = await launch(9231, undefined, annEnv)
 // Bob plays Destiny 2 and links a stand-in for bungie.net (test/fake-bungie.mjs) that approves at once.
 const bobGame = { name: 'Destiny 2', source: 'steam', app: 1085660, played: 211683 }
 const bungieFake = await fakeBungie()
@@ -336,7 +338,7 @@ try {
   }
 
   console.log('--- Friend ID and Settings sections, bitrate (i)')
-  await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
+  await a.ev(`document.querySelector('.user-bar button[title="Settings"]').click()`)
   const layout = await a.ev(`(() => {
     const sec = document.querySelector('section.friend-id'), set = document.querySelector('dialog[open]')
     const tip = document.getElementById('bitrate-tip'), icon = document.querySelector('.info-icon[aria-describedby=bitrate-tip]')
@@ -404,7 +406,7 @@ try {
   for (const p of [a, b]) await p.ev(`document.querySelector('.home.back').click()`)
 
   console.log('--- Activity: a CS2 match, through Game State Integration')
-  await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
+  await a.ev(`document.querySelector('.user-bar button[title="Settings"]').click()`)
   // Settings → Activity: the Steam tile opens a switch per game
   await until('Settings shows the Steam and Bungie.net tiles', () => a.ev(`!!document.querySelector('.connection[data-k="steam"]') && !!document.querySelector('.connection[data-k="bungie"]')`), 10)
   await a.ev(`document.querySelector('.connection[data-k="steam"]').click()`)
@@ -456,7 +458,7 @@ try {
     await b.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
     await b.shot('home-cs2')
     // Settings shows CS2 as live while the game sends
-    await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
+    await a.ev(`document.querySelector('.user-bar button[title="Settings"]').click()`)
     await until('Settings has the Steam tile', () => a.ev(`!!document.querySelector('.connection[data-k="steam"]')`), 10)
     await a.ev(`document.querySelector('.connection[data-k="steam"]').click()`)
     await until('the Steam panel shows CS2 as live', () => a.ev(`document.querySelector('.connection-game[data-game="cs2"] .gsi-state.live')?.textContent === 'Live'`), 10)
@@ -468,7 +470,7 @@ try {
   }
 
   console.log('--- Activity: a Dota 2 match, through the same Game State Integration server')
-  await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
+  await a.ev(`document.querySelector('.user-bar button[title="Settings"]').click()`)
   await until('Settings shows the Steam tile with CS2 live', () => a.ev(`document.querySelector('.connection[data-k="steam"] .connection-state')?.textContent === 'CS2'`), 10)
   await a.ev(`document.querySelector('.connection[data-k="steam"]').click()`)
   const dotaSwitch = `document.querySelector('input[aria-label="Dota 2 live match details"]')`
@@ -519,7 +521,7 @@ try {
 
   console.log('--- Activity: Destiny 2, with a linked Bungie.net account')
   const bobRowA = `[...document.querySelectorAll('.online .row-button')].find((x) => x.textContent.includes('Bob'))`
-  await b.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
+  await b.ev(`document.querySelector('.user-bar button[title="Settings"]').click()`)
   const bungieTile = `document.querySelector('.connection[data-k="bungie"]')`
   await until('Settings offers to link Bungie.net', () => b.ev(`${bungieTile}?.textContent.includes('Link')`), 10)
   await b.ev(`${bungieTile}.click()`)
@@ -678,7 +680,7 @@ try {
   // A call that comes and goes while B is elsewhere counts too
   await a.ev(press('Start call'))
   await until('B sees Ann calling', () => b.ev(`!!${railDm}?.querySelector('.rail-badge')`), 15)
-  await a.ev(press('Leave call'))
+  await a.ev(press('Disconnect'))
   await until('the missed call makes it 3', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '3'`), 15)
   await b.ev(rightClick(railDm))
   await b.ev(item('Mute'))
@@ -688,11 +690,12 @@ try {
   await until('unmuting shows it again', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '3'`), 5)
   await b.ev(`${railDm}.click()`)
   await until('opening the DM reads it: the count is gone', () => b.ev(`!!document.querySelector('.chat-person') && !${railDm}.querySelector('.rail-count')`), 5)
-  // Shown but not focused (on a second screen during a game) is not read
-  await b.focused(false)
+  // Shown but not focused (on a second screen during a game) is not read. The page is told it has no focus, so the
+  // step does not depend on which window the system happens to focus
+  await b.ev(`document.hasFocus = () => false`)
   await a.ev(say('still there?'))
   await until('in an unfocused window, the open DM still counts a new message', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '1'`), 15)
-  await b.focused(true)
+  await b.ev(`delete document.hasFocus`) // back to the real one, which focus emulation answers with true
   await b.ev(`window.dispatchEvent(new Event('focus'))`)
   await until('focusing the window reads it', () => b.ev(`!${railDm}.querySelector('.rail-count')`), 5)
 
@@ -760,6 +763,14 @@ try {
   console.log('ok   nothing of the stream reaches B before B joins')
   await b.ev(joinStream)
   await until("B shows the shared window large, at 720p", () => b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight === 720`), 30)
+  const heardSound = (p, s) => p.ev(`api.diagnostics().then((d) => d.events.some((e) => e.text.startsWith('sound: ${s}')))`)
+  await until('B heard the stream start, and A heard a viewer join it', async () => (await heardSound(b, 'stream')) && (await heardSound(a, 'viewerJoin')), 10)
+  // Picture in picture: going Home, B keeps watching in a corner; Back to call brings the stage back
+  await b.ev(`document.querySelector('.rail-mark').click()`)
+  await until('on Home, the stream plays on in the floating player', () => b.ev(`document.querySelector('.pip video')?.videoHeight > 0`), 10)
+  await b.shot('pip')
+  await b.ev(`document.querySelector('.pip .pip-back').click()`)
+  await until('Back to call brings the stage back, and the floating player goes', () => b.ev(`!!document.querySelector('.stage .screen.big video') && !document.querySelector('.pip')`), 10)
   // Full screen: the button enters it, and follows the document when it ends another way (Esc, F11).
   const fullBtn = `document.querySelector('.stage .screen.big .screen-full')`
   await b.ev(`${fullBtn}.click()`, true)
@@ -787,7 +798,7 @@ try {
   await until("Ann's camera plays in her tile under the stream on B", () => b.ev(`[...${peopleRow}.querySelectorAll('.person-tile')].some((t) => t.querySelector('video')?.videoHeight > 0)`), 30)
   await b.shot('people-row')
   await until('sharing with a camera on, A can see its Turn off camera control', () =>
-    a.ev(`(() => { const b = [...document.querySelectorAll('aside.voice .call-controls button')].find((x) => x.textContent.includes('Turn off camera')); if (!b) return false; const r = b.getBoundingClientRect(), p = document.querySelector('aside.voice').getBoundingClientRect(); return r.width > 0 && r.left >= p.left && r.right <= p.right })()`), 5)
+    a.ev(`(() => { const b = [...document.querySelectorAll('.voice-bar button')].find((x) => x.textContent.includes('Turn off camera')); if (!b) return false; const r = b.getBoundingClientRect(), p = document.querySelector('.bars').getBoundingClientRect(); return r.width > 0 && r.left >= p.left && r.right <= p.right })()`), 5)
   await a.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent.includes('Turn off camera')).click()`)
   await until('the stage bar turns the camera off, and the share goes on', async () =>
     !(await a.ev(`!!${peopleRow}.querySelector('.person-tile video')`)) && (await a.ev(`!!document.querySelector('.stage .sharing-badge')`)) && b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight > 0`), 10)
@@ -940,7 +951,7 @@ try {
   if (await a.ev(`api.call('state').then((s) => !!Object.keys(s.settings.hotkeys ?? {}).length)`)) throw new Error('a hotkey was bound by default')
   console.log('ok   no hotkeys are bound by default')
   // Set them the way a person would: Settings, Set, press the keys.
-  await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
+  await a.ev(`document.querySelector('.user-bar button[title="Settings"]').click()`)
   const order = await a.ev(`(() => { const t = document.querySelector('.audio-settings').textContent; return ['Speakers', 'Master volume', 'Sound volume', 'Microphone', 'Mic sensitivity', 'Voice bitrate'].map((x) => t.indexOf(x)) })()`)
   if (order.some((n, i) => n < 0 || (i && n < order[i - 1]))) throw new Error('Audio settings are not in the order Speakers, Master volume, Sound volume, Microphone, Mic sensitivity, Voice bitrate: ' + order)
   console.log('ok   Settings: Speakers then output volume, Microphone then mic sensitivity, then bitrate')
@@ -1029,7 +1040,7 @@ try {
   await until('B sees a muted mark to the right of Ann', () => b.ev(`(() => { const r = [...document.querySelectorAll('.caller')].find((x) => x.textContent.includes('Ann')); return !!r?.querySelector('.row-title .voice-mark[title=Muted]') })()`), 10)
   await a.ev(press('Deafen'))
   await until('A deafened: Deafened shown, both buttons pressed, Bob silenced locally', () =>
-    a.ev(`document.querySelector('.callers').textContent.includes('Deafened') && [...document.querySelectorAll('aside.voice button[aria-pressed=true]')].length === 2 && [...document.querySelectorAll('audio')].every(x => x.muted)`), 5)
+    a.ev(`document.querySelector('.callers').textContent.includes('Deafened') && [...document.querySelectorAll('.user-bar button[aria-pressed=true]')].length === 2 && [...document.querySelectorAll('audio')].every(x => x.muted)`), 5)
   await until('B sees a deafened mark instead', () => b.ev(`!!document.querySelector('.caller .row-title .voice-mark[title=Deafened]')`), 10)
   await a.ev(press('Undeafen'))
   await until('A undeafened: back to muted only', () => a.ev(`!document.querySelector('.callers').textContent.includes('Deafened') && document.querySelector('.callers').textContent.includes('Muted')`), 5)
@@ -1037,10 +1048,10 @@ try {
   const played = await sounds(a)
   if (!['deafen', 'undeafen'].every((x) => played.includes(x))) throw new Error('no deafen or undeafen sound')
   console.log('ok   A heard each change: ' + played.join(', '))
-  await a.ev(press('Leave call'))
+  await a.ev(press('Disconnect'))
   await until('B sees Ann leave', () => b.ev(`document.querySelector('.callers')?.textContent.includes('Waiting')`))
   await until('B hears her leave', async () => (await sounds(b)).includes('leave'), 5)
-  await b.ev(press('Leave call'))
+  await b.ev(press('Disconnect'))
 
   console.log('--- Groups')
   await a.ev(`document.querySelector('.rail-mark').click()`)
@@ -1087,8 +1098,8 @@ try {
   await b.ev(press('Join call'))
   await until('B and Cy, never linked before, connect for the call', async () =>
     (await b.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Cy')`)) && c.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Bob')`), 45)
-  await b.ev(press('Leave call'))
-  await c.ev(press('Leave call'))
+  await b.ev(press('Disconnect'))
+  await c.ev(press('Disconnect'))
 
   console.log('--- Resizable sidebars')
   const widths = await a.ev(`(() => {
@@ -1162,7 +1173,7 @@ try {
   const bobId = await b.ev(`api.call('state').then((s) => s.me)`)
   const handles = await Promise.all([a, b, c].map((p) => p.ev(`api.call('state').then((s) => s.profile.handle)`)))
   const leaks = (text) => [annId, bobId, cyId, ...handles].filter((x) => text.includes(x))
-  await a.ev(`document.querySelector('.rail-item[aria-label="Settings"]').click()`)
+  await a.ev(`document.querySelector('.user-bar button[title="Settings"]').click()`)
   await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Report a problem').click()`)
   await until('A opens Report a problem, all diagnostics chosen for a problem', () =>
     a.ev(`(() => { const d = document.querySelector('dialog.report-dialog[open]'); return !!d && [...d.querySelectorAll('.report-share input')].slice(0, 4).every((x) => x.checked) })()`), 5)
@@ -1203,6 +1214,10 @@ try {
 
   console.log('--- Servers')
   await a.ev(`document.querySelectorAll('dialog[open]').forEach((d) => d.close())`)
+  await a.ev(`document.querySelector('.rail-mark').click()`)
+  await until('out of a call, the user bar sits under the rail and the left column, and no voice bar', () =>
+    a.ev(`(() => { const u = document.querySelector('.user-bar')?.getBoundingClientRect(), s = document.querySelector('aside.side').getBoundingClientRect(); return !!u && Math.abs(u.right - s.right) < 2 && u.left < 2 && !document.querySelector('.voice-bar') && !document.querySelector('.rail-item[aria-label="Settings"]') })()`), 5)
+  await a.shot('bars-home')
   const menuItem = (label) => `[...document.querySelectorAll('.context-menu [role^=menuitem]')].find((i) => i.textContent === '${label}').click()`
   const typeIn = (sel, v) => `(() => { const i = document.querySelector('${sel}'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ${JSON.stringify(v)}); i.dispatchEvent(new Event('input', { bubbles: true })); i.form.requestSubmit() })()`
   const channel = (name) => `[...document.querySelectorAll('.channel')].find((x) => x.querySelector('.channel-name')?.textContent === '${name}')`
@@ -1246,18 +1261,38 @@ try {
   await until("Ann's server tile counts Bob's message in #plans, and #plans is bold with a count", () =>
     a.ev(`document.querySelector('.rail-server .rail-count')?.textContent === '1' && ${channel('plans')}.classList.contains('unread') && ${channel('plans')}.querySelector('.channel-count')?.textContent === '1'`), 30)
   await a.shot('server-unread')
+  // Right-click a channel: its menu, with Mute channel folded until clicked
+  await a.ev(`${channel('general')}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 160, clientY: 160 }))`)
+  await until('right-clicking #general shows Mark as read, Mute channel ▸, Copy link, Edit, Duplicate, Invite people and Delete channel', () =>
+    a.ev(`JSON.stringify([...document.querySelectorAll('.context-menu .context-section')].map((s) => [...s.querySelectorAll('[role=menuitem]')].map((i) => i.textContent))) === '[["Mute channel ▸","Copy link"],["Edit channel","Duplicate channel","Invite people"],["Delete channel"]]'`), 5)
+  await a.ev(menuItem('Mute channel ▸'))
+  await until('Mute channel unfolds its times', () => a.ev(`['15 minutes', '1 hour', '8 hours', 'Until I turn it back on'].every((l) => [...document.querySelectorAll('.context-menu [role=menuitem]')].some((i) => i.textContent === l))`), 5)
+  await sleep(200)
+  await a.shot('menu-channel')
+  await a.ev(menuItem('1 hour'))
+  await until('muting #general for an hour is saved with its end time', () => a.ev(`api.call('state').then((s) => Object.values(s.settings.muted ?? {}).some((v) => typeof v === 'number' && v > Date.now() + 3500e3))`), 5)
   await a.ev(`${channel('plans')}.click()`)
   await until('opening #plans reads it: the count and the bold are gone', () => a.ev(`!document.querySelector('.rail-server .rail-count') && !${channel('plans')}.classList.contains('unread')`), 10)
   await b.ev(`document.querySelector('.channel-tools button[aria-label^="Open Lounge"]').click()`)
   await until("Bob opens Lounge's own text chat without joining its call", () =>
-    b.ev(`${headIs('Lounge')} && document.querySelector('.msgs').textContent.includes("Lounge's text chat is new") && !document.querySelector('.voice-dock')`), 5)
+    b.ev(`${headIs('Lounge')} && document.querySelector('.msgs').textContent.includes("Lounge's text chat is new") && !document.querySelector('.voice-bar')`), 5)
   await b.ev(`${channel('Lounge')}.click()`)
   await until('clicking Lounge joins its call: Bob gets the Voice connected panel and is listed under it', () =>
-    b.ev(`!!document.querySelector('.voice-dock') && !!document.querySelector('.voice-people')?.textContent.includes('Bob')`), 15)
+    b.ev(`!!document.querySelector('.voice-bar') && !!document.querySelector('.voice-people')?.textContent.includes('Bob')`), 15)
   await until('Ann sees Bob in Lounge, with no ringing as for a direct call', () =>
     a.ev(`!!document.querySelector('.voice-people')?.textContent.includes('Bob') && !document.querySelector('.incoming-calls')`), 30)
   await b.shot('server-voice')
-  await b.ev(`document.querySelector('.voice-dock button[title="Leave call"]').click()`)
+  await until('in a call, Bob has the voice bar above his user bar, saying In voice', () =>
+    b.ev(`!!document.querySelector('.voice-bar .voice-where')?.textContent.includes('Lounge · Smoke Server') && document.querySelector('.user-bar').textContent.includes('In voice')`), 5)
+  await b.shot('bars-call')
+  // Right-click a person in a voice channel: Ann, the owner, may server mute Bob
+  await a.ev(`document.querySelector('.voice-person').dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 160, clientY: 300 }))`)
+  await until("Ann's menu on Bob in Lounge has User volume, Mute, Ignore and Server mute, Server deafen, Move to, Disconnect", () =>
+    a.ev(`(() => { const t = [...document.querySelectorAll('.context-menu [role^=menuitem]')].map((i) => i.textContent); return ['Profile', 'Mute', 'Disable video', 'Ignore', 'Server mute', 'Server deafen', 'Disconnect'].every((l) => t.includes(l)) && !!document.querySelector('.context-menu .person-volume') })()`), 5)
+  await sleep(200)
+  await a.shot('menu-person')
+  await a.ev(`document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`)
+  await b.ev(press('Disconnect'))
   await until('Bob leaves; Lounge is empty again for Ann', () => a.ev(`!document.querySelector('.voice-people')`), 30)
   // Invite to voice channel is a poke to a member, not a link: Bob gets a toast to join
   await a.ev(`document.querySelector('.channel-tools button[aria-label="Invite to voice channel"]').click()`)
@@ -1281,12 +1316,81 @@ try {
   await until('the audit log lists the server being made', () => a.ev(`(document.querySelector('dialog[open]')?.textContent ?? '').includes('Ann')`), 10)
   await a.shot('server-settings')
   await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
+
+  console.log('--- Opening the app beside a voice channel, and restarting in one')
+  // Cy joins the server too, so two people are in Lounge when Ann opens the app
+  await a.ev(`document.querySelector('.server-head').click()`)
+  await a.ev(menuItem('Invite people'))
+  await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Create link').click()`)
+  const link2 = await until('Ann makes another invite link', () => a.ev(`document.querySelector('dialog[open] .invite-link b')?.textContent`), 10)
+  await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Done').click()`)
+  // Sent in a DM, the link shows as an invite card, which joins in one click
+  const cyKey = await c.ev(`api.call('state').then((s) => s.me)`)
+  await a.ev(`api.call('state').then((s) => api.call('send', [s.me, '${cyKey}'].sort().join('_'), 'come in ${link2}'))`)
+  await until("Cy gets Ann's DM on the rail", () => c.ev(`!!document.querySelector('.rail-dm[aria-label^="Ann"]')`), 30)
+  await c.ev(`document.querySelector('.rail-dm[aria-label^="Ann"]').click()`)
+  await until('the link shows as an invite card: Smoke Server, its members, Join; the link text itself is not repeated', () =>
+    c.ev(`(() => { const k = document.querySelector('.invite-card'); return !!k && k.textContent.includes('Smoke Server') && /\\d+ members?, \\d+ online/.test(k.textContent) && k.querySelector('button').textContent === 'Join' && !document.querySelector('.msgs').textContent.includes('eleusinia://') && document.querySelector('.msgs').textContent.includes('come in') })()`), 30)
+  await c.shot('invite-card')
+  await c.ev(`document.querySelector('.invite-card button').click()`)
+  await until('Cy joins the server from the card, and it opens', () => c.ev(`document.querySelector('.server-name')?.textContent === 'Smoke Server'`), 60)
+  await until('Cy sees Lounge', () => c.ev(`!!${channel('Lounge')}`), 30)
+  const inLounge = (p, ...names) => p.ev(`${JSON.stringify(names)}.every((n) => !!document.querySelector('.voice-people')?.textContent.includes(n))`)
+  const diagLines = (p, start) => p.ev(`api.diagnostics().then((d) => d.events.map((e) => e.text).filter((t) => t.startsWith('${start}')))`)
+  // Each connected call connection has received voice: every person in the call is heard
+  const hearsAll = (n) => `(async () => {
+    const live = window.__pcs.filter((p) => p.connectionState === 'connected')
+    if (live.length < ${n}) return false
+    for (const pc of live) {
+      let got = 0
+      ;(await pc.getStats()).forEach((r) => r.type === 'inbound-rtp' && r.kind === 'audio' && (got += r.packetsReceived ?? 0))
+      if (!got) return false
+    }
+    return true
+  })()`
+  // Opened (or restarted) on the server: events that arrive while the window loads must wait for it, and the
+  // people in Lounge show as soon as Ann is linked with them
+  const restartAnn = async (port) => {
+    a.child.kill()
+    a = await launch(port, a.dir, annEnv)
+    await until('Ann is back on Home', () => a.ev(`!!document.querySelector('main.home')`), 30)
+    await a.ev(`document.querySelector('.rail-server').click()`)
+    await until('Ann links with someone', async () => (await diagLines(a, 'linked with')).length > 0, 30)
+  }
+  await b.ev(`${channel('Lounge')}.click()`)
+  await c.ev(`${channel('Lounge')}.click()`)
+  await until('Ann sees Bob and Cy in Lounge', () => inLounge(a, 'Bob', 'Cy'), 30)
+  await restartAnn(9235)
+  await until('as soon as she is linked, the freshly opened Ann sees Bob and Cy in Lounge and online, without joining', async () =>
+    (await inLounge(a, 'Bob', 'Cy')) && (await a.ev(`!document.querySelector('.voice-bar') && !!document.querySelector('aside.members')?.textContent.includes('Online — 3')`)), 3)
+  console.log('     ', (await diagLines(a, 'first person shown'))[0])
+  let t = Date.now()
+  await a.ev(`${channel('Lounge')}.click()`)
+  await until('Ann joins Lounge and hears Bob and Cy at once', () => a.ev(hearsAll(2)), 4)
+  console.log(`      heard both ${Date.now() - t} ms after clicking join;`, (await diagLines(a, 'joined:')).join(', '))
+  // Bob and Cy still hold connections to Ann's old copy that look alive; her new copy's join replaces them at once
+  // A window that reloaded since it was launched (the crash step) has lost the connection counter: put it back
+  const track = `window.__pcs || (() => { window.__pcs = []; const P = RTCPeerConnection; window.RTCPeerConnection = class extends P { constructor(...a) { super(...a); window.__pcs.push(this) } } })(), window.__pcs.length`
+  const pcsBefore = [await b.ev(track), await c.ev(track)]
+  const renewed = (n) => `window.__pcs.slice(${n}).some((p) => p.connectionState === 'connected')`
+  await restartAnn(9236)
+  t = Date.now()
+  await a.ev(`${channel('Lounge')}.click()`)
+  await until('Ann restarts in the call, rejoins, and all three are connected again on new connections, hearing each other', async () =>
+    (await a.ev(hearsAll(2))) && (await b.ev(renewed(pcsBefore[0]))) && (await c.ev(renewed(pcsBefore[1]))) && (await inLounge(a, 'Bob', 'Cy')) && (await inLounge(b, 'Ann', 'Cy')), 15)
+  console.log(`      reconnected and heard both ${Date.now() - t} ms after rejoining`)
+  // Bob ranks below Ann, so his menu on her has no server mute
+  await b.ev(`[...document.querySelectorAll('.voice-person')].find((x) => x.textContent.includes('Ann')).dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 160, clientY: 300 }))`)
+  await until("Bob's menu on Ann in Lounge has Profile and Mute, and no Server mute", () =>
+    b.ev(`(() => { const t = [...document.querySelectorAll('.context-menu [role^=menuitem]')].map((i) => i.textContent); return t.includes('Profile') && t.includes('Mute') && !t.includes('Server mute') && !t.includes('Disconnect') })()`), 5)
+  await b.ev(`document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`)
+  for (const p of [a, b, c]) await p.ev(press('Disconnect'))
   }
 } catch (e) {
   failed = true
   console.error('FAIL', e.message)
   for (const [n, p] of [['A', a], ['B', b], ['C', c]]) console.error(n, (await p.ev(`document.body.innerText`).catch(String)).replace(/\n+/g, ' | '))
-  for (const [n, p] of [['A', a], ['B', b], ['C', c]]) console.error(n, 'DIAG', JSON.stringify(await p.ev(`api.diagnostics().then((d) => d.events.filter((e) => e.area === 'network').map((e) => e.text))`).catch(String)))
+  for (const [n, p] of [['A', a], ['B', b], ['C', c]]) console.error(n, 'DIAG', JSON.stringify(await p.ev(`api.diagnostics().then((d) => d.events.filter((e) => e.area === 'network' || e.area === 'call').map((e) => e.area[0] + ' ' + e.text).slice(-40))`).catch(String)))
 } finally {
   children.forEach((ch) => ch.kill())
   await testnet?.destroy().catch(() => {})

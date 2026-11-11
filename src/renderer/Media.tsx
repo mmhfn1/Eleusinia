@@ -1,5 +1,5 @@
 // Calls on screen: the voice panel's pieces, screen sharing and camera dialogs, and the stage that shows videos.
-import { type KeyboardEvent, type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { usable } from '../shared/devices'
 import { type Key, type State } from '../shared/protocol'
 import type { Steadiness } from '../shared/quality'
@@ -8,6 +8,7 @@ import * as call from './call'
 import { Avatar, Dialog, Icon } from './ui'
 import type { SourceKind } from '../shared/sources'
 import { api } from './common'
+import './pip.css'
 
 const GRADE_WORDS = { good: 'good and stable', fair: 'degraded', poor: 'poor' }
 // How much the ping moved over the last minute, next to the number itself.
@@ -562,10 +563,15 @@ const GRID_FULL = 4 // up to this many cameras in the grid each get full quality
 
 const PEOPLE_ROW = 'people-row-hidden' // remembered per computer: whether the people row under a stream is folded away
 
+// How many Stages are showing (one while the call's conversation is open), so the floating player knows to step aside.
+let stages = 0
+const stageWatchers = new Set<() => void>()
+const stagesChanged = () => stageWatchers.forEach((f) => f())
+const useStages = () => useSyncExternalStore((f) => (stageWatchers.add(f), () => void stageWatchers.delete(f)), () => stages)
+
 export function Stage({ st, name, settings }: { st: State; name: (k: Key) => string; settings: () => void }) {
   useSpeaking()
   const [focus, setFocus] = useState<string | null>(null)
-  const [joined, setJoined] = useState<Key | null>(null)
   const [hidden, setHidden] = useState(false)
   const [rowHidden, setRowHidden] = useState(() => {
     try {
@@ -584,25 +590,27 @@ export function Stage({ st, name, settings }: { st: State; name: (k: Key) => str
   const items: Item[] = [
     ...[...call.shares.keys()].map((k) => ({ k, slot: 'screen' as const })),
     ...[...call.cameras.keys()].map((k) => ({ k, slot: 'camera' as const })),
-  ].filter((i) => call.peers.has(i.k))
+  ].filter((i) => call.peers.has(i.k) && !call.noVideo(i.k))
   const latest = useRef(items)
   latest.current = items
   useEffect(() => {
     const on = () => setAway(document.hidden)
     document.addEventListener('visibilitychange', on)
+    stages++
+    stagesChanged()
     return () => {
       document.removeEventListener('visibilitychange', on)
-      for (const i of latest.current) call.show(i.k, i.slot, 'off')
+      // The stream we watch plays on in the floating player (Pip); everything else stops
+      for (const i of latest.current) if (i.slot !== 'screen' || i.k !== call.watched) call.show(i.k, i.slot, 'off')
+      stages--
+      stagesChanged()
     }
   }, [])
   const mine = call.sharing()
   const cam = call.filming()
-  // The stream we joined, while it lasts; one that ended is left, so its next share starts unjoined again
-  const watching = joined && call.shares.has(joined) ? joined : null
-  useEffect(() => {
-    if (joined && !watching) setJoined(null)
-  })
-  const join = (k: Key) => (setJoined(k), setFocus(null))
+  // The stream we joined, while it lasts (call.ts forgets one that ended, so its next share starts unjoined again)
+  const watching = call.watched && call.shares.has(call.watched) && !call.noVideo(call.watched) ? call.watched : null
+  const join = (k: Key) => (call.watch(k), setFocus(null))
   const live = (i: Item) => i.slot === 'camera' || i.k === watching
   const main = items.find((i) => itemId(i) === focus) ?? items.find((i) => i.slot === 'screen' && i.k === watching) ?? items.find((i) => i.slot === 'screen') ?? null
   // A joined stream, or our own share with nothing else large, fills the stage with the people row along its bottom.
@@ -710,7 +718,7 @@ export function Stage({ st, name, settings }: { st: State; name: (k: Key) => str
           </button>
         )}
         {watching && (
-          <button className="button subtle" onClick={() => setJoined(null)}>
+          <button className="button subtle" onClick={() => call.watch(null)}>
             Leave stream
           </button>
         )}
@@ -753,5 +761,101 @@ export function Stage({ st, name, settings }: { st: State; name: (k: Key) => str
         </div>
       )}
     </section>
+  )
+}
+
+// The floating player (picture in picture): the stream we watch, carried into other conversations. Shown only while
+// no Stage is (the call's conversation is closed); dragged by any part, it settles in the nearest corner of the area
+// it is placed in, remembered per computer. It keeps asking for the stream as the Stage did: full, sound only while
+// the window is hidden.
+const PIP_CORNER = 'pip-corner'
+type Corner = 'br' | 'bl' | 'tr' | 'tl'
+export function Pip({ st, name, back }: { st: State; name: (k: Key) => string; back: () => void }) {
+  const open = useStages() > 0
+  const k = call.watched
+  const share = k ? call.shares.get(k) : undefined
+  const on = !open && !!k && !!share && !call.noVideo(k)
+  const [away, setAway] = useState(document.hidden)
+  const [corner, setCorner] = useState<Corner>(() => {
+    try {
+      return (['br', 'bl', 'tr', 'tl'] as const).find((c) => c === localStorage.getItem(PIP_CORNER)) ?? 'br'
+    } catch {
+      return 'br'
+    }
+  })
+  const [drag, setDrag] = useState<{ x: number; y: number; dx: number; dy: number } | null>(null)
+  const unmuted = useRef(1)
+  useEffect(() => {
+    const vis = () => setAway(document.hidden)
+    document.addEventListener('visibilitychange', vis)
+    return () => document.removeEventListener('visibilitychange', vis)
+  }, [])
+  useEffect(() => {
+    if (on) call.show(k!, 'screen', away ? 'audio' : 'full')
+  })
+  if (!on || !k || !share) return null
+  const [sid, cid] = (call.conv ?? '').split('.')
+  const where = st.servers?.[sid]?.channels.find((c) => c.id === cid)?.name ?? st.groups[call.conv ?? '']?.name
+  const box = (e: PointerEvent<HTMLElement>) => ({ el: e.currentTarget.getBoundingClientRect(), area: (e.currentTarget.offsetParent ?? document.body).getBoundingClientRect() })
+  const down = (e: PointerEvent<HTMLElement>) => {
+    if ((e.target as Element).closest('button, input')) return
+    const { el, area } = box(e)
+    e.currentTarget.setPointerCapture(e.pointerId)
+    setDrag({ x: el.left - area.left, y: el.top - area.top, dx: e.clientX - el.left, dy: e.clientY - el.top })
+  }
+  const move = (e: PointerEvent<HTMLElement>) => {
+    if (!drag) return
+    const { el, area } = box(e)
+    const clamp = (v: number, max: number) => Math.max(0, Math.min(max, v))
+    setDrag({ ...drag, x: clamp(e.clientX - area.left - drag.dx, area.width - el.width), y: clamp(e.clientY - area.top - drag.dy, area.height - el.height) })
+  }
+  const up = (e: PointerEvent<HTMLElement>) => {
+    if (!drag) return
+    const { el, area } = box(e)
+    const c = `${el.top + el.height / 2 - area.top > area.height / 2 ? 'b' : 't'}${el.left + el.width / 2 - area.left > area.width / 2 ? 'r' : 'l'}` as Corner
+    setDrag(null)
+    setCorner(c)
+    try {
+      localStorage.setItem(PIP_CORNER, c)
+    } catch {}
+  }
+  const leave = () => (call.show(k, 'screen', 'off'), call.watch(null))
+  // shortcut: finds the Stage's large view by its class once Back has opened it; pass a ref through if this grows
+  const expand = () => (back(), setTimeout(() => document.querySelector<HTMLElement>('.stage .screen.big')?.requestFullscreen().catch(() => {}), 0))
+  const vol = call.streamVolumeOf(k)
+  const mute = vol ? `Mute ${name(k)}'s stream` : `Unmute ${name(k)}'s stream`
+  return (
+    <div
+      className={`pip ${drag ? 'dragging' : corner}`}
+      style={drag ? { left: drag.x, top: drag.y } : undefined}
+      onPointerDown={down}
+      onPointerMove={move}
+      onPointerUp={up}
+      onPointerCancel={up}
+      role="region"
+      aria-label={`${name(k)}'s stream, picture in picture`}
+    >
+      <Screen stream={call.peers.get(k)?.screen} label={`${name(k)}${where ? ` · ${where}` : ''}`}>
+        <span className="pip-grip" aria-hidden="true">
+          <Icon name="grip" size={14} />
+        </span>
+        <div className="screen-controls">
+          <button className="button screen-full pip-back" onClick={back}>
+            <Icon name="back" size={14} /> Back to call
+          </button>
+          {share.sound && (
+            <button className="icon-button screen-full" aria-label={mute} title={mute} aria-pressed={!vol} onClick={() => (vol ? ((unmuted.current = vol), call.setStreamVolume(k, 0)) : call.setStreamVolume(k, unmuted.current))}>
+              <Icon name={vol ? 'volume' : 'volumeOff'} size={16} />
+            </button>
+          )}
+          <button className="icon-button screen-full" aria-label="Leave stream" title="Leave stream" onClick={leave}>
+            <Icon name="close" size={16} />
+          </button>
+          <button className="icon-button screen-full" aria-label="Expand" title="Expand" onClick={expand}>
+            <Icon name="expand" size={16} />
+          </button>
+        </div>
+      </Screen>
+    </div>
   )
 }

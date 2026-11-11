@@ -33,11 +33,13 @@ export type ServerState = {
   channels: Channel[]
   invites: Record<string, Invite>
   bans: Key[]
-  audit: { author: Key; kind: string; n: number; ts: number; target?: string }[] // target: the key, role, channel or invite acted on
+  voice: Record<Key, { mute?: true; deafen?: true }> // server mute and deafen, kept across a leave so rejoining does not lift them
+  // target: the key, role, channel or invite acted on; channel: where voice.move sent them
+  audit: { author: Key; kind: string; n: number; ts: number; target?: string; channel?: string }[]
 }
 type KeyPair = { publicKey: Buffer; secretKey: Buffer }
 
-const KINDS = new Set(['create', 'server.edit', 'role.add', 'role.edit', 'role.delete', 'role.move', 'member.roles', 'channel.add', 'channel.edit', 'channel.delete', 'channel.move', 'invite.add', 'invite.revoke', 'join', 'leave', 'kick', 'ban', 'unban', 'nickname'])
+const KINDS = new Set(['create', 'server.edit', 'role.add', 'role.edit', 'role.delete', 'role.move', 'member.roles', 'channel.add', 'channel.edit', 'channel.delete', 'channel.move', 'invite.add', 'invite.revoke', 'join', 'leave', 'kick', 'ban', 'unban', 'nickname', 'voice.mute', 'voice.deafen', 'voice.move', 'voice.disconnect'])
 const MAX_ROLES = 250
 const MAX_CHANNELS = 500
 const MAX_INVITES = 1000
@@ -51,7 +53,7 @@ const MAX_SEEN = 5000
 const SEEN_BYTES = 90 // one `seen` entry at most: a quoted key, a colon, a 16-digit number, a comma
 // What a channel override may grant or take away: channel matters only, never server-wide power like kick or ban
 const CHANNEL_PERMS: readonly Perm[] = ['viewChannel', 'sendMessages', 'manageMessages', 'mentionEveryone', 'connect', 'speak', 'muteMembers', 'deafenMembers', 'moveMembers']
-const TARGET_KEY = new Set(['kick', 'ban', 'unban', 'member.roles', 'nickname', 'join'])
+const TARGET_KEY = new Set(['kick', 'ban', 'unban', 'member.roles', 'nickname', 'join', 'voice.mute', 'voice.deafen', 'voice.move', 'voice.disconnect'])
 const CUT_KINDS = new Set(['role.edit', 'role.delete', 'role.move', 'member.roles', 'kick', 'ban', 'invite.revoke', 'channel.delete'])
 
 const isSig = (s: unknown): s is string => typeof s === 'string' && /^[0-9a-f]{128}$/.test(s)
@@ -195,6 +197,7 @@ function apply(s: ServerState, o: Op, latest: number): boolean {
   const p = permsOf(s, a)
   const h = highest(s, a)
   const member = (k: unknown) => isKey(k) && Object.hasOwn(s.members, k)
+  const below = (k: unknown) => member(k) && k !== s.owner && highest(s, k as Key) < h
   switch (o.kind) {
     case 'server.edit': {
       if (!p.has('manageServer') || (b.name !== undefined && !isName(b.name)) || (b.avatar !== undefined && b.avatar !== '' && !isPicture(b.avatar))) return false
@@ -329,6 +332,25 @@ function apply(s: ServerState, o: Op, latest: number): boolean {
       else s.members[b.key].nick = b.nick
       return true
     }
+    // Voice moderation, checked like kick. Not cut ops: they change no one's rights in the replay, so where they land
+    // among others' ops changes nothing; an author demoted by a cut that did not see them is refused as for any op.
+    case 'voice.mute':
+    case 'voice.deafen': {
+      const flag = o.kind === 'voice.mute' ? 'mute' : 'deafen'
+      if (!p.has(o.kind === 'voice.mute' ? 'muteMembers' : 'deafenMembers') || !below(b.key) || typeof b.on !== 'boolean') return false
+      const v = { ...s.voice[b.key] }
+      if (b.on) v[flag] = true
+      else delete v[flag]
+      if (v.mute || v.deafen) s.voice[b.key] = v
+      else delete s.voice[b.key]
+      return true
+    }
+    case 'voice.move': {
+      const c = s.channels.find((x) => x.id === b.channel)
+      return p.has('moveMembers') && below(b.key) && c?.kind === 'voice' && can(s, b.key, 'viewChannel', c.id) && can(s, b.key, 'connect', c.id)
+    }
+    case 'voice.disconnect':
+      return p.has('moveMembers') && below(b.key)
   }
   return false
 }
@@ -346,6 +368,7 @@ function created(o: Op, id: string): ServerState | null {
     channels: [],
     invites: {},
     bans: [],
+    voice: {},
     audit: [],
   }
 }
@@ -456,7 +479,7 @@ export function replay(ops: unknown[], now = Date.now(), id?: string): ServerSta
     if (!ok) continue
     const b = o.body as Record<string, unknown>
     const target = TARGET_KEY.has(o.kind) ? b.key : /^(role|channel|invite)\./.test(o.kind) ? b.id : undefined
-    s!.audit.push({ author: o.author, kind: o.kind, n: o.n, ts: o.ts, ...(typeof target === 'string' && { target }) })
+    s!.audit.push({ author: o.author, kind: o.kind, n: o.n, ts: o.ts, ...(typeof target === 'string' && { target }), ...(o.kind === 'voice.move' && { channel: b.channel as string }) })
     latest = Math.max(latest, o.ts)
   }
   return s

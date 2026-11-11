@@ -1,7 +1,7 @@
 import { RnnoiseWorkletNode } from '@sapphi-red/web-noise-suppressor'
 import rnnoiseWasm from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?inline'
 import rnnoiseWorklet from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?raw'
-import { createCandidates, createWatchdog, lightOpus, offers, quickVideo, rejoinFrom, relayCandidate, restartAfterFor } from '../shared/callstate'
+import { createCandidates, createWatchdog, lightOpus, offers, quickVideo, rejoinFrom, relayCandidate, restartAfterFor, restarted, viewerCue } from '../shared/callstate'
 import { fellBack, nextDevice, usable } from '../shared/devices'
 import { type Jingle, LOOP_EVERY, RING_MS, loopNow } from '../shared/jingles'
 import { CALL_VERSION, type Event, type Key, type State } from '../shared/protocol'
@@ -142,6 +142,12 @@ const shown = new Map<string, Level>()
 // A screen goes to no one until they join it; a camera starts at thumbnail size until a viewer shows it bigger, so
 // someone in the call but reading another conversation is not sent full quality.
 const want = (slot: Slot, k: Key): Level => (state?.relayed?.includes(k) ? 'off' : (wants.get(`${slot}:${k}`) ?? (slot === 'screen' ? 'off' : 'thumb')))
+// The stream we joined (one at a time), kept here rather than in the Stage so it plays on in the floating player (Pip
+// in Media.tsx) while another conversation is open.
+export let watched: Key | null = null
+export const watch = (k: Key | null) => ((watched = k), notify())
+// People whose camera and screen we turned off (Disable video): we ask them for nothing.
+export const noVideo = (k: Key) => !!state.settings.noVideo?.includes(k)
 let starved = 0 // samples in a row where our stream to someone was held back by their or our bandwidth
 let cpuBound = 0 // ... or by our computer not encoding fast enough
 let upload: { kbps: number | null; at: number } | null = null
@@ -155,6 +161,14 @@ export const onSpeaking = (fn: () => void) => (speakers.add(fn), () => void spea
 export const speakingVersion = () => speakingAt
 
 const send = (c: string, to: Key | null, data: unknown) => window.api.call('signal', c, to, data)
+// This window load's session, sent in every join so peers can tell a restarted copy from the one they hold (restarted)
+const JOIN = { k: 'join', s: Math.random().toString(36).slice(2, 12) }
+const sessions = new Map<Key, string>()
+// For the timings in the diagnostics: from the window opening to the first person shown in a call, and from joining
+// to connecting with each person
+const openedAt = Date.now()
+let shownAny = false
+let joinedAt = 0
 // Updates about our call (mute, share, camera) go only to the people in it, not every member of the group.
 const sendInCall = (to: Key | null, data: unknown) => {
   if (!conv) return
@@ -167,7 +181,18 @@ const soundLevel = () => outVolume() * soundVolume()
 const sound = (name: Jingle) => (log(`sound: ${name}`), play(name, soundLevel(), outId || state.settings.out || ''))
 // A server's voice channel (`${server}.${channel}`) calls like a group: no ringing, no missed calls.
 const serverOf = (c: string) => state.servers?.[c.split('.')[0]]
+// A conversation muted for good (true) or until a time not yet reached (common.ts isMuted, which call.ts cannot import)
+const mutedNow = (c: string) => {
+  const m = state.settings.muted?.[c]
+  return m === true || (typeof m === 'number' && m > Date.now())
+}
 const isDm = (c: string) => !state.groups[c] && !serverOf(c)
+// Server mute and deafen (signed server ops) in our voice channel call: ours, and whether a person's voice plays here.
+export const serverVoice = (): { mute?: true; deafen?: true } => (conv && serverOf(conv)?.voice?.[state.me]) || {}
+const serverSilenced = (k: Key) => ((v) => !!(v?.mute || v?.deafen))(conv ? serverOf(conv)?.voice?.[k] : undefined)
+const deaf = () => deafened || !!serverVoice().deafen
+// A sound only for the people around us, so not while deafened. For App.tsx: a poke arriving.
+export const cue = (name: 'poke' | 'stream' | 'viewerJoin' | 'viewerLeave' | 'moved') => void (deaf() || sound(name))
 // Ringing: direct calls we are not in, since when each started. Calling: since when we have waited alone in a direct
 // call. Both repeat for 40 s at most (loopNow); after that the call carries on silently, it is never ended for it.
 const ringing = new Map<string, number>()
@@ -205,6 +230,8 @@ export function mismatched() {
 // 0 to 2 (200%); played through a GainNode, so above 100% is a real boost.
 const clampVolume = (v: number | undefined) => Math.min(2, Math.max(0, v ?? 1))
 export const volumeOf = (k: Key) => clampVolume(state.settings.volumes?.[k])
+// What their voice plays at: nothing when we muted them for us (localMuted) or the server muted or deafened them.
+const voiceGain = (k: Key) => (state.settings.localMuted?.includes(k) || serverSilenced(k) ? 0 : volumeOf(k))
 export const outVolume = () => clampVolume(state.settings.outVolume)
 export const soundVolume = () => Math.min(1, Math.max(0, state.settings.soundVolume ?? 1))
 // How loud each person's shared screen sound plays here, set beside their stream; for this session only.
@@ -304,7 +331,7 @@ function context() {
 }
 // Output device for every voice at once. AudioContext.setSinkId is not in the DOM typings yet.
 const sinkTo = (id: string) => (context() as AudioContext & { setSinkId(id: string): Promise<void> }).setSinkId(id).catch(() => {})
-const applyDeafen = () => master && (master.gain.value = deafened ? 0 : outVolume())
+const applyDeafen = () => master && (master.gain.value = deaf() ? 0 : outVolume())
 
 function listen(s: MediaStream): Listen {
   const source = context().createMediaStreamSource(s)
@@ -336,7 +363,7 @@ function playVoice(k: Key, p: Peer, s: MediaStream) {
   p.audio.srcObject = s
   const l = listen(s)
   const gain = context().createGain()
-  gain.gain.value = volumeOf(k)
+  gain.gain.value = voiceGain(k)
   l.source.connect(gain).connect(master!)
   p.voice = { ...l, gain }
 }
@@ -412,7 +439,17 @@ function drop(k: Key) {
   cameras.delete(k)
   for (const slot of ['screen', 'camera']) wants.delete(`${slot}:${k}`), shown.delete(`${slot}:${k}`)
   voices.delete(k)
+  if (watched === k) watched = null
   close(k)
+}
+
+// A call that does not connect may mean someone is on a newer version: main checks for an update, at most every 5 min
+let updateAskedAt = 0
+function askUpdate(why: string) {
+  if (Date.now() - updateAskedAt < 300000) return
+  updateAskedAt = Date.now()
+  log(`${why}: checking for updates`)
+  window.api.checkUpdates().catch(() => {})
 }
 
 function connect(k: Key) {
@@ -442,7 +479,7 @@ function connect(k: Key) {
         {
           restart: () => serial(() => restart(k)),
           rebuild: () => (log(`rebuilding the connection to ${who(k)}`), serial(() => offer(k))),
-          ask: () => conv && (log(`asking ${who(k)} to reconnect`), send(conv, k, { k: 'join' })),
+          ask: () => conv && (log(`asking ${who(k)} to reconnect`), send(conv, k, JOIN)),
           giveUp: () => conv && (log(`${who(k)} never reconnected; dropping them`), left(conv, k), drop(k), notify()),
         },
         undefined,
@@ -453,7 +490,9 @@ function connect(k: Key) {
     if (peers.get(k) !== peer) return // a replaced connection
     log(`connection to ${who(k)}: ${pc.connectionState}`)
     watchdogs.get(k)?.update(pc.connectionState)
+    if (pc.connectionState === 'failed') askUpdate(`the call with ${who(k)} failed`)
     if (pc.connectionState === 'connected') {
+      if (joinedAt) log(`joined: connected to ${who(k)} in ${Date.now() - joinedAt} ms`)
       bitrate(pc)
       sendVoice(k)
       if (screen) sendShare(k)
@@ -464,6 +503,7 @@ function connect(k: Key) {
     notify()
   }
   peers.set(k, peer)
+  setTimeout(() => peers.get(k) === peer && pc.connectionState !== 'connected' && askUpdate(`no call connection with ${who(k)} after 5 s`), 5000)
   return pc
 }
 
@@ -751,6 +791,7 @@ export function stopCamera() {
 
 // What we show of someone's screen or camera; they then send only that. Unchanged levels are not resent.
 export function show(k: Key, slot: Slot, level: Level) {
+  if (noVideo(k)) level = 'off'
   const id = `${slot}:${k}`
   if (!conv || shown.get(id) === level) return
   shown.set(id, level)
@@ -964,7 +1005,8 @@ export function notices() {
 // Bumped by every join and leave: a join whose number is no longer current was overtaken (double click, a quick
 // switch, a leave) and must give back what it opened instead of touching the call.
 let joinSeq = 0
-export async function join(c: string) {
+// moved: a server moved us here (onOrder), which we and the people in the channel hear as `moved` rather than `join`
+export async function join(c: string, moved = false) {
   leave()
   const my = ++joinSeq
   const stale = () => my !== joinSeq
@@ -997,13 +1039,17 @@ export async function join(c: string) {
   listenOwn(fresh)
   listening = setInterval(listenAll, 50)
   navigator.mediaDevices.addEventListener('devicechange', onDeviceChange)
-  send(c, null, { k: 'join' })
+  joinedAt = Date.now()
+  send(c, null, moved ? { ...JOIN, m: 1 } : JOIN)
+  // Those we offer to get the offer at once instead of after their reply to our join: one round trip less each, and
+  // all of them in parallel
+  for (const k of active.get(c) ?? []) if (k !== state.me && state.online.includes(k) && offers(state.me, k)) serial(() => offer(k))
   // The broadcast reaches only members linked with us; anyone already in the call who is not (a big group, known from
   // their presence note) gets it addressed, which makes the node dial them
-  for (const k of active.get(c) ?? []) if (!state.online.includes(k)) send(c, k, { k: 'join' })
+  for (const k of active.get(c) ?? []) if (!state.online.includes(k)) send(c, k, JOIN)
   ringing.delete(c)
   callingSince = isDm(c) && !active.get(c)?.size ? Date.now() : null
-  sound('join')
+  sound(moved ? 'moved' : 'join')
   loops()
   followDevices() // device ids are only listed once the microphone is allowed
   sampler = setInterval(measure, SAMPLE_EVERY)
@@ -1011,14 +1057,16 @@ export async function join(c: string) {
   notify()
 }
 
-export function leave() {
+export const leave = () => end(false)
+// quiet: no leave sound, as when moved to another channel (its `moved` sound follows)
+function end(quiet: boolean) {
   joinSeq++ // also cancels a join still opening the microphone
   if (!conv) return
   log(`left the call (${peers.size} connected)`)
   stopShare()
   stopCamera()
   send(conv, null, { k: 'leave' })
-  if (!deafened) sound('leave')
+  if (!deaf() && !quiet) sound('leave')
   callingSince = null
   for (const k of [...peers.keys()]) drop(k)
   navigator.mediaDevices.removeEventListener('devicechange', onDeviceChange)
@@ -1039,6 +1087,7 @@ export function leave() {
   wants.clear()
   shown.clear()
   voices.clear()
+  watched = null
   upload = null
   stream?.getTracks().forEach((t) => ((t.onended = null), t.stop()))
   stream = null
@@ -1046,6 +1095,7 @@ export function leave() {
   cleaned = null
   denoiseCtx?.suspend() // no audio thread work between calls
   conv = null
+  joinedAt = 0
   notify()
 }
 
@@ -1056,14 +1106,14 @@ export const pushToTalk = () => state.settings.hotkeys?.ptt
 let gateOpen = true
 let gateAt: number | null = null
 export let ownLevel = 0 // your microphone's level right now, for the meter in Settings
-const sending = () => !muted && !deafened && (pushToTalk() ? talking : gateOpen)
+const sending = () => !muted && !deafened && !serverVoice().mute && !serverVoice().deafen && (pushToTalk() ? talking : gateOpen)
 const applyMic = () => stream?.getAudioTracks().forEach((t) => (t.enabled = sending()))
 
 // A hotkey pressed anywhere, even with the app in the background. They only act during a call.
 export function onHotkey(action: string, down: boolean) {
   if (action === 'ptt') {
     // A tick when the microphone opens and closes, only in a call and only when it changes (keys repeat while held).
-    if (conv && down !== talking && !muted && !deafened) sound(down ? 'talk' : 'untalk')
+    if (conv && down !== talking && !muted && !deaf()) sound(down ? 'talk' : 'untalk')
     talking = down
     applyMic()
     return notify()
@@ -1104,6 +1154,10 @@ async function handle(from: Key, c: string, d: any) {
     if (c === conv) drop(from)
     return
   }
+  if (d.k === 'join' && restarted(sessions.get(from), d.s)) {
+    sessions.set(from, d.s)
+    if (peers.has(from)) log(`${who(from)} restarted: dropping the old connection`), drop(from)
+  }
   // A call starting that we are not in: if it ends before we join, it was missed. Not one coming back from a blip,
   // nor any later signal of a call we already joined and left.
   const resumed = blips.has(c)
@@ -1112,29 +1166,32 @@ async function handle(from: Key, c: string, d: any) {
   if (c !== conv && !set.size && !resumed && !serverOf(c)) unjoined.add(c)
   // At most one a minute per conversation, so leaving and joining over and over cannot flood the notifications;
   // none for voice channels, where people come and go all day
-  if (!set.size && !conv && !serverOf(c) && !state.settings.muted?.[c] && (announced.get(c) ?? 0) < Date.now() - 60000) {
+  const ignored = isDm(c) && !!state.settings.ignored?.includes(from) // their DM calls ring silently: no sound, no bar
+  if (!set.size && !conv && !serverOf(c) && !mutedNow(c) && !ignored && (announced.get(c) ?? 0) < Date.now() - 60000) {
     announced.set(c, Date.now())
     new Notification('Eleusinia', { body: `${state.profiles[from]?.name || 'Someone'} started a call` })
   }
   const fresh = !set.has(from)
   set.add(from)
+  if (!shownAny) (shownAny = true), log(`first person shown in a call ${Date.now() - openedAt} ms after the window opened`)
   if (fresh && c === conv) {
     callingSince = null // they answered
-    if (!deafened) sound('join')
+    if (!deaf()) sound(d.k === 'join' && d.m ? 'moved' : 'join')
   }
-  if (fresh && c !== conv && isDm(c) && !ringing.has(c)) ringing.set(c, Date.now()), notify()
+  if (fresh && c !== conv && isDm(c) && !ringing.has(c) && !ignored) ringing.set(c, Date.now()), notify()
   loops()
   if (c !== conv) return
   // In our call but never linked with us (a big group, known from their presence note): our join, addressed to them,
-  // makes the node link up; their answer then comes with their version
-  if (!state.versions?.[from]) return void send(c, from, { k: 'join' })
-  if (!compatible(from)) return log(`not connecting ${who(from)}: call version ${callVersionOf(from)}, ours ${CALL_VERSION}`), notify()
+  // makes the node link up, and they answer over that link
+  if (state.present.includes(from) && !state.online.includes(from)) return void send(c, from, JOIN)
+  // Everyone updates to the latest version by themselves, so the call version is only noted, never a reason to wait
+  if ((d.k === 'join' || d.k === 'offer') && state.versions?.[from] && !compatible(from)) log(`${who(from)} is on call version ${callVersionOf(from)}, we are on ${CALL_VERSION}`)
 
   if (d.k === 'join') {
     // A duplicate while our connection works or is being set up; otherwise they lost us and we start over.
     const p = peers.get(from)
     if (p && ['new', 'connecting', 'connected'].includes(p.pc.connectionState)) return
-    if (!offers(state.me, from)) return void send(c, from, { k: 'join' })
+    if (!offers(state.me, from)) return void send(c, from, JOIN)
     await offer(from)
   } else if (d.k === 'offer') {
     // An ICE restart reuses the connection; any other offer starts a new one.
@@ -1160,6 +1217,8 @@ async function handle(from: Key, c: string, d: any) {
     // From another app, so every field is checked and capped.
     const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Math.round(Number(v)) || 0))
     if (!!d.on !== shares.has(from)) log(`${who(from)} ${d.on ? 'started' : 'stopped'} sharing their screen`)
+    if (d.on && !shares.has(from) && !deaf()) sound('stream')
+    if (!d.on && watched === from) watched = null
     if (d.on) shares.set(from, { name: String(d.name ?? '').slice(0, 100), width: n(d.width, 8192), height: n(d.height, 8192), fps: n(d.fps, 480), starved: !!d.starved, sound: !!d.sound, preview: shares.get(from)?.preview })
     else (shares.delete(from), shown.delete(`screen:${from}`))
   } else if (d.k === 'preview') {
@@ -1174,7 +1233,10 @@ async function handle(from: Key, c: string, d: any) {
     voices.set(from, { muted: !!d.muted, deafened: !!d.deafened })
   } else if (d.k === 'want') {
     if (['off', 'audio', 'thumb', 'full'].includes(d.level)) {
-      wants.set(`${d.slot === 'camera' ? 'camera' : 'screen'}:${from}`, d.level)
+      const id = `${d.slot === 'camera' ? 'camera' : 'screen'}:${from}`
+      const heard = d.slot !== 'camera' && viewerCue(wants.get(id), d.level, !!screen)
+      if (heard && !deaf()) sound(heard)
+      wants.set(id, d.level)
       await applyLevel(from)
     }
   }
@@ -1190,7 +1252,7 @@ export function silence(c: string) {
 // Someone left a call, by saying so or by going offline.
 function left(c: string, k: Key, offline = false) {
   const had = active.get(c)?.delete(k)
-  if (had && c === conv && !deafened) sound('leave')
+  if (had && c === conv && !deaf()) sound('leave')
   if (!active.get(c)?.size) {
     ringing.delete(c)
     // Gone offline rather than left: the call may come back within a minute, and is then the same call
@@ -1208,6 +1270,18 @@ function serial(fn: () => Promise<void>) {
   queue = queue.then(fn).catch(console.error).then(notify)
 }
 export const onSignal = (from: Key, c: string, d: any) => serial(() => handle(from, c, d))
+
+// A server's voice order aimed at us (node.ts `voiceOrder`), only acted on in a call on that server: disconnected,
+// we leave; moved, we leave quietly and join the channel we were moved to.
+export function onOrder(e: { server: string; kind: 'move' | 'disconnect'; channel?: string; by: Key }) {
+  if (!conv?.startsWith(e.server + '.')) return
+  const to = e.kind === 'move' && e.channel ? `${e.server}.${e.channel}` : null
+  if (to === conv) return
+  log(`${e.kind === 'move' ? 'moved to another voice channel' : 'disconnected from the voice channel'} by ${who(e.by)}`)
+  if (!to) return leave()
+  end(true)
+  join(to, true).catch(console.error)
+}
 
 // Restarting into an update during a call: the call is remembered, and the new version rejoins it as it starts.
 const REJOIN = 'rejoin-after-update'
@@ -1247,14 +1321,16 @@ export function onState(next: State) {
   for (const k of next.online) {
     if (prev.online.includes(k)) continue
     watchdogs.get(k)?.back()
-    if (conv && membersOf(conv).includes(k) && peers.get(k)?.pc.connectionState !== 'connected') send(conv, k, { k: 'join' })
+    if (conv && membersOf(conv).includes(k) && peers.get(k)?.pc.connectionState !== 'connected') send(conv, k, JOIN)
   }
 
   const [a, b] = [prev.settings, next.settings]
   if (a.audioKbps !== b.audioKbps) for (const p of peers.values()) bitrate(p.pc)
   if (!b.hotkeys?.ptt) talking = false
   applyMic()
-  for (const [k, p] of peers) if (p.voice) p.voice.gain.gain.value = volumeOf(k)
+  for (const [k, p] of peers) if (p.voice) p.voice.gain.gain.value = voiceGain(k)
+  // Disable video: what we showed of them goes off at once (the Stage then leaves them out)
+  for (const k of next.settings.noVideo ?? []) if (!prev.settings.noVideo?.includes(k)) (show(k, 'screen', 'off'), show(k, 'camera', 'off'), watched === k && (watched = null))
   for (const k of new Set([...prev.relayed, ...next.relayed])) if (prev.relayed.includes(k) !== next.relayed.includes(k)) applyLevel(k)
   applyDeafen()
   if (a.mic !== b.mic || a.out !== b.out || a.micLabel !== b.micLabel || a.outLabel !== b.outLabel) followDevices()

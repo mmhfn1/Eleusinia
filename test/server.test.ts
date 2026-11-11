@@ -473,3 +473,46 @@ test('the audit names who or what each op acted on', () => {
   expect(audit.find((x) => x.kind === 'invite.add')!.target).toMatch(/^[0-9a-f]{32}$/)
   expect(audit.slice(-2).map((x) => x.target)).toEqual([ch, hex(w.b)])
 })
+
+test('voice moderation: mute, deafen, move and disconnect need the permission and a rank above the target', () => {
+  const w = staffed()
+  const [, , , d] = w.people // d: a plain member below everyone
+  w.join(w.o, d, w.invite(w.o))
+  const voice = w.role('voice', ['muteMembers', 'deafenMembers', 'moveMembers'])
+  w.by(w.o, 'role.move', { id: voice, to: 3 }) // [@everyone, low, mod, voice, admin]: voice ranks above a and b
+  w.by(w.o, 'member.roles', { key: hex(w.a), roles: [w.mod, voice] })
+  const vc = newId(), text = newId(), locked = newId()
+  w.by(w.o, 'channel.add', { id: vc, name: 'voice', kind: 'voice' })
+  w.by(w.o, 'channel.add', { id: text, name: 'text', kind: 'text' })
+  w.by(w.o, 'channel.add', { id: locked, name: 'locked', kind: 'voice', overrides: { [w.id]: { allow: [], deny: ['connect'] } } })
+  const moves = (s: ReturnType<typeof w.state>) => s.audit.filter((x) => x.kind.startsWith('voice.')).map((x) => `${x.kind} ${x.target === hex(w.b) ? 'b' : x.target === hex(d) ? 'd' : 'other'}${x.channel ? ' ' + (x.channel === vc ? 'vc' : '?') : ''}`)
+
+  // Allowed: a (voice role) on b and d
+  w.by(w.a, 'voice.mute', { key: hex(w.b), on: true })
+  w.by(w.a, 'voice.deafen', { key: hex(w.b), on: true })
+  w.by(w.a, 'voice.mute', { key: hex(d), on: true })
+  w.by(w.a, 'voice.mute', { key: hex(d), on: false })
+  w.by(w.a, 'voice.move', { key: hex(w.b), channel: vc })
+  w.by(w.a, 'voice.disconnect', { key: hex(d) })
+  // Refused: no permission (b on d), equal or higher rank (a on itself, on c), the owner, bad bodies, a text or forbidden channel
+  w.by(w.b, 'voice.mute', { key: hex(d), on: true })
+  w.by(w.b, 'voice.disconnect', { key: hex(d) })
+  w.by(w.a, 'voice.mute', { key: hex(w.a), on: true })
+  w.by(w.a, 'voice.deafen', { key: hex(w.c), on: true })
+  w.by(w.a, 'voice.disconnect', { key: hex(w.c) })
+  w.by(w.c, 'voice.mute', { key: hex(w.o), on: true })
+  w.by(w.a, 'voice.mute', { key: hex(d), on: 'yes' })
+  w.by(w.a, 'voice.move', { key: hex(d), channel: text })
+  w.by(w.a, 'voice.move', { key: hex(d), channel: locked })
+  w.by(w.a, 'voice.move', { key: hex(d), channel: newId() })
+
+  const s = w.state()
+  expect(s.voice).toEqual({ [hex(w.b)]: { mute: true, deafen: true } })
+  expect(moves(s)).toEqual(['voice.mute b', 'voice.deafen b', 'voice.mute d', 'voice.mute d', 'voice.move b vc', 'voice.disconnect d'])
+  // The owner and admins may; an unmute lifts only the mute
+  w.by(w.c, 'voice.mute', { key: hex(w.b), on: false })
+  expect(w.state().voice).toEqual({ [hex(w.b)]: { deafen: true } })
+  // The same in any arrival order
+  const want = JSON.stringify(w.state())
+  for (let i = 0; i < 5; i++) expect(JSON.stringify(w.state(shuffled(w.ops)))).toBe(want)
+})

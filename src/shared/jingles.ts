@@ -3,7 +3,7 @@
 // someone joining rises and someone leaving falls. Ringing and the caller tune repeat for RING_MS at most; the call
 // itself never ends because nobody answered.
 
-export type Jingle = 'mute' | 'unmute' | 'deafen' | 'undeafen' | 'join' | 'leave' | 'ring' | 'calling' | 'waiting' | 'talk' | 'untalk'
+export type Jingle = 'mute' | 'unmute' | 'deafen' | 'undeafen' | 'join' | 'leave' | 'ring' | 'calling' | 'waiting' | 'talk' | 'untalk' | 'stream' | 'viewerJoin' | 'viewerLeave' | 'poke' | 'moved'
 export type Note = { f: number; t: number; d: number; wave: 'sine' | 'triangle' | 'square'; gain?: number } // Hz, start s, length s
 
 export const JINGLES: Record<Jingle, Note[]> = {
@@ -52,6 +52,32 @@ export const JINGLES: Record<Jingle, Note[]> = {
     { f: 494, t: 0.32, d: 0.28, wave: 'triangle' },
     { f: 587, t: 0.64, d: 0.28, wave: 'triangle' },
     { f: 494, t: 0.96, d: 0.5, wave: 'triangle' },
+  ],
+  // Someone in the call starts sharing a screen: a bright rising fifth, then its octave.
+  stream: [
+    { f: 659, t: 0, d: 0.08, wave: 'triangle' },
+    { f: 988, t: 0.09, d: 0.08, wave: 'triangle' },
+    { f: 1319, t: 0.18, d: 0.16, wave: 'triangle' },
+  ],
+  // Someone opens or closes our stream: two soft high notes, up or down, quieter than a join or leave.
+  viewerJoin: [
+    { f: 1047, t: 0, d: 0.06, wave: 'sine', gain: 0.5 },
+    { f: 1397, t: 0.07, d: 0.1, wave: 'sine', gain: 0.5 },
+  ],
+  viewerLeave: [
+    { f: 1397, t: 0, d: 0.06, wave: 'sine', gain: 0.5 },
+    { f: 1047, t: 0.07, d: 0.1, wave: 'sine', gain: 0.5 },
+  ],
+  // A poke (Invite to voice channel): two quick taps on the same note.
+  poke: [
+    { f: 1568, t: 0, d: 0.04, wave: 'square', gain: 0.3 },
+    { f: 1568, t: 0.1, d: 0.04, wave: 'square', gain: 0.3 },
+  ],
+  // Moved into a voice channel (us, or someone landing in ours): a quick swoop up and back down a step.
+  moved: [
+    { f: 392, t: 0, d: 0.06, wave: 'triangle' },
+    { f: 784, t: 0.06, d: 0.06, wave: 'triangle' },
+    { f: 698, t: 0.12, d: 0.18, wave: 'triangle' },
   ],
 }
 

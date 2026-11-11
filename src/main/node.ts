@@ -16,9 +16,11 @@ import {
   MAX_TEXT,
   cleanProfile,
   dmId,
+  KEY_SETTINGS,
   isGroupId,
   isHandle,
   isKey,
+  isKeyList,
   isPicture,
   isUsername,
   normHandle,
@@ -35,12 +37,13 @@ import { openRequest, requestSeed, sealRequest } from '../shared/sealed'
 import { createImpairment, parseNetSim } from '../shared/netsim'
 import { createPresence } from './presence'
 import { createServers } from './servers'
-import { type InviteLink, type JoinReason, askOrder, checkJoinAsk, isJoinAnswer, isJoinAsk, joinTopic, limiter, makeInvite, newInvite, parseInvite, serverTopic } from '../shared/invite'
-import { joinProof } from '../shared/server'
+import { type InviteCard, type InviteLink, type JoinReason, askOrder, checkJoinAsk, cleanInviteCard, inviteCard, isJoinAnswer, isJoinAsk, joinTopic, limiter, makeInvite, newInvite, parseInvite, serverTopic } from '../shared/invite'
+import { type ServerState, joinProof, verifyJoin } from '../shared/server'
 import { createFiles } from './files'
 import { type Activity, type Game, cleanActivity, shareable } from '../shared/activity'
 import { type RelayLimits, RELAY_LIMITS, createNet } from './network'
 import { createRelay } from './relay'
+import { isNewer } from '../shared/updatesig'
 
 type Saved = {
   unread?: Record<string, number> // per conversation: messages from others and missed calls since it was last read
@@ -80,6 +83,7 @@ type Opts = {
   relayLimits?: RelayLimits // testing: smaller caps on what we relay for contacts
   inbox?: Key // the developers' inbox, where problem and crash reports go
   version?: string // this app's version, told to everyone we greet
+  newerApp?: (version: string) => void // a contact runs a newer version than ours: an update is out (index.ts checks)
   diag?: (area: Area, text: string) => void // diagnostic events, kept in memory by the caller
   forwardTo?: number // how many members a group message is passed on to; testing: 0, so only asking delivers
   groupLinks?: number // how many members of each group we dial ourselves (besides friends and people in our call)
@@ -98,7 +102,7 @@ const CATCHUP_BACKLOG = 1 << 20 // no new round while this much is still unsent 
 const FLOOD = { burst: 400, perSecond: 20 }
 
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
-export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', links, strict, relayLimits, maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8, keepMsgs = 50000 }: Opts) {
+export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', newerApp, links, strict, relayLimits, maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8, keepMsgs = 50000 }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
   const file = join(dir, 'state.json')
   mkdirSync(join(dir, 'msgs'), { recursive: true })
@@ -316,7 +320,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const since = (conv: string) => s.joinedAt?.[conv] ?? ((servers.isChannel(conv) && servers.state(conv.split('.')[0])?.members[me]?.joinedAt) || 0)
   function append(m: Msg, old = false) {
     if (!old) s.lastAt = { ...s.lastAt, [m.conv]: Date.now() }
-    if (m.author !== me && !s.blocked?.[m.author] && m.ts >= since(m.conv)) s.unread = { ...s.unread, [m.conv]: (s.unread?.[m.conv] ?? 0) + 1 }
+    if (m.author !== me && !s.blocked?.[m.author] && m.ts > since(m.conv)) s.unread = { ...s.unread, [m.conv]: (s.unread?.[m.conv] ?? 0) + 1 }
     saveSoon()
     pushSoon()
     haveOf(m.conv)[m.author] = Math.max(haveOf(m.conv)[m.author] ?? 0, m.seq)
@@ -373,12 +377,13 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     const shared = Object.values(s.groups).filter((g) => g.members.includes(key))
     // Group docs go first: they are how a member who is not our friend learns who we are.
     for (const g of shared) net.send(key, { t: 'group', g })
+    // Then who is online and in which call, so a freshly started copy shows them from its first link on
+    if (shared.length || servers.shares(key)) for (const p of presence.snapshot(key)) net.send(key, { t: 'presence', p })
     hi(key)
     if (s.friends[key] === 'friend') sendHave(key, dmId(me, key))
     for (const g of shared) sendHave(key, g.id)
     servers.greet(key)
     for (const conv of servers.channelsWith(key)) sendHave(key, conv)
-    if (shared.length || servers.shares(key)) net.send(key, { t: 'presence', p: presence.note() })
     sendActivity(key)
   }
   function reach(key: Key) {
@@ -431,6 +436,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (asks && s.friends[key] === 'friend' && s.accepted?.[key]) delete s.accepted[key] // they know we accepted
       if (!known(key) && !s.friends[key]) return // a stranger who is not asking anything
       versions.set(key, versionOf(w))
+      if (isNewer(versionOf(w).app, version)) newerApp?.(versionOf(w).app)
       if (isKey(w.relay)) {
         if (!relayKeys.has(key)) retryAt.clear() // someone new who might relay: waiting peers may try again now
         relayKeys.set(key, w.relay)
@@ -469,6 +475,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     if (w.t === 'joinOk' || w.t === 'joinNo') return joinAnswered(key, w)
     if (!known(key)) return
     if (w.t === 'poke') return takePoke(key, w)
+    if (w.t === 'inviteInfo') return answerCard(key, w)
+    if (w.t === 'inviteCard') return takeCard(key, w)
     if (w.t === 'activity') {
       const a = cleanActivity(w.a)
       if (a?.game) theirs.set(key, a)
@@ -813,6 +821,29 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     poked.push(now)
     emit({ type: 'poke', from: k, server: w.server, channel: w.channel })
   }
+  // Invite cards. Only from our own replay, or asked of a contact named in the link that we are already linked with
+  // (most often whoever sent it): no dialing or join topic for a card, so a preview never reaches out to strangers.
+  const cardEach = limiter(2000)
+  const cardWaits = new Map<string, ((c: InviteCard | null) => void)[]>() // by contact and server
+  const onlineIn = (sv: ServerState) => {
+    const on = new Set([me, ...net.keys(), ...presence.online()])
+    return Object.keys(sv.members).filter((k) => on.has(k)).length
+  }
+  // Only for someone who holds the link (the join proof), so a card tells nobody more than the link itself would
+  function answerCard(k: Key, w: { server: unknown; invite: unknown; key: unknown; proof: unknown }) {
+    if (!isJoinAsk({ ...w, t: 'joinAsk' }) || w.key !== k || !cardEach(k, Date.now())) return
+    const sv = servers.state(w.server as string)
+    const inv = sv && Object.hasOwn(sv.members, me) && Object.hasOwn(sv.invites, w.invite as string) ? sv.invites[w.invite as string] : undefined
+    if (!inv || !verifyJoin(sv!.id, inv, k, w.proof)) return
+    net.send(k, { t: 'inviteCard', server: sv!.id, card: inviteCard(sv!, inv.id, onlineIn(sv!), Date.now()) })
+  }
+  function takeCard(k: Key, w: { server: unknown; card: unknown }) {
+    const waits = typeof w.server === 'string' ? cardWaits.get(k + w.server) : undefined
+    if (!waits) return
+    cardWaits.delete(k + w.server)
+    const card = cleanInviteCard(w.card, w.server as string)
+    for (const done of waits) done(card)
+  }
   function joinAnswered(k: Key, w: unknown) {
     const j = isJoinAnswer(w) ? pending.get(w.server) : undefined
     if (!j || !isJoinAnswer(w) || !j.to.includes(k)) return
@@ -912,7 +943,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       changed()
       return 'stored'
     },
-    changed: () => pushSoon(),
+    changed: () => (pushSoon(), preDialSoon()),
   })
   // Servers' op logs and their sync (servers.ts). A channel we can newly read is asked for from members we are linked with.
   const servers = createServers({
@@ -920,6 +951,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     keyPair,
     net,
     few,
+    order: (server, kind, by, channel) => emit({ type: 'voiceOrder', server, kind, by, ...(channel && { channel }) }),
     changed(convs) {
       for (const conv of convs) for (const k of members(conv)) if (k !== me && net.linked(k)) sendHave(k, conv)
       for (const j of pending.values()) if (servers.members(j.link.server).includes(me)) net.announce(serverTopic(j.link.server)), j.done()
@@ -1009,11 +1041,29 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     for (const k of versions.keys()) if (!net.linked(k) && !known(k)) versions.delete(k)
     for (const [id, b] of flood) if (Date.now() - b.at > 60000) flood.delete(id) // long since refilled
   }
+  // Members in a call we could join (by their presence notes), up to 10 per call: dialled ahead so that joining needs
+  // no dial, and kept linked while they are in it (closeIdle lets them go once their call ends)
+  function callMates(): Key[] {
+    const per = new Map<string, Key[]>()
+    for (const [k, conv] of presence.calls()) {
+      const ms = callers(conv)
+      const l = per.get(conv) ?? []
+      if (k !== me && l.length < 10 && ms.includes(me) && ms.includes(k)) per.set(conv, [...l, k])
+    }
+    return [...per.values()].flat()
+  }
+  function preDial() {
+    for (const k of callMates()) if (!net.linked(k) && !s.blocked?.[k]) demand.set(k, demand.get(k) ?? Date.now()), due(k) && net.dial(k)
+  }
+  let preDialing: ReturnType<typeof setTimeout> | null = null // after notes arrive, at most once a second
+  const preDialSoon = () => void (preDialing ??= setTimeout(() => ((preDialing = null), preDial()), 1000))
   const redial = () => {
     relayTick()
     presence.expire()
     prune()
-    const picked = new Set([...ours().map((g) => g.members), ...servers.lists()].flatMap(linkPick))
+    const mates = callMates()
+    for (const k of mates) if (!net.linked(k) && !s.blocked?.[k]) demand.set(k, demand.get(k) ?? Date.now())
+    const picked = new Set([...[...ours().map((g) => g.members), ...servers.lists()].flatMap(linkPick), ...mates])
     closeIdle(picked)
     const keys = new Set([...picked, ...demand.keys()])
     for (const [k, st] of Object.entries(s.friends)) if (st !== 'incoming') keys.add(k)
@@ -1439,6 +1489,31 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         net.lookup(serverTopic(link.server)).then((found) => ((j.to = askOrder(j.to, found, me)), tick()), () => {})
       })
     },
+    // What an invite card shows: from our own replay when we are in that server, else from a contact in the link we
+    // are linked with (5 s at most); null when neither can tell.
+    invitePreview(text: string): Promise<(InviteCard & { member: boolean }) | null> {
+      const link = parseInvite(text)
+      if (!link) return Promise.resolve(null)
+      const sv = servers.state(link.server)
+      if (sv && Object.hasOwn(sv.members, me)) return Promise.resolve({ ...inviteCard(sv, link.invite, onlineIn(sv), Date.now()), member: true })
+      const to = link.contacts.find((k) => k !== me && net.linked(k) && known(k))
+      if (!to) return Promise.resolve(null)
+      return new Promise((resolve) => {
+        const id = to + link.server
+        const done = (c: InviteCard | null) => (clearTimeout(timer), resolve(c && { ...c, member: false }))
+        const timer = setTimeout(() => {
+          const left = (cardWaits.get(id) ?? []).filter((x) => x !== done)
+          if (left.length) cardWaits.set(id, left)
+          else cardWaits.delete(id)
+          resolve(null)
+        }, 5000)
+        if (!cardWaits.has(id)) {
+          if (cardWaits.size > 100) return done(null) // shortcut: at most 100 servers asked at once, plenty for one chat
+          net.send(to, { t: 'inviteInfo', server: link.server, invite: link.invite, key: me, proof: joinProof(link.server, link.invite, me, link.secret) })
+        }
+        cardWaits.set(id, [...(cardWaits.get(id) ?? []), done])
+      })
+    },
     // Asks a fellow member to join a voice channel's call with us. True once sent; false when they could not be
     // reached within 2 minutes (dialled like a call signal's recipient meanwhile).
     poke(server: string, channel: string, key: Key): Promise<boolean> {
@@ -1544,6 +1619,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       pushSoon()
     },
     async setSettings(p: Partial<Settings>) {
+      for (const k of KEY_SETTINGS) if (p[k] !== undefined && !isKeyList(p[k])) throw new Error('Those settings are not valid')
       const was = s.settings.relay !== false
       Object.assign(s.settings, p)
       changed()
@@ -1574,6 +1650,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       clearInterval(delivery)
       clearInterval(announcer)
       clearInterval(presenceTimer)
+      if (preDialing) clearTimeout(preDialing)
       for (const t of floodRetry.values()) clearTimeout(t)
       presence.destroy()
       servers.destroy()

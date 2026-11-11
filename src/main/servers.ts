@@ -21,13 +21,16 @@ type Opts = {
   few: (ks: Key[], n: number) => Key[]
   // A server changed (membership, channels, roles); convs: channels we can newly read, whose messages to ask for
   changed: (convs: string[]) => void
+  // A voice.move or voice.disconnect aimed at us, newly accepted while we run
+  order?: (server: string, kind: 'move' | 'disconnect', by: Key, channel?: string) => void
 }
 type Log = { ops: Op[]; have: Have; n: number; state: ServerState | null; dirty: boolean }
 
 const isObj = (x: unknown): x is Record<string, unknown> => !!x && typeof x === 'object' && !Array.isArray(x)
 const memberOf = (s: ServerState | null, k: Key) => !!s && Object.hasOwn(s.members, k)
 
-export function createServers({ dir, keyPair, net, few, changed }: Opts) {
+export function createServers({ dir, keyPair, net, few, changed, order }: Opts) {
+  const started = Date.now()
   const me: Key = keyPair.publicKey.toString('hex')
   const root = join(dir, 'servers')
   mkdirSync(root, { recursive: true })
@@ -72,8 +75,20 @@ export function createServers({ dir, keyPair, net, few, changed }: Opts) {
       for (const id of logs.keys()) stateOf(id)
       changed(fresh.splice(0))
     }, 100))
+  // Orders aimed at us that this replay accepted and the last did not. Not on the first replay at start, nor ones from
+  // before we started or before our latest join (old history arriving late), so only orders given while we run.
+  function newOrders(id: string, was: ServerState | null, next: ServerState | null) {
+    if (!order || !was || !memberOf(next, me)) return
+    const had = new Set(was.audit.map((x) => `${x.author}:${x.n}`))
+    const since = Math.max(started, next!.members[me].joinedAt)
+    for (const x of next!.audit) {
+      if ((x.kind !== 'voice.move' && x.kind !== 'voice.disconnect') || x.target !== me || x.ts < since || had.has(`${x.author}:${x.n}`)) continue
+      order(id, x.kind === 'voice.move' ? 'move' : 'disconnect', x.author, x.channel)
+    }
+  }
   function settle(id: string, log: Log, next: ServerState | null) {
     const before = readable(log.state)
+    newOrders(id, log.state, next)
     log.state = next
     log.dirty = false
     mates = null
@@ -183,6 +198,7 @@ export function createServers({ dir, keyPair, net, few, changed }: Opts) {
       channels: all ? s.channels : shown,
       invites: Object.fromEntries(Object.entries(s.invites).map(([id, { pub: _, ...inv }]) => [id, inv])),
       bans: s.bans,
+      voice: s.voice,
       mine: { rank: highest(s, me), perms: [...permsOf(s, me)], channels: Object.fromEntries(shown.map((c) => [c.id, [...permsOf(s, me, c.id)]])) },
     }
   }

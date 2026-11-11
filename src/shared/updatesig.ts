@@ -20,3 +20,9 @@ export function updateFileFor(files: { url: string }[], platform: string, arch: 
   const want = platform === 'darwin' ? (u: string) => u.endsWith(`-${arch}-mac.zip`) : platform === 'linux' ? (u: string) => u.endsWith('.AppImage') : () => false
   return files.find((f) => want(f.url))?.url ?? null
 }
+
+// Whether version a (x.y.z, as hellos carry it) is newer than b: a contact on a newer version means an update is out.
+export function isNewer(a: string, b: string) {
+  const d = a.split('.').map((n, i) => Number(n) - Number(b.split('.')[i] ?? 0)).find((x) => x !== 0)
+  return !!d && d > 0
+}
