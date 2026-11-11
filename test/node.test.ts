@@ -1415,21 +1415,24 @@ async function letIn(owner: N, joiner: N, id: string) {
 const chan = () => randomBytes(16).toString('hex')
 const lines = (f: string) => (existsSync(f) ? readFileSync(f, 'utf8').split('\n').filter(Boolean).length : 0)
 
-test('a server: the owner makes a text channel, a member let in gets the whole log, and messages cross the channel', async () => {
+test('a server: the owner makes a text channel, a member let in gets the whole log, messages cross the channel and count as unread', async () => {
   const a = start()
   const b = start()
   const id = a.node.createServer('Hall')
   const general = chan()
   a.node.serverAct(id, 'channel.add', { id: general, kind: 'text', name: 'general' })
   expect(() => a.node.serverAct(id, 'kick', { key: a.key })).toThrow() // the replay refuses it, so it is never written
+  const conv = `${id}.${general}`
+  a.node.send(conv, 'before you came')
   await letIn(a, b, id)
   await until(() => JSON.stringify(b.node.servers()) === JSON.stringify(a.node.servers()))
   expect(b.node.state().servers[id]).toMatchObject({ name: 'Hall', owner: a.key, channels: [{ id: general, name: 'general', kind: 'text' }] })
   expect(Object.keys(b.node.state().servers[id].members).sort()).toEqual([a.key, b.key].sort())
-  expect(b.node.state().chats).toEqual({}) // channels are not direct messages on the rail
-  const conv = `${id}.${general}`
   a.node.send(conv, 'welcome')
-  await until(() => texts(b, conv).includes('welcome'))
+  await until(() => texts(b, conv).includes('welcome') && texts(b, conv).includes('before you came'))
+  expect(b.node.state().chats[conv].unread).toBe(1) // history from before the join is not unread
+  b.node.markRead(conv)
+  expect(b.node.state().chats[conv].unread).toBe(0)
   b.node.send(conv, 'thanks')
   await until(() => texts(a, conv).includes('thanks'))
   expect(() => a.node.send(`${id}.${chan()}`, 'nowhere')).toThrow()

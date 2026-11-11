@@ -73,7 +73,7 @@ export type State = {
   relayed: Key[] // online people whose link goes through a mutual friend's relay: voice and text only
   present: Key[] // group members online but not linked with us, known from their presence notes
   activity: Record<Key, Activity> // what contacts are doing now, memory only; ours as they see it, under our own key
-  chats: Record<string, { unread: number; at: number }> // conversations with at least one message: unread messages and missed calls, last activity
+  chats: Record<string, { unread: number; at: number }> // conversations with at least one message, server channels included: unread messages and missed calls, last activity
   blocked: Key[]
   servers: Record<string, ServerView> // servers we are in, for the window (main/servers.ts)
 }

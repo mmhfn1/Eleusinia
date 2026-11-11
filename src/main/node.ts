@@ -233,7 +233,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     versions: Object.fromEntries([...versions].filter(([k]) => known(k))),
     relayed: net.keys().filter((k) => known(k) && relayedVia.has(k)),
     activity: { ...Object.fromEntries([...theirs].filter(([k]) => known(k) && net.linked(k))), [me]: ourActivity() },
-    chats: Object.fromEntries(Object.entries(s.lastAt ?? {}).filter(([c]) => members(c).length && !servers.isChannel(c)).map(([c, at]) => [c, { unread: s.unread?.[c] ?? 0, at }])),
+    chats: Object.fromEntries(Object.entries(s.lastAt ?? {}).filter(([c]) => members(c).length).map(([c, at]) => [c, { unread: s.unread?.[c] ?? 0, at }])),
     blocked: Object.keys(s.blocked ?? {}),
     present: presence.online().filter(known),
     servers: servers.summary(),
@@ -312,9 +312,11 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     delete s.confirmed?.[conv]
     rmSync(confFile(conv), { force: true })
   }
+  // History written before a group reached us, or before we joined a server, is not unread
+  const since = (conv: string) => s.joinedAt?.[conv] ?? ((servers.isChannel(conv) && servers.state(conv.split('.')[0])?.members[me]?.joinedAt) || 0)
   function append(m: Msg, old = false) {
     if (!old) s.lastAt = { ...s.lastAt, [m.conv]: Date.now() }
-    if (m.author !== me && !s.blocked?.[m.author] && m.ts >= (s.joinedAt?.[m.conv] ?? 0)) s.unread = { ...s.unread, [m.conv]: (s.unread?.[m.conv] ?? 0) + 1 }
+    if (m.author !== me && !s.blocked?.[m.author] && m.ts >= since(m.conv)) s.unread = { ...s.unread, [m.conv]: (s.unread?.[m.conv] ?? 0) + 1 }
     saveSoon()
     pushSoon()
     haveOf(m.conv)[m.author] = Math.max(haveOf(m.conv)[m.author] ?? 0, m.seq)

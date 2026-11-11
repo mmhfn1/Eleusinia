@@ -130,12 +130,14 @@ export function Server({ st, sv, channel, people: everyone, run, go }: Props) {
     const here = voiceIn(`${sv.id}.${c.id}`, me)
     // A full voice channel is not joined (0 or none: no limit); its chat still opens
     const full = voice && !!c.userLimit && here.length >= c.userLimit && call.conv !== `${sv.id}.${c.id}`
+    const muted = st.settings.muted
+    const unread = muted?.[sv.id] || muted?.[`${sv.id}.${c.id}`] ? 0 : (st.chats[`${sv.id}.${c.id}`]?.unread ?? 0)
     return (
       <div key={c.id} className="channel-row">
         <button
-          className={`channel ${c.id === cid ? 'active' : ''}`}
+          className={`channel ${c.id === cid ? 'active' : ''} ${unread ? 'unread' : ''}`}
           aria-current={c.id === cid ? 'page' : undefined}
-          aria-label={voice ? `${c.name}, voice channel${here.length ? `, ${here.length} in it` : ''}${full ? ', full' : ': join'}` : undefined}
+          aria-label={`${c.name}${voice ? `, voice channel${here.length ? `, ${here.length} in it` : ''}` : ''}${unread ? `, ${unread} unread` : ''}${voice ? (full ? ', full' : ': join') : ''}`}
           title={full ? 'This voice channel is full' : undefined}
           onClick={() => (open(c.id), voice && !full && call.conv !== `${sv.id}.${c.id}` && run(call.join(`${sv.id}.${c.id}`)))}
         >
@@ -146,6 +148,7 @@ export function Server({ st, sv, channel, people: everyone, run, go }: Props) {
               <Icon name="lock" size={14} />
             </span>
           )}
+          {unread > 0 && <span className="channel-count">{unread > 99 ? '99+' : unread}</span>}
           {voice && c.userLimit ? (
             <span className="tail">{full ? 'Full' : `${here.length}/${c.userLimit}`}</span>
           ) : null}

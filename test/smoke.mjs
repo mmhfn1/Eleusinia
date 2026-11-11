@@ -1239,6 +1239,15 @@ try {
   await until('both are listed online in the members list', () => a.ev(`(() => { const m = document.querySelector('aside.members'); return !!m && m.textContent.includes('Online — 2') && ['Ann', 'Bob'].every((n) => m.textContent.includes(n)) })()`), 30)
   await until("Ann's message shows delivered once Bob's receipt is back", () => a.ev(`!!document.querySelector('.msgs .msg') && !document.querySelector('.msgs .msg-status.pending')`), 20)
   await a.shot('server')
+  // A channel not being looked at counts on the server's rail tile and is bold until opened
+  await a.ev(`${channel('general')}.click()`)
+  await until('Ann opens #general', () => a.ev(headIs('general')), 5)
+  await b.ev(say('plans for friday'))
+  await until("Ann's server tile counts Bob's message in #plans, and #plans is bold with a count", () =>
+    a.ev(`document.querySelector('.rail-server .rail-count')?.textContent === '1' && ${channel('plans')}.classList.contains('unread') && ${channel('plans')}.querySelector('.channel-count')?.textContent === '1'`), 30)
+  await a.shot('server-unread')
+  await a.ev(`${channel('plans')}.click()`)
+  await until('opening #plans reads it: the count and the bold are gone', () => a.ev(`!document.querySelector('.rail-server .rail-count') && !${channel('plans')}.classList.contains('unread')`), 10)
   await b.ev(`document.querySelector('.channel-tools button[aria-label^="Open Lounge"]').click()`)
   await until("Bob opens Lounge's own text chat without joining its call", () =>
     b.ev(`${headIs('Lounge')} && document.querySelector('.msgs').textContent.includes("Lounge's text chat is new") && !document.querySelector('.voice-dock')`), 5)

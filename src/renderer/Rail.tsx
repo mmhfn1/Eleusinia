@@ -20,7 +20,7 @@ export const otherIn = (c: string, me: Key) => c.split('_').find((k) => k !== me
 export function railDms(st: State) {
   const pinned = st.settings.pinned ?? []
   const dms = Object.entries(st.chats)
-    .filter(([c, ch]) => !st.groups[c] && !st.blocked.includes(otherIn(c, st.me)) && (pinned.includes(c) || ch.at > (st.settings.closed?.[c] ?? 0)))
+    .filter(([c, ch]) => !st.groups[c] && !st.servers[c.split('.')[0]] && !st.blocked.includes(otherIn(c, st.me)) && (pinned.includes(c) || ch.at > (st.settings.closed?.[c] ?? 0)))
     .sort(([a, x], [b, y]) => (pinned.includes(a) ? pinned.indexOf(a) - 1e15 : -x.at) - (pinned.includes(b) ? pinned.indexOf(b) - 1e15 : -y.at))
   return dms.map(([c]) => c)
 }
@@ -41,7 +41,9 @@ export function Rail({ st, people, open, go, show, run }: Props) {
   const muted = (c: string) => !!st.settings.muted?.[c]
   // A server counts as in a call when any of its channels is (their conversations are `${server}.${channel}`).
   const inCall = (c: string) => [...call.active].some(([x, v]) => (x === c || x.startsWith(c + '.')) && v.size) || call.conv === c || !!call.conv?.startsWith(c + '.')
-  const count = (c: string) => (muted(c) ? 0 : (st.chats[c]?.unread ?? 0))
+  // A server's conversations are its channels'; a muted channel or server adds nothing to its count
+  const convs = (c: string) => (st.servers[c] ? Object.keys(st.chats).filter((x) => x.startsWith(c + '.')) : [c])
+  const count = (c: string) => (muted(c) ? 0 : convs(c).reduce((n, x) => n + (muted(x) ? 0 : (st.chats[x]?.unread ?? 0)), 0))
   const badges = (c: string) => (
     <>
       {inCall(c) && <span className="rail-badge" aria-hidden="true" />}
@@ -57,7 +59,7 @@ export function Rail({ st, people, open, go, show, run }: Props) {
   const leaveIfOpen = (c: string) => open === c && go(null)
   const startCall = (c: string) => (go(c), run(call.join(c)))
   const common = (c: string): Item[] => [
-    ...(st.chats[c]?.unread ? [{ label: 'Mark as read', act: () => run(api.call('markRead', c)) }] : []),
+    ...(convs(c).some((x) => st.chats[x]?.unread) ? [{ label: 'Mark as read', act: () => convs(c).forEach((x) => run(api.call('markRead', x))) }] : []),
     { label: muted(c) ? 'Unmute' : 'Mute', act: () => settings({ muted: { ...st.settings.muted, [c]: !muted(c) } }) },
   ]
 
@@ -135,7 +137,7 @@ export function Rail({ st, people, open, go, show, run }: Props) {
     ],
     [{ label: 'Create a group', act: () => show({ kind: 'group' }) }],
   ]
-  const sections = menu ? (menu.for === '+' ? addMenu : st.groups[menu.for] ? groupMenu(menu.for) : st.chats[menu.for] ? dmMenu(menu.for) : []) : []
+  const sections = menu ? (menu.for === '+' ? addMenu : st.groups[menu.for] ? groupMenu(menu.for) : st.servers[menu.for] ? [common(menu.for)] : st.chats[menu.for] ? dmMenu(menu.for) : []) : []
   const here = (c: string) => open === c || !!open?.startsWith(c + '.')
 
   const conv = (c: string, label: string, body: ReactNode, extra: string) => (

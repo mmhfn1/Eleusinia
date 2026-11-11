@@ -4236,6 +4236,14 @@ aside.server-side {
 .channel > .icon {
   color: var(--mist-2);
 }
+.channel.unread {
+  color: var(--silver);
+  font-weight: 600;
+}
+.channel-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
 .channel-name {
   flex: 1;
   min-width: 0;
