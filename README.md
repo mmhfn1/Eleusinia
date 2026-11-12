@@ -107,6 +107,7 @@ The two can find each other by exact friend ID even if one is closed, once each 
 | `npm run dist` | Builds the Windows installer into `dist/` (`Eleusinia-Setup-<version>.exe`); the macOS and Linux ones are built by GitHub (`npx electron-builder --mac` or `--linux` on those systems) |
 | `ELEUSINIA_SMOKE_EXE=dist/win-unpacked/Eleusinia.exe node test/smoke.mjs` | The same smoke run against the packaged app, after `npm run dist` |
 | `npm run inbox` | Runs the developers' inbox, which receives problem and crash reports and files them as GitHub issues (see [docs/reports.md](docs/reports.md)) |
+| `npm run logs` | Asks every tester's app for its logs (`npm run logs -- name#1234` for one); they arrive in the inbox's reports folder and, with GitHub filing set up, as one issue per pull 10 minutes later (see [docs/reports.md](docs/reports.md)) |
 | `npm run installer-art` | Redraws the installer's sidebar and header pictures in the app's look |
 | `ELEUSINIA_SMOKE_PUBLIC=1 npm run smoke` | Same, over the public DHT: an occasional real-network check, slower and sometimes flaky when the DHT is |
 | `ELEUSINIA_TEST_NET="delay=150,jitter=30,loss=0.03,burst=4"` | Testing only: a simulated bad line (delay, jitter, average loss, loss burst length, `outage=30:8` for 8 s of nothing from 30 s in) on relayed call packets; use with `ELEUSINIA_NO_DIRECT=1` so every packet takes that path |
