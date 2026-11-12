@@ -1,0 +1,123 @@
+/* The startup splash, Lantern (design/mockups/splash.html): a warm lamp breathes inside the emblem while the cold fog
+   outside breathes the other way. Only opacity and transform move, the cheapest work for the graphics card. */
+.splash {
+  --breath: 2.6s;
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  overflow: hidden;
+  /* The same room as the app (style.css body): fog above, the lamp's light below, so closing is seamless */
+  background:
+    radial-gradient(90% 60% at 50% -10%, rgb(66 90 107 / 0.4), transparent 62%),
+    radial-gradient(70% 45% at 50% 118%, rgb(216 195 156 / var(--glow)), transparent 72%),
+    var(--void);
+  color: var(--silver);
+  transition: opacity 400ms ease;
+  -webkit-app-region: drag; /* the window can still be moved while it shows */
+}
+.splash.gone {
+  opacity: 0;
+  pointer-events: none;
+}
+.splash-art {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+.splash-stage {
+  position: relative;
+  width: 240px;
+  height: 240px;
+}
+.splash-layer {
+  position: absolute;
+  inset: 0;
+  will-change: opacity, transform;
+}
+.splash-fish {
+  -webkit-mask: url('./assets/emblem.png') center / contain no-repeat;
+  mask: url('./assets/emblem.png') center / contain no-repeat;
+}
+.splash-fog {
+  inset: -45%;
+  background: radial-gradient(closest-side, rgb(66 90 107 / 0.75), rgb(29 57 78 / 0.45) 45%, transparent 75%);
+  animation:
+    splash-swell var(--breath) ease-in-out infinite alternate,
+    splash-out var(--breath) ease-in-out infinite alternate;
+}
+.splash-base {
+  background: radial-gradient(circle at 50% 56%, #6b5a4c, #2a2320 55%, var(--void));
+}
+.splash-lamp {
+  background: radial-gradient(circle at 50% 56%, #eadedc 0%, #d8c39c 32%, #8c6f4e 62%, #2a2320 92%);
+  animation: splash-in var(--breath) ease-in-out infinite alternate;
+}
+.splash-word,
+.splash-status,
+.splash-detail {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  text-align: center;
+}
+.splash-word {
+  top: calc(50% + 150px);
+  padding-left: 0.42em;
+  font: 600 15px/1 var(--display);
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: #e6d6b4; /* the wordmark, as in the app */
+  opacity: 0.86;
+}
+.splash-status {
+  top: calc(50% + 184px);
+  font: 14px/1.3 var(--sans);
+  color: var(--mist-2);
+}
+.splash-detail {
+  top: calc(50% + 208px);
+  font: 12px/1.3 var(--sans);
+  color: color-mix(in srgb, var(--mist-2) 70%, transparent);
+}
+@keyframes splash-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes splash-out {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+@keyframes splash-swell {
+  from { transform: scale(0.86); }
+  to { transform: scale(1.12); }
+}
+
+/* Reduced motion: one still frame halfway through a breath, and no fade */
+@media (prefers-reduced-motion: reduce) {
+  .splash-layer {
+    animation: none !important;
+  }
+  .splash-lamp {
+    opacity: 0.55;
+  }
+  .splash-fog {
+    opacity: 0.45;
+  }
+  .splash {
+    transition-duration: 1ms;
+  }
+}
+
+/* Who is still connecting after the splash gave up waiting: a note, not an error */
+.toast.still-connecting {
+  padding-right: 16px;
+  border-color: color-mix(in srgb, var(--accent) 50%, transparent);
+  background: var(--obsidian);
+}
+
+/* The window's own title bar stays usable on top of the splash */
+.splash .titlebar {
+  position: relative;
+  z-index: 1;
+}
