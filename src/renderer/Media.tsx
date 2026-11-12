@@ -8,6 +8,7 @@ import * as call from './call'
 import { Avatar, Dialog, Icon } from './ui'
 import type { SourceKind } from '../shared/sources'
 import { api } from './common'
+import { callWords } from '../shared/reach'
 import './pip.css'
 
 const GRADE_WORDS = { good: 'good and stable', fair: 'degraded', poor: 'poor' }
@@ -55,7 +56,7 @@ export function Oculus({ st, name, show }: { st: State; name: (k: Key) => string
   const prof = (k: Key) => (k === st.me ? st.profile : st.profiles[k])
   const state = (k: Key) => {
     const v = k === st.me ? { muted: call.muted, deafened: call.deafened } : call.voices.get(k)
-    return v?.deafened ? 'Deafened' : v?.muted ? 'Muted' : call.speaking.has(k) ? 'Talking' : k === st.me ? '' : STATE_WORDS[call.peers.get(k)?.pc.connectionState ?? ''] ?? ''
+    return v?.deafened ? 'Deafened' : v?.muted ? 'Muted' : call.speaking.has(k) ? 'Talking' : k === st.me ? '' : callWords(st, k, call.peers.get(k)?.pc.connectionState ?? '')
   }
   return (
     <section className="oculus" aria-label="People in the call">
@@ -123,14 +124,6 @@ export function PersonVolume({ st, k, name }: { st: State; k: Key; name: string 
   )
 }
 
-export const STATE_WORDS: Record<string, string> = {
-  new: 'Connecting…',
-  connecting: 'Connecting…',
-  connected: 'Connected',
-  disconnected: 'Reconnecting…',
-  failed: 'Reconnecting…', // call.ts retries until the peer leaves or goes offline
-  closed: 'Disconnected',
-}
 
 const mbps = (kbps: number) => (kbps / 1000).toFixed(kbps < 10000 ? 1 : 0)
 

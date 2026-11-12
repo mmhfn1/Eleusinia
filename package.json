@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "smoke": "electron-vite build && node test/smoke.mjs .",
     "inbox": "electron-vite build && electron . --inbox",
+    "logs": "electron . --inbox --pull",
     "installer-art": "electron build/installer-art.cjs",
     "dist": "electron-vite build && electron-builder --win --publish never"
   },

@@ -413,6 +413,20 @@ function Feedback({ st }: { st: State }) {
           It never includes your messages, names, pictures, window titles, device names, full keys or network addresses.
         </Info>
       </div>
+      {BUILD === 'tester' && (
+        <div className="setting crash-setting">
+          <label className="check-row">
+            <input type="checkbox" role="switch" checked={st.settings.shareLogs !== false} onChange={(e) => api.call('setSettings', { shareLogs: e.target.checked })} />
+            <span>Send logs when the developers ask for them</span>
+          </label>
+          <Info id="logs-tip">
+            In this tester build, the developers can ask every tester's app for its logs at once, to look into a problem without anyone writing a report.
+            Your app then sends what a crash report carries: the app and Windows versions and the last few minutes of connection, call and error events.
+            <br />
+            It never includes your messages, names, pictures, window titles, device names, full keys or network addresses.
+          </Info>
+        </div>
+      )}
       {st.reports > 0 && (
         <p className="row-sub" role="status">
           {st.reports === 1 ? '1 report is' : `${st.reports} reports are`} waiting to reach the developers. They are sent as soon as their inbox is

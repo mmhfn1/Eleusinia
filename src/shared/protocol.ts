@@ -48,6 +48,7 @@ export type Settings = {
   soundVolume?: number // the app's own sounds (mute, joins, ringing, push to talk), 0 to 1 on top of outVolume; default 1
   micGate?: number
   crashReports?: boolean // send crash reports to the developers automatically; on unless turned off
+  shareLogs?: boolean // tester builds: answer a developer's log pull (reports.ts Pull); on unless turned off
   closeToTray?: boolean // closing the window keeps Eleusinia running in the tray; on unless turned off
   noiseSuppression?: boolean // RNNoise on the microphone; on unless turned off
   relay?: boolean // relay for mutual friends who cannot link directly; on unless turned off (being reached through one is always on)
@@ -84,6 +85,10 @@ export type State = {
   versions: Record<Key, Version> // what each person we have greeted runs; memory only
   relayed: Key[] // online people whose link goes through a mutual friend's relay: voice and text only
   present: Key[] // group members online but not linked with us, known from their presence notes
+  // People we could not link with for now: a direct dial and a round of relay asks both failed (node.ts relayFailed).
+  // Shown as "can't connect" only for someone known to be online (present, or in our call); for anyone else it just
+  // means offline. Tried again with a growing wait.
+  unreachable: Key[]
   activity: Record<Key, Activity> // what contacts are doing now, memory only; ours as they see it, under our own key
   chats: Record<string, { unread: number; at: number }> // conversations with at least one message, server channels included: unread messages and missed calls, last activity
   blocked: Key[]

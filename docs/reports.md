@@ -53,6 +53,28 @@ Only one machine can run the inbox at a time.
 Reports received while GitHub is unreachable are filed later, retried every minute. If the token may not create
 labels, issues are filed without them.
 
+### Pulling logs from testers
+
+Tester builds can be asked for their logs without anyone writing a report:
+
+```bash
+npm run logs
+```
+
+asks every tester; `npm run logs -- kestrel#2741 a1b2c3` asks only those friend IDs or Unique Keys (the last 6
+characters of a key, as Settings shows). Run it on the inbox machine after `npm run inbox` has built the app; while the
+inbox runs, the command is handed to it, otherwise it starts the inbox itself.
+
+The inbox publishes the request as a record signed by its own key, which the DHT checks, so nobody else can make one.
+Tester copies read it every 2 minutes and once on start, and each answers a request once, within a day, with what a
+crash report carries: the app and system details and the last 15 minutes of scrubbed diagnostics. The answers arrive
+as `[logs]` reports in the reports folder. With GitHub filing set up, each pull becomes **one** issue, labelled
+`logs`, 10 minutes after it was made: who was asked, who answered, and a section per tester (version, system, memory
+in use and their newest events, shortened to fit GitHub's size limit). Testers who answer later, within the day, are
+added as comments on that issue. Pulls and the answers to each are kept in `pulls.json` beside the reports folder,
+so a restarted inbox carries on where it left off. Testers can turn this off in Settings →
+Help and feedback; builds other than the tester build never answer.
+
 ### A new inbox key
 
 If the identity is lost or leaked, delete `inbox-identity.json`, run `npm run inbox` to make a new one, put the

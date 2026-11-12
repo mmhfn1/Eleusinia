@@ -4,7 +4,8 @@ import { join } from 'node:path'
 import DHT from 'hyperdht'
 import createTestnet from 'hyperdht/testnet'
 import { afterAll, beforeAll, expect, test, vi } from 'vitest'
-import { createInbox, issueOf, reportLimit } from '../src/main/inbox'
+import { createInbox, issueOf, pullIssueOf, reportLimit } from '../src/main/inbox'
+import { PULL_TTL, cleanPull, pullFor, pullTargets } from '../src/shared/reports'
 import { createNode } from '../src/main/node'
 
 let testnet: any
@@ -107,4 +108,73 @@ test('reports saved before a restart and not yet filed are filed by the next sta
   expect(posted).toEqual(['[bug] Saved 1111111111111111'])
   vi.unstubAllGlobals()
   await inbox.destroy()
+})
+
+test('a log pull names everyone or some testers by friend ID or Unique Key, and is answered once, within a day', () => {
+  expect(pullTargets(undefined)).toBe('all')
+  expect(pullTargets('Kestrel#2741, A1B2C3')).toEqual(['kestrel#2741', 'a1b2c3'])
+  expect(pullTargets('kestrel')).toBeNull() // neither a friend ID nor a Unique Key
+  const p = { id: '0123456789abcdef', at: 1000, to: ['kestrel#2741', 'a1b2c3'] as string[] }
+  expect(cleanPull(Buffer.from(JSON.stringify(p)))).toEqual(p)
+  expect(cleanPull(Buffer.from('{"id":"x","at":1,"to":"all"}'))).toBeNull()
+  expect(cleanPull(Buffer.from('not json'))).toBeNull()
+  const now = 2000
+  expect(pullFor(p, { tail: 'A1B2C3' }, [], now)).toBe(true)
+  expect(pullFor(p, { tail: 'ffffff', handle: 'Kestrel#2741' }, [], now)).toBe(true)
+  expect(pullFor(p, { tail: 'ffffff', handle: 'ann#1111' }, [], now)).toBe(false) // not named
+  expect(pullFor(p, { tail: 'a1b2c3' }, [p.id], now)).toBe(false) // already answered
+  expect(pullFor(p, { tail: 'a1b2c3' }, [], p.at + PULL_TTL + 1)).toBe(false) // too old
+})
+
+test('a log pull becomes one GitHub issue once its answers are gathered, and a later answer a comment on it', async () => {
+  const posted: { url: string; body: any }[] = []
+  vi.stubGlobal('fetch', async (url: string, init: any) => (posted.push({ url, body: JSON.parse(init.body) }), new Response(JSON.stringify({ number: 9 }), { status: 201 })))
+  const inboxDir = tmp()
+  const inbox = createInbox({ dir: inboxDir, keyPair: DHT.keyPair(), dht: { bootstrap: testnet.bootstrap }, github: { token: 't', repo: 'team/r' }, fileEvery: 200, gatherMs: 1500 })
+  const pull = await inbox.pull('all')
+  expect(pull).not.toBeNull()
+
+  const tester = (line: string) => {
+    let node: ReturnType<typeof createNode> | null = null
+    node = createNode({
+      dir: tmp(),
+      keyPair: DHT.keyPair(),
+      emit: () => {},
+      dht: { bootstrap: testnet.bootstrap },
+      redialMs: 300,
+      inbox: inbox.key,
+      pullLogs: (p, id) => node!.report({ kind: 'logs', title: `Logs for pull ${p.id.slice(0, 6)}`, body: '', events: [{ at: 1, area: 'network', text: line }] }, id),
+    })
+    return node
+  }
+  const first = tester('direct link with …a1b2c3 failed: HOLEPUNCH_ABORTED')
+  await until(() => first.state().reports === 0) // answered on joining the DHT, and delivered
+  expect(posted).toHaveLength(0) // not before the answers are gathered
+  await until(() => posted.length === 1)
+  expect(posted[0].url).toBe('https://api.github.com/repos/team/r/issues')
+  expect(posted[0].body.title.startsWith(`[logs] Pull ${pull!.id.slice(0, 6)}: 1 tester,`)).toBe(true)
+  expect(posted[0].body.body).toContain('HOLEPUNCH_ABORTED')
+
+  const late = tester('no contact could relay for …d8568a yet')
+  await until(() => posted.length === 2)
+  expect(posted[1].url).toBe('https://api.github.com/repos/team/r/issues/9/comments')
+  expect(posted[1].body.body).toContain('no contact could relay')
+  await new Promise((r) => setTimeout(r, 600))
+  expect(posted).toHaveLength(2) // each answer once
+  expect(readdirSync(join(inboxDir, 'reports')).filter((f) => f.endsWith('.txt'))).toHaveLength(2) // saved too
+
+  vi.unstubAllGlobals()
+  await first.destroy()
+  await late.destroy()
+  await inbox.destroy()
+})
+
+test('a pull issue from many testers with long logs stays within GitHub size limit', () => {
+  const events = Array.from({ length: 400 }, (_, i) => ({ at: i * 1000, area: 'network' as const, text: `event ${i} `.padEnd(290, 'x') }))
+  const answers = Array.from({ length: 20 }, (_, i) => ({ report: { id: i.toString(16).padStart(16, '0'), at: 0, kind: 'logs' as const, title: 'Logs for pull 012345', body: '', events }, from: `T${i}`.padEnd(6, '0'), received: 0, issue: null }))
+  const issue = pullIssueOf({ id: '0123456789abcdef', at: 0, to: 'all' }, answers)
+  expect(issue.body.length).toBeLessThan(65536)
+  expect(issue.body).toContain('### Tester …T19000')
+  expect(issue.body).toContain('event 399') // each tester's newest events are kept
+  expect(issue.labels).toEqual(['logs'])
 })

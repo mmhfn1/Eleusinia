@@ -31,7 +31,7 @@ import DHT from 'hyperdht'
 import { idSeed, readClaims, signClaim, withClaim, writeClaims } from '../shared/idcard'
 import { type FileRef, validFiles } from '../shared/media'
 import { cleanLink } from '../shared/links'
-import { type Area, type Report, cleanReport } from '../shared/reports'
+import { type Area, type Pull, type Report, PULL_EVERY, cleanPull, cleanReport, pullFor } from '../shared/reports'
 import { EDIT_AHEAD_MS, groupIdOf, heldFrom, mergeGroup, missing, ownerOf, signAdd, signEdit, signLeft, signMsg, profileVersion, signRemoved, validGroup, verifyAdd, verifyMsg, withLink } from '../shared/sync'
 import { openRequest, requestSeed, sealRequest } from '../shared/sealed'
 import { createImpairment, parseNetSim } from '../shared/netsim'
@@ -42,6 +42,7 @@ import { type ServerState, joinProof, verifyJoin } from '../shared/server'
 import { createFiles } from './files'
 import { type Activity, type Game, cleanActivity, shareable } from '../shared/activity'
 import { type RelayLimits, RELAY_LIMITS, createNet } from './network'
+import { pickRelays } from '../shared/relaypick'
 import { createRelay } from './relay'
 import { isNewer } from '../shared/updatesig'
 import { type Check, type StartupEvent, type StepId, startupEvent } from '../shared/startup'
@@ -52,6 +53,7 @@ type Saved = {
   blocked?: Record<Key, number> // people we blocked, and when: no friend requests, no links, their messages uncounted
   joinedAt?: Record<string, number> // per group: when it reached us; history written before that is not unread
   profileV?: Record<Key, string> // the profile version (profileVersion) we hold of each person, from a greeting or their card
+  pulled?: string[] // developers' log pulls already answered (reports.ts pullFor), the newest 20
   profile: Profile
   friends: Record<Key, FriendStatus>
   profiles: Record<Key, Profile>
@@ -83,6 +85,9 @@ type Opts = {
   strict?: boolean // testing: direct connections fail for real, as behind a strict router, so only a relay links
   relayLimits?: RelayLimits // testing: smaller caps on what we relay for contacts
   inbox?: Key // the developers' inbox, where problem and crash reports go
+  // Tester builds: answer a developer's log pull (index.ts files the diagnostics with report); id: the answer's report
+  // id, the same for one pull and copy, so a resent answer is stored once
+  pullLogs?: (p: Pull, id: string) => void
   version?: string // this app's version, told to everyone we greet
   newerApp?: (version: string) => void // a contact runs a newer version than ours: an update is out (index.ts checks)
   diag?: (area: Area, text: string) => void // diagnostic events, kept in memory by the caller
@@ -105,7 +110,7 @@ const CATCHUP_BACKLOG = 1 << 20 // no new round while this much is still unsent 
 const FLOOD = { burst: 400, perSecond: 20 }
 
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
-export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', newerApp, links, strict, relayLimits, maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8, keepMsgs = 50000, startupMs = 20000, appMemory = () => process.memoryUsage().rss / 2 ** 20 }: Opts) {
+export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, pullLogs, diag = () => {}, version = '0.0.0', newerApp, links, strict, relayLimits, maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8, keepMsgs = 50000, startupMs = 20000, appMemory = () => process.memoryUsage().rss / 2 ** 20 }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
   const file = join(dir, 'state.json')
   mkdirSync(join(dir, 'msgs'), { recursive: true })
@@ -243,6 +248,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     chats: Object.fromEntries(Object.entries(s.lastAt ?? {}).filter(([c]) => members(c).length).map(([c, at]) => [c, { unread: s.unread?.[c] ?? 0, at }])),
     blocked: Object.keys(s.blocked ?? {}),
     present: presence.online().filter(known),
+    // Both a direct dial and a round of relay asks failed, and nothing is being tried right now; tried again later
+    unreachable: [...fails.keys()].filter((k) => directFailed.has(k) && !attempting.has(k) && !net.linked(k) && known(k)),
     servers: servers.summary(),
   })
   const push = () => emit({ type: 'state', state: state() })
@@ -646,12 +653,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     } else if (w.t === 'reach') {
       if (!isKey(w.key)) return
       if (typeof w.ok === 'boolean') return reaching.get(w.key)?.(key, w.ok)
-      // Yes only for two of our contacts, with the target linked to us and on a version that accepts relayed links.
-      const n = (asked.get(key) ?? 0) + 1
-      asked.set(key, n)
-      const ok = !!relayKey && n <= 10 && w.key !== key && known(w.key) && net.linked(w.key) && (reachable.has(w.key) || relayKeys.has(w.key))
-      if (!ok) tell(`cant:${key}:${w.key}`, `can't relay for …${key.slice(-6)} to …${w.key.slice(-6)}: ${!relayKey ? 'relaying off' : !known(w.key) ? 'not a contact' : !net.linked(w.key) ? 'not linked with them' : !(reachable.has(w.key) || relayKeys.has(w.key)) ? 'their version cannot be reached through a friend' : 'too many asks'}`)
-      net.send(key, { t: 'reach', key: w.key, ok })
+      relayFor(key, w.key)
     } else if (w.t === 'relayed') {
       if (!isKey(w.by) || !known(w.by)) return
       relayedVia.set(key, { by: w.by, path: net.path(key), at: Date.now() })
@@ -666,6 +668,34 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const probes = new Map<number, () => void>()
   let probeId = 0
   const asked = new Map<Key, number>() // reach questions per contact this minute
+  const dialingFor = new Set<Key>() // targets we are linking with because someone asked us to relay to them
+  const dialedBack = new Map<Key, number>() // contacts whose dial reached us unlinked, when we last dialed back (incoming)
+  const REACH_DIAL_MS = 10000 // a hole punch to a strict router can take 8 to 9 s
+  const MAX_DIALS_FOR_OTHERS = 4
+  // Someone asks us to relay to target. Yes only for two of our contacts, with the target on a version that accepts
+  // relayed links. Not linked with the target yet: we link first (0.1.3 reports: most refusals were only that), within
+  // 10 s and at most 4 such links at a time, since one asker must not make us dial a whole server.
+  async function relayFor(asker: Key, target: Key) {
+    const n = (asked.get(asker) ?? 0) + 1
+    asked.set(asker, n)
+    const why = !relayKey ? 'relaying off' : n > 10 ? 'too many asks' : target === asker || !known(target) ? 'not a contact' : ''
+    const ready = () => net.linked(target) && (reachable.has(target) || relayKeys.has(target))
+    if (!why && !ready() && !s.blocked?.[target]) {
+      if (!net.linked(target)) {
+        if (!dialingFor.has(target) && dialingFor.size >= MAX_DIALS_FOR_OTHERS) return answer(asker, target, 'busy linking for others')
+        tell(`first:${asker}:${target}`, `relaying for …${asker.slice(-6)} to …${target.slice(-6)}: linking with them first`)
+        if (!dialingFor.has(target)) dialingFor.add(target), net.dial(target)
+      }
+      const t0 = Date.now()
+      while (!ready() && Date.now() - t0 < REACH_DIAL_MS) await new Promise((r) => setTimeout(r, 200))
+      dialingFor.delete(target)
+    }
+    answer(asker, target, why || (!net.linked(target) ? 'could not link with them' : !ready() ? 'their version cannot be reached through a friend' : ''))
+  }
+  function answer(asker: Key, target: Key, why: string) {
+    if (why) tell(`cant:${asker}:${target}`, `can't relay for …${asker.slice(-6)} to …${target.slice(-6)}: ${why}`)
+    net.send(asker, { t: 'reach', key: target, ok: !why })
+  }
   const probeReset = setInterval(() => (probed.clear(), asked.clear()), 60000)
 
   // Relaying through a mutual contact, for peers no direct dial reaches (both behind strict routers). The relay
@@ -715,22 +745,25 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     fails.set(k, n)
     retryAt.set(k, later(n, RETRY))
     if (by) avoid.set(by + k, Date.now() + 600000)
+    push() // State.unreachable: the window stops saying "connecting"
   }
-  // Ask up to 3 relaying contacts, the last one that worked first; dial through the first that says yes.
+  // Ask up to 6 relaying contacts, those most likely to reach them first (shared/relaypick.ts); dial through the first
+  // that says yes. A yes can take a few seconds, as the relay may link with them first (relayFor).
   async function tryRelay(k: Key) {
     attempting.add(k)
     const now = Date.now()
-    const cands = net
-      .keys()
-      .filter((c) => c !== k && relayKeys.has(c) && known(c) && (avoid.get(c + k) ?? 0) <= now)
-      .sort(() => Math.random() - 0.5)
-      .sort((a, b) => +(b === lastGood.get(k)) - +(a === lastGood.get(k)))
-      .slice(0, 3)
+    const callOf = new Map(presence.calls())
+    const shares = (c: Key) => ours().some((g) => g.members.includes(c) && g.members.includes(k)) || servers.lists().some((l) => l.includes(c) && l.includes(k))
+    const cands = pickRelays(
+      net.keys().filter((c) => c !== k && relayKeys.has(c) && known(c) && (avoid.get(c + k) ?? 0) <= now),
+      k,
+      { last: lastGood.get(k), callOf: (c) => callOf.get(c), shares },
+    )
     tell(`ask:${k}`, `asking ${cands.length} contact${cands.length === 1 ? '' : 's'} to relay for …${k.slice(-6)}`)
     const by = await new Promise<Key | null>((resolve) => {
       let left = cands.length
       if (!left) return resolve(null)
-      const timer = setTimeout(() => resolve(null), 3000)
+      const timer = setTimeout(() => resolve(null), REACH_DIAL_MS + 2000) // room for the relay to link with them first
       reaching.set(k, (from, ok) => {
         if (!cands.includes(from)) return
         if (ok || !--left) clearTimeout(timer), resolve(ok ? from : null)
@@ -885,6 +918,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       // A stranger dialing is how a new request rings: they announce it first, then dial, so looking now finds it at
       // once instead of at the next 30 s check.
       knock: (key) => !s.friends[key] && !declinedRecently(key) && (ring(key), lookJoiner(key)),
+      // A contact dialing us while unlinked (a relay linking with us for someone, a friend coming back): when our router
+      // turns their dial away, ours to them often works, so we dial back once their attempt has had its chance
+      incoming(key) {
+        if (!known(key) || (dialedBack.get(key) ?? 0) > Date.now() - 10000) return
+        dialedBack.set(key, Date.now())
+        if (dialedBack.size > 1000) dialedBack.clear()
+        setTimeout(() => !net.linked(key) && net.dial(key), 1500)
+      },
       open(key, replaced) {
         const by = pendingVia.get(key)
         if (by) {
@@ -927,7 +968,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         }
         push()
       },
-      failed(key, via) {
+      failed(key, via, why) {
+        // Why a link never formed was missing from reports; once per peer and reason, so a redial loop does not flood them
+        if (joined && why) tell(`fail:${key}:${via ?? ''}:${why}`, `${via ? `relayed link with …${key.slice(-6)} through …${pendingVia.get(key)?.slice(-6) ?? '?'}` : `direct link with …${key.slice(-6)}`} failed: ${why}`)
         if (!via) directFailed.add(key), joined && backOff(key) // dials before we are on the DHT say nothing about them
         else if (pendingVia.has(key)) relayFailed(key, pendingVia.get(key))
       },
@@ -998,7 +1041,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   let joined = false
   // Dials that failed before we were on the DHT said nothing (failed), so dial again at once, not at the next tick,
   // and name unlinked members now rather than in 30 s
-  net.listening.then(() => ((joined = true), redial(), nameUnlinked(Infinity)), () => {})
+  net.listening.then(() => ((joined = true), redial(), nameUnlinked(Infinity), checkPull()), () => {})
   // While relaying, the first few retries skip the wait (a relay needs its contacts linked as soon as they can be, or
   // pairs wait minutes); after that it backs off too, or with relaying on by default nobody offline ever would.
   const due = (k: Key) => (retries.get(k)?.next ?? 0) <= Date.now() || (!!relayKey && (retries.get(k)?.n ?? 0) < 3)
@@ -1092,6 +1135,17 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const timer = setInterval(redial, redialMs)
   const delivery = setInterval(deliver, redialMs) // only dials while reports are waiting, like redialing an offline friend
   deliver()
+  // Tester builds: a developer's log pull, read from the inbox's own signed record, answered once each
+  async function checkPull() {
+    if (!inbox || !pullLogs || !joined || s.settings.shareLogs === false) return
+    const p = cleanPull(await net.fetch(inbox, true))
+    if (!pullFor(p, { tail: me.slice(-6), handle: s.profile.handle }, s.pulled ?? [])) return
+    s.pulled = [...(s.pulled ?? []).slice(-19), p.id]
+    changed()
+    diag('app', `the developers asked for logs (pull ${p.id.slice(0, 6)}); sending them`)
+    pullLogs(p, createHash('sha256').update(p.id + me).digest('hex').slice(0, 16))
+  }
+  const pulls = setInterval(checkPull, PULL_EVERY)
 
   const prefixTopic = (prefix: string) => createHash('sha256').update('eleusinia-prefix:' + prefix).digest()
   // Only with Settings → suggest: every username prefix from 4 letters up, so people can be suggested while typing.
@@ -1732,8 +1786,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     },
     // Queues a problem or crash report for the developers. It is checked and scrubbed here (shared/reports.ts) as
     // well as at the inbox, then sent whenever the inbox is reachable.
-    report(r: Omit<Report, 'id' | 'at'>) {
-      const clean = cleanReport({ ...r, id: randomBytes(8).toString('hex'), at: Date.now() })
+    // id: given for a log pull's answer, so the same pull is stored once at the inbox
+    report(r: Omit<Report, 'id' | 'at'>, id = randomBytes(8).toString('hex')) {
+      const clean = cleanReport({ ...r, id, at: Date.now() })
       if (!clean) throw new Error('That report cannot be sent')
       mkdirSync(outbox, { recursive: true })
       writeFileSync(join(outbox, clean.id + '.json'), JSON.stringify(clean))
@@ -1750,6 +1805,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (pushing) clearTimeout(pushing)
       clearInterval(timer)
       clearInterval(delivery)
+      clearInterval(pulls)
       clearInterval(announcer)
       clearInterval(presenceTimer)
       if (preDialing) clearTimeout(preDialing)
