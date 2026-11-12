@@ -14,6 +14,7 @@ import { isWebUrl } from '../shared/links'
 import { isKey } from '../shared/protocol'
 import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared/reports'
 import { kindOf, shareable } from '../shared/sources'
+import { limiter } from '../shared/invite'
 import { isNewer, verifyUpdate } from '../shared/updatesig'
 import { DESTINY_APP, type Game, artUrl, sharing } from '../shared/activity'
 import type { Destiny } from '../shared/destiny'
@@ -255,20 +256,25 @@ let activityChanged = () => {}
 
 // Closing windows never quits by itself: the tray menu, the close-to-tray setting or an update does, explicitly.
 app.on('window-all-closed', () => {})
-app.whenReady().then(async () => firstCopy && (inboxMode ? startInbox() : (await updateFirst()) && startApp()))
+app.whenReady().then(() => firstCopy && (inboxMode ? startInbox() : startApp()))
 
 // Updates: the installed app looks for a newer release of github.com/mmhfn1/Eleusinia (published for every push to
-// main, see .github/workflows/release.yml) on start, hourly, when a contact runs a newer version and when a call does not connect (startUpdates), downloads it in the background and tells the
-// window, which offers a restart; otherwise it installs the next time Eleusinia is closed. Copies run from source never
-// update. ELEUSINIA_UPDATE_URL points it at another folder of releases (testing), ELEUSINIA_NO_UPDATES=1 turns it off.
+// main, see .github/workflows/release.yml) on start, hourly, when a contact runs a newer version and when a call does
+// not connect (startUpdates). One found on start is downloaded and installed behind the splash, which then opens the
+// new version; one found later downloads in the background and the window offers a restart, otherwise it installs the
+// next time Eleusinia is closed. Copies run from source never update. ELEUSINIA_UPDATE_URL points it at another folder
+// of releases (testing), ELEUSINIA_NO_UPDATES=1 turns it off.
 const updatable = () => app.isPackaged && process.env.ELEUSINIA_NO_UPDATES !== '1' && !process.env.ELEUSINIA_BOOTSTRAP
 // macOS and Linux install updates themselves (main/selfupdate.ts); electron-updater only finds them there.
 const own = process.platform !== 'win32'
 const releaseBase = (version: string) => process.env.ELEUSINIA_UPDATE_URL?.replace(/\/+$/, '') ?? `https://github.com/mmhfn1/Eleusinia/releases/download/v${version}`
 let staged: Staged | null = null
-// Set by startUpdates when this copy updates itself; the newest version a contact runs, so each is checked for once
+// Set by startUpdates when this copy updates itself. A contact on a newer version than ours triggers at most one check
+// per 10 minutes, so a wrong or invented version (a dev build, a broken client) can neither spam checks nor block them.
 let checkUpdate = (_why: string): unknown => undefined
-let newest = ''
+const OFFLINE = 'Could not check for updates (offline?)'
+const newest = () => `Eleusinia ${app.getVersion()} is the newest`
+const contactCheck = limiter(600e3)
 const updateFeed = () => process.env.ELEUSINIA_UPDATE_URL && autoUpdater.setFeedURL({ provider: 'generic', url: process.env.ELEUSINIA_UPDATE_URL })
 
 // Every downloaded installer must carry a signature by Eleusinia's update key (shared/updatesig.ts), fetched from the
@@ -292,75 +298,65 @@ function guardUpdates() {
   }
 }
 
-// Every start first asks for a newer release (at most 6 s, so being offline never holds it up). When there is one, a
-// small window shows the download, then it installs quietly and opens the new version; this copy never starts.
-// Resolves true to start this version.
-async function updateFirst() {
-  if (!updatable()) return true
+// What the update check tells the splash (node.ts updateStep): holding while an update is installed before start
+type UpdateStep = { done: boolean; detail: string; waiting?: string[]; label?: string; holding?: boolean }
+
+// Quietly, then opens the new version. macOS and Linux: quitting puts the staged copy in place (will-quit) after the
+// node has shut down and saved.
+function installNow() {
+  if (!own) return autoUpdater.quitAndInstall(true, true)
+  if (!staged) return
+  app.relaunch()
+  app.quit()
+}
+
+// ready: an update found after start, downloaded, for the window to offer. step: the start's check, for the splash.
+// starting: still behind the splash, so an update the start's check finds is downloaded and installed there, and the
+// new version opens and signs in by itself; the splash never gives up on it (node.ts HOLD_MS caps a stalled one).
+function startUpdates(ready: (version: string) => void, diag: (area: 'app' | 'error', text: string) => void, step: (s: UpdateStep) => void, starting: () => boolean) {
+  if (!updatable()) return
   updateFeed()
   if (own) tidy()
   else guardUpdates()
-  autoUpdater.autoDownload = false
-  autoUpdater.autoInstallOnAppQuit = !own
-  const found = await Promise.race([autoUpdater.checkForUpdates().catch(() => null), new Promise<null>((r) => setTimeout(() => r(null), 6000))])
-  if (!found?.isUpdateAvailable || (own && !canInstall())) return true
-  const version = found.updateInfo.version
-  const splash = new BrowserWindow({ width: 380, height: 120, frame: false, resizable: false, backgroundColor: '#0b1119', show: false })
-  const page = (text: string) =>
-    `data:text/html;charset=utf-8,${encodeURIComponent(`<body style="margin:0;height:100vh;display:grid;place-items:center;background:#0b1119;color:#d9e0ec;font:14px 'Segoe UI',sans-serif">${text}</body>`)}`
-  await splash.loadURL(page(`Updating Eleusinia to ${version}…`))
-  splash.show()
-  const progress = (share: number) => !splash.isDestroyed() && splash.setProgressBar(share)
-  if (own) {
-    const s = await fetchUpdate(version, found.updateInfo.files, releaseBase(version), (u) => net.fetch(u), progress).catch(() => null)
-    try {
-      if (!s) throw new Error('no update')
-      install(s)
-    } catch {
-      splash.destroy()
-      return true // start this version; the background check tries again later
-    }
-    app.relaunch()
-    app.exit(0)
-    return false
-  }
-  autoUpdater.on('download-progress', (p) => progress(p.percent / 100))
-  try {
-    await autoUpdater.downloadUpdate()
-  } catch {
-    splash.destroy() // the download failed: start this version, and the background check tries again later
-    return true
-  }
-  autoUpdater.quitAndInstall(true, true) // quietly, then opens the new version
-  return false
-}
-
-function startUpdates(ready: (version: string) => void, diag: (area: 'app' | 'error', text: string) => void) {
-  if (!updatable()) return
-  updateFeed()
-  if (!own) guardUpdates()
   autoUpdater.autoDownload = !own
   autoUpdater.autoInstallOnAppQuit = !own
+  // The start's check is over once it said there is nothing (or failed); being offline holds the splash at most 6 s
+  let atStart = true
+  let heard = false
+  const answered = (detail: string) => atStart && ((atStart = false), step({ done: true, detail }))
+  const installing = (detail: string) => atStart && starting() && step({ done: false, holding: true, label: 'Updating Eleusinia', detail })
+  setTimeout(() => heard || answered('No answer from the update server yet'), 6000)
+  const failed = (v: string) => answered(`Could not download Eleusinia ${v}; it is tried again later`)
+  const pct = (share: number) => `${Math.round(Math.max(0, Math.min(1, share)) * 100)}%`
+  const downloaded = (version: string) => {
+    diag('app', `update ${version} ready`)
+    if (atStart && starting()) return installing(`Installing Eleusinia ${version}, then it opens again`), installNow()
+    ready(version)
+  }
   autoUpdater.on('update-available', (i) => diag('app', `update ${i.version} found, downloading`))
+  autoUpdater.on('download-progress', (p) => installing(`Downloading Eleusinia ${offered}, ${pct(p.percent / 100)}`))
   let fetching = false // our own download (macOS, Linux), which can outlast the check that started it
   let found = false
   let quietUntil = 0 // after a download that failed (or cannot be installed here), an hour before trying again
   if (own)
     autoUpdater.on('update-available', async (i) => {
       if (staged?.version === i.version || fetching) return
-      if (!canInstall()) return (quietUntil = Date.now() + 3600e3), diag('error', `update ${i.version} found, but this copy cannot replace itself where it is (a folder it cannot write to, or a Mac app opened straight from Downloads)`)
+      if (!canInstall())
+        return (
+          (quietUntil = Date.now() + 3600e3),
+          answered(`Eleusinia ${i.version} is out, but this copy cannot replace itself where it is`),
+          diag('error', `update ${i.version} found, but this copy cannot replace itself where it is (a folder it cannot write to, or a Mac app opened straight from Downloads)`)
+        )
       fetching = true
-      const s = await fetchUpdate(i.version, i.files, releaseBase(i.version), (u) => net.fetch(u)).catch(() => null)
+      const s = await fetchUpdate(i.version, i.files, releaseBase(i.version), (u) => net.fetch(u), (share) => installing(`Downloading Eleusinia ${i.version}, ${pct(share)}`)).catch(() => null)
       fetching = false
-      if (!s) return (quietUntil = Date.now() + 3600e3), diag('error', `update ${i.version} could not be downloaded or is not signed with the update key`)
+      if (!s) return (quietUntil = Date.now() + 3600e3), failed(i.version), diag('error', `update ${i.version} could not be downloaded or is not signed with the update key`)
       staged = s
-      diag('app', `update ${i.version} ready`)
-      ready(i.version)
+      downloaded(i.version)
     })
   autoUpdater.on('update-downloaded', (i) => {
     found = true
-    diag('app', `update ${i.version} ready`)
-    ready(i.version)
+    downloaded(i.version)
   })
   autoUpdater.on('error', (e) => diag('error', `update check failed: ${e.message}`))
   // Checked when there is a reason (a contact on a newer version, a call that does not connect: checkUpdate) and
@@ -373,8 +369,16 @@ function startUpdates(ready: (version: string) => void, diag: (area: 'app' | 'er
     checking = true
     diag('app', `checking for updates: ${why}`)
     try {
-      await (await autoUpdater.checkForUpdates())?.downloadPromise?.catch(() => (quietUntil = Date.now() + 3600e3))
-    } catch {} // offline: the next check tries again
+      const r = await autoUpdater.checkForUpdates()
+      heard = true
+      const v = r?.isUpdateAvailable ? r.updateInfo.version : ''
+      if (!v) answered(newest())
+      else installing(`Downloading Eleusinia ${v}`)
+      await r?.downloadPromise?.catch(() => ((quietUntil = Date.now() + 3600e3), failed(v)))
+    } catch {
+      heard = true
+      answered(OFFLINE) // the next check tries again
+    }
     checking = false
   }
   checkUpdate('started')
@@ -475,6 +479,7 @@ function startApp() {
 
   // The last few minutes of what happened, scrubbed and in memory only, for problem and crash reports (reports.ts).
   const diagnostics = createDiagnostics()
+  const appMemoryMb = () => Math.round(app.getAppMetrics().reduce((n, m) => n + m.memory.workingSetSize, 0) / 1024)
   const meta = (): Meta => ({
     version: app.getVersion(),
     build: BUILD,
@@ -484,7 +489,7 @@ function startApp() {
     chrome: process.versions.chrome,
     locale: app.getLocale(),
     memoryGb: Math.round(os.totalmem() / 2 ** 30),
-    appMemoryMb: Math.round(app.getAppMetrics().reduce((n, m) => n + m.memory.workingSetSize, 0) / 1024),
+    appMemoryMb: appMemoryMb(),
   })
   diagnostics.add('app', `started Eleusinia ${app.getVersion()} (${BUILD} build)`)
   const node = createNode({
@@ -513,17 +518,13 @@ function startApp() {
     inbox: isKey(process.env.ELEUSINIA_INBOX) ? process.env.ELEUSINIA_INBOX : app.isPackaged ? INBOX_KEY : undefined,
     diag: diagnostics.add,
     version: app.getVersion(),
-    newerApp: (v) => isNewer(v, newest || app.getVersion()) && ((newest = v), checkUpdate(`a contact runs ${v}`)),
+    newerApp: (v) => isNewer(v, app.getVersion()) && contactCheck('contact', Date.now()) && checkUpdate(`a contact runs ${v}`),
+    appMemory: appMemoryMb,
   })
   startActivity(node, dir, (text) => diagnostics.add('app', text))
-  startUpdates((version) => toPage({ type: 'update', version }), diagnostics.add)
-  ipcMain.handle('installUpdate', async () => {
-    if (!own) return autoUpdater.quitAndInstall(true, true) // quietly, then opens the new version
-    if (!staged) return
-    // Quitting puts it in place (will-quit) after the node has shut down and saved
-    app.relaunch()
-    app.quit()
-  })
+  if (updatable()) node.updateStep({ done: false, detail: 'Asking for a newer version', waiting: ['Still waiting for the update check'] })
+  startUpdates((version) => toPage({ type: 'update', version }), diagnostics.add, node.updateStep, node.starting)
+  ipcMain.handle('installUpdate', installNow)
   // From the emblem's menu. A copy run from source (or with updates off) never updates, and says so.
   ipcMain.handle('checkUpdates', async () => {
     const current = app.getVersion()
@@ -568,7 +569,7 @@ function startApp() {
   // Windows ends the app at shutdown, restart or logoff without will-quit, which would read as a crash next start
   win.on('session-end', () => (node.flush(), rmSync(running, { force: true })))
   // Node methods the page must never reach: they read or reveal local files, or end the node
-  const MAIN_ONLY = new Set(['addFile', 'addBytes', 'filePath', 'destroy', 'flush', 'setActivity'])
+  const MAIN_ONLY = new Set(['addFile', 'addBytes', 'filePath', 'destroy', 'flush', 'setActivity', 'updateStep'])
   ipcMain.handle('call', async (_e, method: string, ...args: unknown[]) => {
     if (!Object.hasOwn(node, method) || MAIN_ONLY.has(method) || (method === 'dropLink' && !process.env.ELEUSINIA_BOOTSTRAP)) throw new Error('Unknown method')
     // The page picks no save path (that is saveFile's dialog); the smoke run on a local test DHT still passes one

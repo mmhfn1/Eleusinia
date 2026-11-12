@@ -62,6 +62,11 @@ export type Settings = {
   localMuted?: Key[] // people whose voice we stop playing, for us only
   noVideo?: Key[] // people whose camera and screen we stop receiving
 }
+// A conversation is muted for good (true) or until a time not yet reached (Settings → muted).
+export const mutedNow = (st: Settings, c: string, now = Date.now()) => {
+  const m = st.muted?.[c]
+  return m === true || (typeof m === 'number' && m > now)
+}
 export const KEY_SETTINGS = ['ignored', 'localMuted', 'noVideo'] as const
 export const MAX_KEY_SETTING = 5000
 // A key list setting from the window: keys only, no repeats, capped
@@ -160,6 +165,9 @@ export type Event =
   | { type: 'poke'; from: Key; server: string; channel: string } // a checked poke (Wire 'poke'), memory only
   // A voice.move or voice.disconnect aimed at us, accepted while we run (never from old history replayed at start)
   | { type: 'voiceOrder'; server: string; kind: 'move' | 'disconnect'; channel?: string; by: Key }
+  // Startup checks for the splash (shared/startup.ts), at most every 200 ms until ready or given up
+  | { type: 'startup'; steps: StartupStep[]; ready: boolean; gaveUp: boolean; pending: string[] }
+export type StartupStep = { id: 'account' | 'network' | 'updates' | 'links' | 'presence' | 'catchup' | 'memory'; label: string; detail: string; done: boolean }
 
 export const MAX_TEXT = 4000
 

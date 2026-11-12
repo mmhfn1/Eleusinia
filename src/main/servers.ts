@@ -41,6 +41,7 @@ export function createServers({ dir, keyPair, net, few, changed, order }: Opts) 
   const sentUpTo = new Map<string, { have: Have; at: number }>() // per link and server: what catch-up just sent
   const askedAt = new Map<string, number>()
   const receipts = new Map<string, ReturnType<typeof setTimeout>>()
+  const catching = new Map<string, Have | null>() // at startup, per link and server greeted: their first have, until we hold it
   const fresh: string[] = []
   let flushing: ReturnType<typeof setTimeout> | null = null
   let mates: Set<Key> | null = null // everyone in a server with us, rebuilt after any replay
@@ -153,6 +154,7 @@ export function createServers({ dir, keyPair, net, few, changed, order }: Opts) 
     if (typeof id !== 'string' || !isGroupId(id) || !logs.has(id) || !peersOf(id, true).includes(from) || !isObj(w.have)) return
     const log = logs.get(id)!
     const theirs = w.have
+    if (catching.has(from + id)) catching.set(from + id, theirs as Have)
     const upTo: Have = {}
     for (const a of Object.keys(log.have)) upTo[a] = Number(theirs[a]) || 0
     // What this link just carried is not sent again on a receipt (an ask gets it all), as with messages
@@ -268,15 +270,26 @@ export function createServers({ dir, keyPair, net, few, changed, order }: Opts) 
       expected.set(id, by)
       mates = null
     },
-    greet(k: Key) {
-      for (const id of logs.keys()) if (peersOf(id).includes(k)) sendSops(k, id)
+    // `track`: at startup, wait for their answer and what it shows we lack (`behind`)
+    greet(k: Key, track = false) {
+      for (const id of logs.keys()) if (peersOf(id).includes(k)) sendSops(k, id), track && catching.set(k + id, null)
+    },
+    // Linked peers whose first sops have has not come, or showed ops we do not hold yet
+    behind(): Key[] {
+      const out: Key[] = []
+      for (const [x, h] of catching) {
+        const have = logs.get(x.slice(64))?.have ?? {}
+        if (h && !Object.entries(h).some(([a, n]) => (Number(n) || 0) > (have[a] ?? 0))) catching.delete(x)
+        else out.push(x.slice(0, 64))
+      }
+      return out
     },
     receive(k: Key, w: Wire) {
       if (w.t === 'sop') takeOp(k, w.op)
       else if (w.t === 'sops') takeHave(k, w)
     },
     closed(k: Key) {
-      for (const x of sentUpTo.keys()) if (x.startsWith(k)) sentUpTo.delete(x)
+      for (const m of [sentUpTo, catching]) for (const x of m.keys()) if (x.startsWith(k)) m.delete(x)
     },
     destroy() {
       if (flushing) clearTimeout(flushing)

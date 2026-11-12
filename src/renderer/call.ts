@@ -1,10 +1,10 @@
 import { RnnoiseWorkletNode } from '@sapphi-red/web-noise-suppressor'
 import rnnoiseWasm from '@sapphi-red/web-noise-suppressor/rnnoise_simd.wasm?inline'
 import rnnoiseWorklet from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?raw'
-import { createCandidates, createWatchdog, lightOpus, offers, quickVideo, rejoinFrom, relayCandidate, restartAfterFor, restarted, viewerCue } from '../shared/callstate'
+import { createCandidates, createWatchdog, lightOpus, offers, quickVideo, rejoinFrom, relayCandidate, restartAfterFor, restarted, sessionOf, viewerCue } from '../shared/callstate'
 import { fellBack, nextDevice, usable } from '../shared/devices'
 import { type Jingle, LOOP_EVERY, RING_MS, loopNow } from '../shared/jingles'
-import { CALL_VERSION, type Event, type Key, type State } from '../shared/protocol'
+import { CALL_VERSION, type Event, type Key, type State, mutedNow } from '../shared/protocol'
 import { type PingReading, SAMPLE_EVERY, type Sample, grade, handsFree, jitterTarget, patched, pingSummary, remember, rememberPing, trouble, videoHold, worst } from '../shared/quality'
 import type { SourceKind } from '../shared/sources'
 import { gate, hear, rms } from '../shared/speaking'
@@ -161,7 +161,7 @@ export const onSpeaking = (fn: () => void) => (speakers.add(fn), () => void spea
 export const speakingVersion = () => speakingAt
 
 const send = (c: string, to: Key | null, data: unknown) => window.api.call('signal', c, to, data)
-// This window load's session, sent in every join so peers can tell a restarted copy from the one they hold (restarted)
+// This window load's session, sent in every join, offer and answer so peers can tell a restarted copy from the one they hold (restarted)
 const JOIN = { k: 'join', s: Math.random().toString(36).slice(2, 12) }
 const sessions = new Map<Key, string>()
 // For the timings in the diagnostics: from the window opening to the first person shown in a call, and from joining
@@ -181,11 +181,6 @@ const soundLevel = () => outVolume() * soundVolume()
 const sound = (name: Jingle) => (log(`sound: ${name}`), play(name, soundLevel(), outId || state.settings.out || ''))
 // A server's voice channel (`${server}.${channel}`) calls like a group: no ringing, no missed calls.
 const serverOf = (c: string) => state.servers?.[c.split('.')[0]]
-// A conversation muted for good (true) or until a time not yet reached (common.ts isMuted, which call.ts cannot import)
-const mutedNow = (c: string) => {
-  const m = state.settings.muted?.[c]
-  return m === true || (typeof m === 'number' && m > Date.now())
-}
 const isDm = (c: string) => !state.groups[c] && !serverOf(c)
 // Server mute and deafen (signed server ops) in our voice channel call: ours, and whether a person's voice plays here.
 export const serverVoice = (): { mute?: true; deafen?: true } => (conv && serverOf(conv)?.voice?.[state.me]) || {}
@@ -220,13 +215,9 @@ function loops() {
 }
 // A voice channel's members: everyone on its server (the node drops signals from whoever may not connect there)
 const membersOf = (c: string) => state.groups[c]?.members ?? (serverOf(c) ? Object.keys(serverOf(c)!.members) : c.split('_'))
-// People on a call version that cannot work with ours are never connected; the call panel says who must update.
-export const callVersionOf = (k: Key) => state.versions?.[k]?.call ?? 1
+// A peer's call version, only logged: calls never wait on versions
+const callVersionOf = (k: Key) => state.versions?.[k]?.call ?? 1
 const compatible = (k: Key) => callVersionOf(k) === CALL_VERSION
-export function mismatched() {
-  if (!conv) return []
-  return [...(active.get(conv) ?? [])].filter((k) => state.versions?.[k] && !compatible(k)).map((k) => ({ k, app: state.versions?.[k]?.app ?? 'an older version', newer: callVersionOf(k) > CALL_VERSION }))
-}
 // 0 to 2 (200%); played through a GainNode, so above 100% is a real boost.
 const clampVolume = (v: number | undefined) => Math.min(2, Math.max(0, v ?? 1))
 export const volumeOf = (k: Key) => clampVolume(state.settings.volumes?.[k])
@@ -561,7 +552,7 @@ async function offer(k: Key) {
   await useSlots(k)
   const id = (peers.get(k)!.offer = ++offerId)
   await local(pc, await pc.createOffer())
-  send(c, k, { k: 'offer', sdp: pc.localDescription!.toJSON(), id })
+  send(c, k, { k: 'offer', sdp: pc.localDescription!.toJSON(), id, s: JOIN.s })
 }
 
 // Finds a new route on the same connection; the other side answers without tearing anything down.
@@ -572,7 +563,7 @@ async function restart(k: Key) {
   log(`looking for a new route to ${who(k)}`)
   p.pc.restartIce()
   await local(p.pc, await p.pc.createOffer({ iceRestart: true }))
-  send(conv, k, { k: 'offer', sdp: p.pc.localDescription!.toJSON(), restart: true, id })
+  send(conv, k, { k: 'offer', sdp: p.pc.localDescription!.toJSON(), restart: true, id, s: JOIN.s })
 }
 
 // Sets the remote side's description, then the candidates that arrived before it and the relay port.
@@ -1154,10 +1145,11 @@ async function handle(from: Key, c: string, d: any) {
     if (c === conv) drop(from)
     return
   }
-  if (d.k === 'join' && restarted(sessions.get(from), d.s)) {
-    sessions.set(from, d.s)
-    if (peers.has(from)) log(`${who(from)} restarted: dropping the old connection`), drop(from)
-  }
+  // Every join, offer and answer names its session; only a join from a new one means the copy we hold is gone
+  // (a new offer replaces the connection by itself)
+  const s = ['join', 'offer', 'answer'].includes(d.k) ? sessionOf(d.s) : undefined
+  if (d.k === 'join' && peers.has(from) && restarted(sessions.get(from), s)) log(`${who(from)} restarted: dropping the old connection`), drop(from)
+  if (s) sessions.set(from, s)
   // A call starting that we are not in: if it ends before we join, it was missed. Not one coming back from a blip,
   // nor any later signal of a call we already joined and left.
   const resumed = blips.has(c)
@@ -1167,7 +1159,7 @@ async function handle(from: Key, c: string, d: any) {
   // At most one a minute per conversation, so leaving and joining over and over cannot flood the notifications;
   // none for voice channels, where people come and go all day
   const ignored = isDm(c) && !!state.settings.ignored?.includes(from) // their DM calls ring silently: no sound, no bar
-  if (!set.size && !conv && !serverOf(c) && !mutedNow(c) && !ignored && (announced.get(c) ?? 0) < Date.now() - 60000) {
+  if (!set.size && !conv && !serverOf(c) && !mutedNow(state.settings, c) && !ignored && (announced.get(c) ?? 0) < Date.now() - 60000) {
     announced.set(c, Date.now())
     new Notification('Eleusinia', { body: `${state.profiles[from]?.name || 'Someone'} started a call` })
   }
@@ -1206,7 +1198,7 @@ async function handle(from: Key, c: string, d: any) {
       await useSlots(from)
     }
     await local(pc, await pc.createAnswer())
-    send(c, from, { k: 'answer', sdp: pc.localDescription!.toJSON(), id: d.id })
+    send(c, from, { k: 'answer', sdp: pc.localDescription!.toJSON(), id: d.id, s: JOIN.s })
   } else if (d.k === 'answer') {
     const p = peers.get(from)
     if (!p || (d.id !== undefined && d.id !== p.offer)) return

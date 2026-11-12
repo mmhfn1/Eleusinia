@@ -89,9 +89,9 @@ export function createPresence({ keyPair, net, emit, few, tell, ownProfile, arou
     receive(from: Key, p: unknown) {
       if (!verifyPresence(p) || p.key === me || p.at <= Date.now() - PRESENCE_TTL || !accepts(p.key)) return
       const was = present.get(p.key)
-      // Newer only: at most every 20 s, every 10 s when their profile changed, every second when their call did. Each
+      // Newer only: at most every 20 s, every 10 s when their profile changed, every 250 ms when their call did (a join right after a note must not be lost). Each
       // note is passed on by everyone, so these limits are what keeps one member from flooding all the others.
-      if (was && p.at < was.at + (p.call !== was.call ? 1000 : p.v !== was.v ? 10000 : 20000)) return
+      if (was && p.at < was.at + (p.call !== was.call ? 250 : p.v !== was.v ? 10000 : 20000)) return
       const before = was && !gone.has(p.key) && was.at > Date.now() - PRESENCE_TTL ? was.call : null
       present.set(p.key, p)
       gone.delete(p.key)
