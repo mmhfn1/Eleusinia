@@ -31,7 +31,7 @@ import DHT from 'hyperdht'
 import { idSeed, readClaims, signClaim, withClaim, writeClaims } from '../shared/idcard'
 import { type FileRef, validFiles } from '../shared/media'
 import { cleanLink } from '../shared/links'
-import { type Area, type Report, cleanReport } from '../shared/reports'
+import { type Area, type Pull, type Report, PULL_EVERY, cleanPull, cleanReport, pullFor } from '../shared/reports'
 import { EDIT_AHEAD_MS, groupIdOf, heldFrom, mergeGroup, missing, ownerOf, signAdd, signEdit, signLeft, signMsg, profileVersion, signRemoved, validGroup, verifyAdd, verifyMsg, withLink } from '../shared/sync'
 import { openRequest, requestSeed, sealRequest } from '../shared/sealed'
 import { createImpairment, parseNetSim } from '../shared/netsim'
@@ -52,6 +52,7 @@ type Saved = {
   blocked?: Record<Key, number> // people we blocked, and when: no friend requests, no links, their messages uncounted
   joinedAt?: Record<string, number> // per group: when it reached us; history written before that is not unread
   profileV?: Record<Key, string> // the profile version (profileVersion) we hold of each person, from a greeting or their card
+  pulled?: string[] // developers' log pulls already answered (reports.ts pullFor), the newest 20
   profile: Profile
   friends: Record<Key, FriendStatus>
   profiles: Record<Key, Profile>
@@ -83,6 +84,9 @@ type Opts = {
   strict?: boolean // testing: direct connections fail for real, as behind a strict router, so only a relay links
   relayLimits?: RelayLimits // testing: smaller caps on what we relay for contacts
   inbox?: Key // the developers' inbox, where problem and crash reports go
+  // Tester builds: answer a developer's log pull (index.ts files the diagnostics with report); id: the answer's report
+  // id, the same for one pull and copy, so a resent answer is stored once
+  pullLogs?: (p: Pull, id: string) => void
   version?: string // this app's version, told to everyone we greet
   newerApp?: (version: string) => void // a contact runs a newer version than ours: an update is out (index.ts checks)
   diag?: (area: Area, text: string) => void // diagnostic events, kept in memory by the caller
@@ -105,7 +109,7 @@ const CATCHUP_BACKLOG = 1 << 20 // no new round while this much is still unsent 
 const FLOOD = { burst: 400, perSecond: 20 }
 
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
-export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', newerApp, links, strict, relayLimits, maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8, keepMsgs = 50000, startupMs = 20000, appMemory = () => process.memoryUsage().rss / 2 ** 20 }: Opts) {
+export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, pullLogs, diag = () => {}, version = '0.0.0', newerApp, links, strict, relayLimits, maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8, keepMsgs = 50000, startupMs = 20000, appMemory = () => process.memoryUsage().rss / 2 ** 20 }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
   const file = join(dir, 'state.json')
   mkdirSync(join(dir, 'msgs'), { recursive: true })
@@ -927,7 +931,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         }
         push()
       },
-      failed(key, via) {
+      failed(key, via, why) {
+        // Why a link never formed was missing from reports; once per peer and reason, so a redial loop does not flood them
+        if (joined && why) tell(`fail:${key}:${via ?? ''}:${why}`, `${via ? `relayed link with …${key.slice(-6)} through …${pendingVia.get(key)?.slice(-6) ?? '?'}` : `direct link with …${key.slice(-6)}`} failed: ${why}`)
         if (!via) directFailed.add(key), joined && backOff(key) // dials before we are on the DHT say nothing about them
         else if (pendingVia.has(key)) relayFailed(key, pendingVia.get(key))
       },
@@ -998,7 +1004,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   let joined = false
   // Dials that failed before we were on the DHT said nothing (failed), so dial again at once, not at the next tick,
   // and name unlinked members now rather than in 30 s
-  net.listening.then(() => ((joined = true), redial(), nameUnlinked(Infinity)), () => {})
+  net.listening.then(() => ((joined = true), redial(), nameUnlinked(Infinity), checkPull()), () => {})
   // While relaying, the first few retries skip the wait (a relay needs its contacts linked as soon as they can be, or
   // pairs wait minutes); after that it backs off too, or with relaying on by default nobody offline ever would.
   const due = (k: Key) => (retries.get(k)?.next ?? 0) <= Date.now() || (!!relayKey && (retries.get(k)?.n ?? 0) < 3)
@@ -1092,6 +1098,17 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const timer = setInterval(redial, redialMs)
   const delivery = setInterval(deliver, redialMs) // only dials while reports are waiting, like redialing an offline friend
   deliver()
+  // Tester builds: a developer's log pull, read from the inbox's own signed record, answered once each
+  async function checkPull() {
+    if (!inbox || !pullLogs || !joined || s.settings.shareLogs === false) return
+    const p = cleanPull(await net.fetch(inbox, true))
+    if (!pullFor(p, { tail: me.slice(-6), handle: s.profile.handle }, s.pulled ?? [])) return
+    s.pulled = [...(s.pulled ?? []).slice(-19), p.id]
+    changed()
+    diag('app', `the developers asked for logs (pull ${p.id.slice(0, 6)}); sending them`)
+    pullLogs(p, createHash('sha256').update(p.id + me).digest('hex').slice(0, 16))
+  }
+  const pulls = setInterval(checkPull, PULL_EVERY)
 
   const prefixTopic = (prefix: string) => createHash('sha256').update('eleusinia-prefix:' + prefix).digest()
   // Only with Settings → suggest: every username prefix from 4 letters up, so people can be suggested while typing.
@@ -1732,8 +1749,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     },
     // Queues a problem or crash report for the developers. It is checked and scrubbed here (shared/reports.ts) as
     // well as at the inbox, then sent whenever the inbox is reachable.
-    report(r: Omit<Report, 'id' | 'at'>) {
-      const clean = cleanReport({ ...r, id: randomBytes(8).toString('hex'), at: Date.now() })
+    // id: given for a log pull's answer, so the same pull is stored once at the inbox
+    report(r: Omit<Report, 'id' | 'at'>, id = randomBytes(8).toString('hex')) {
+      const clean = cleanReport({ ...r, id, at: Date.now() })
       if (!clean) throw new Error('That report cannot be sent')
       mkdirSync(outbox, { recursive: true })
       writeFileSync(join(outbox, clean.id + '.json'), JSON.stringify(clean))
@@ -1750,6 +1768,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (pushing) clearTimeout(pushing)
       clearInterval(timer)
       clearInterval(delivery)
+      clearInterval(pulls)
       clearInterval(announcer)
       clearInterval(presenceTimer)
       if (preDialing) clearTimeout(preDialing)

@@ -26,7 +26,7 @@ type Handlers = {
   close(key: Key): void
   msg(key: Key, w: Wire): void
   packet?(key: Key, b: Buffer): void
-  failed?(key: Key, via?: Key): void // a dial ended without a link
+  failed?(key: Key, via?: Key, why?: string): void // a dial ended without a link; why: hyperdht's error code, if any
   // Who may link to us. Decided before the handshake completes, so whoever is turned away never learns our address.
   admit?(key: Key): boolean
   // Someone turned away by `admit`: they learn nothing, but their (verified) key says someone is at the door.
@@ -171,10 +171,12 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
     dialing.add(id)
     let opened = false
     const sock = dht.connect(Buffer.from(key, 'hex'), { keyPair, relayThrough: via ? Buffer.from(via, 'hex') : null })
-    sock.on('error', () => {}) // offline peers end up here; the caller redials on a timer
+    let why = ''
+    // Offline peers end up here; the caller redials on a timer. The code (PEER_NOT_FOUND, HOLEPUNCH_ABORTED, …) goes to the diagnostics.
+    sock.on('error', (e: Error & { code?: string }) => (why = e?.code || e?.message || ''))
     sock.on('close', () => {
       dialing.delete(id)
-      if (!opened) on.failed?.(key, via)
+      if (!opened) on.failed?.(key, via, why)
     })
     sock.on('open', () => {
       opened = true
@@ -239,9 +241,10 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
         return null
       }
     },
-    async fetch(key: Key): Promise<Buffer | null> {
+    // latest: ask more nodes for the newest copy (a log pull), rather than taking the first that answers
+    async fetch(key: Key, latest = false): Promise<Buffer | null> {
       try {
-        return (await dht.mutableGet(Buffer.from(key, 'hex'), { latest: false }))?.value ?? null
+        return (await dht.mutableGet(Buffer.from(key, 'hex'), { latest }))?.value ?? null
       } catch {
         return null
       }

@@ -48,6 +48,7 @@ export type Settings = {
   soundVolume?: number // the app's own sounds (mute, joins, ringing, push to talk), 0 to 1 on top of outVolume; default 1
   micGate?: number
   crashReports?: boolean // send crash reports to the developers automatically; on unless turned off
+  shareLogs?: boolean // tester builds: answer a developer's log pull (reports.ts Pull); on unless turned off
   closeToTray?: boolean // closing the window keeps Eleusinia running in the tray; on unless turned off
   noiseSuppression?: boolean // RNNoise on the microphone; on unless turned off
   relay?: boolean // relay for mutual friends who cannot link directly; on unless turned off (being reached through one is always on)

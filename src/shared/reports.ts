@@ -13,8 +13,8 @@ export const INBOX_KEY = 'dcd6194dda6abebfddf17b8fd26e23ed87b8791894156e7ec931dc
 // Shown in Settings and sent with every report.
 export const BUILD = 'tester'
 
-export type Kind = 'bug' | 'feedback' | 'idea' | 'crash'
-export const KINDS: Kind[] = ['bug', 'feedback', 'idea', 'crash']
+export type Kind = 'bug' | 'feedback' | 'idea' | 'crash' | 'logs'
+export const KINDS: Kind[] = ['bug', 'feedback', 'idea', 'crash', 'logs'] // logs: answered a developer's pull (pullFor)
 // Which part of the app a diagnostic event comes from; the report dialog offers each as its own choice.
 export type Area = 'app' | 'network' | 'call' | 'error'
 export const AREAS: Area[] = ['app', 'network', 'call', 'error']
@@ -95,6 +95,39 @@ export function createDiagnostics(now = () => Date.now()) {
     },
     list: (areas: Area[] = AREAS) => events.filter((e) => areas.includes(e.area)),
   }
+}
+
+// Log pulls (tester builds only): `npm run logs` makes the inbox publish a record signed by INBOX_KEY on the DHT (the
+// DHT checks the signature, so nobody else can make one), naming everyone or some testers by friend ID or Unique Key.
+// Tester copies read it every few minutes and answer once per pull, within a day, with the same scrubbed diagnostics a
+// problem report carries, unless Settings turns it off.
+export type Pull = { id: string; at: number; to: 'all' | string[] }
+export const PULL_TTL = 24 * 3600e3
+export const PULL_EVERY = 2 * 60000
+
+// "all", or friend IDs (name#1234) and Unique Keys (the last 6 characters of a key), comma or space separated
+export function pullTargets(arg: string | undefined): Pull['to'] | null {
+  const ids = (arg ?? 'all').toLowerCase().split(/[\s,]+/).filter(Boolean)
+  if (!ids.length || ids.includes('all')) return 'all'
+  const ok = ids.filter((t) => /^[0-9a-f]{6}$/.test(t) || /^[a-z0-9._]{2,20}#\d{4}$/.test(t))
+  return ok.length === ids.length && ok.length <= 50 ? ok : null
+}
+
+export function cleanPull(b: Buffer | null): Pull | null {
+  try {
+    const p = JSON.parse(String(b))
+    if (!/^[0-9a-f]{16}$/.test(p?.id) || !Number.isSafeInteger(p.at)) return null
+    const to = p.to === 'all' ? 'all' : Array.isArray(p.to) && p.to.length <= 50 && p.to.every((t: unknown) => typeof t === 'string' && t.length <= 30) ? p.to : null
+    return to ? { id: p.id, at: p.at, to } : null
+  } catch {
+    return null
+  }
+}
+
+// A pull this copy should answer: recent, not answered yet, and naming everyone, our Unique Key or our friend ID
+export function pullFor(p: Pull | null, me: { tail: string; handle?: string }, answered: string[], now = Date.now()): p is Pull {
+  if (!p || answered.includes(p.id) || p.at < now - PULL_TTL || p.at > now + 600000) return false
+  return p.to === 'all' || p.to.includes(me.tail.toLowerCase()) || (!!me.handle && p.to.includes(me.handle.toLowerCase()))
 }
 
 // One event as a line: time (UTC), area, text.

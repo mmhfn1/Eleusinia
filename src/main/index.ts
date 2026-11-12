@@ -12,7 +12,7 @@ import { type Bindings, type Hotkey, createMatcher, createRecorder } from '../sh
 import { type FileRef, inlineKind, mimeOf, safeName } from '../shared/media'
 import { isWebUrl } from '../shared/links'
 import { isKey } from '../shared/protocol'
-import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared/reports'
+import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics, pullTargets } from '../shared/reports'
 import { kindOf, shareable } from '../shared/sources'
 import { limiter } from '../shared/invite'
 import { isNewer, verifyUpdate } from '../shared/updatesig'
@@ -37,7 +37,7 @@ else if (process.env.ELEUSINIA_DATA) app.setPath('userData', process.env.ELEUSIN
 // second one with the same identity. The inbox too (its own folder): two would file every report twice.
 const firstCopy = app.requestSingleInstanceLock()
 if (!firstCopy) {
-  if (inboxMode) console.log('An inbox is already running here; this one stops.')
+  if (inboxMode) console.log(process.argv.includes('--pull') ? 'Asked the running inbox to pull logs; see its window.' : 'An inbox is already running here; this one stops.')
   app.quit()
 }
 
@@ -81,6 +81,16 @@ function startInbox() {
   log(token && repo ? `filing issues in ${repo}` : `not filing issues: put {"token": "...", "repo": "owner/name"} in ${config}`)
   if (inbox.key !== INBOX_KEY && !process.env.ELEUSINIA_BOOTSTRAP) log('warning: the app sends reports to a different inbox (INBOX_KEY in src/shared/reports.ts)')
   process.on('SIGINT', () => inbox.destroy().then(() => app.exit(0)))
+  // `npm run logs [all | name#1234 | a1b2c3 ...]`: here at start, or handed over by a second copy while this one runs
+  const pull = (argv: string[]) => {
+    const i = argv.indexOf('--pull')
+    if (i < 0) return
+    const to = pullTargets(argv.slice(i + 1).filter((a) => !a.startsWith('-')).join(' ') || 'all')
+    if (!to) return log('pull: name testers by friend ID (name#1234) or Unique Key (6 characters), or say all')
+    inbox.pull(to).then((p) => log(p ? `pull ${p.id.slice(0, 6)} published for ${to === 'all' ? 'every tester' : to.join(', ')}; logs arrive as [logs] reports in the folder above` : 'pull: the DHT did not take it; try again in a minute'))
+  }
+  pull(process.argv)
+  app.on('second-instance', (_e, argv) => pull(argv))
 }
 
 function loadIdentity(dir: string) {
@@ -459,6 +469,8 @@ function startApp() {
   let quitting = false
   app.on('before-quit', () => (quitting = true))
   const show = () => {
+    // While quitting the window is already gone, and opening Eleusinia again then crashed (0.1.3 crash report)
+    if (win.isDestroyed()) return
     if (win.isMinimized()) win.restore()
     win.show()
     win.focus()
@@ -516,6 +528,15 @@ function startApp() {
     dht: testDht(),
     // Only the installed app reports to the real inbox, so development runs (stopped with Ctrl+C) never send any.
     inbox: isKey(process.env.ELEUSINIA_INBOX) ? process.env.ELEUSINIA_INBOX : app.isPackaged ? INBOX_KEY : undefined,
+    // Tester builds answer a developer's log pull with what a problem report would carry; one report per pull and copy
+    pullLogs:
+      BUILD === 'tester'
+        ? (p, id) =>
+            node.report(
+              { kind: 'logs', title: `Logs for pull ${p.id.slice(0, 6)}`, body: 'Sent automatically for a developer log pull (tester build); this can be turned off in Settings.', meta: meta(), events: diagnostics.list() },
+              id,
+            )
+        : undefined,
     diag: diagnostics.add,
     version: app.getVersion(),
     newerApp: (v) => isNewer(v, app.getVersion()) && contactCheck('contact', Date.now()) && checkUpdate(`a contact runs ${v}`),
