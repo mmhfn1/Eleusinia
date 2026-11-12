@@ -3,10 +3,10 @@
 // Also the right-click menus every screen shares (useMenus): a conversation or channel, and a person in a call.
 import { type KeyboardEvent, type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { type Key, type State, dmId } from '../shared/protocol'
+import { type Key, type State, dmId, mutedNow } from '../shared/protocol'
 import * as call from './call'
 import { PersonVolume } from './Media'
-import { type Modal, type People, type Run, api, groupName, isMuted } from './common'
+import { type Modal, type People, type Run, api, groupName } from './common'
 import { InviteDialog, PokeDialog, below, newId } from './Server'
 import { ServerSettings } from './ServerSettings'
 import { Avatar, Dialog, Emblem, GroupEmblem, Icon, copyText } from './ui'
@@ -49,7 +49,7 @@ export function useMenus({ st, people, open: here, go, show, run }: Props) {
   const [fold, setFold] = useState('') // the sub-list unfolded in place
   const [ask, setAsk] = useState<Ask>(null)
   const settings = (p: Partial<State['settings']>) => run(api.call('setSettings', p))
-  const muted = (c: string) => isMuted(st, c)
+  const muted = (c: string) => mutedNow(st.settings, c)
   const convs = (c: string) => (st.servers[c] ? Object.keys(st.chats).filter((x) => x.startsWith(c + '.')) : [c])
   const leaveIfOpen = (c: string) => (here === c || here?.startsWith(c + '.')) && go(null)
   const startCall = (c: string) => (go(c), run(call.join(c)))
@@ -271,7 +271,7 @@ export function Rail(props: Props) {
     onMouseLeave: () => setTip(null),
     onBlur: () => setTip(null),
   })
-  const muted = (c: string) => isMuted(st, c)
+  const muted = (c: string) => mutedNow(st.settings, c)
   // An ignored person's DM adds nothing to the counts (plan-sounds-menus.md, answers from the user)
   const quiet = (c: string) => muted(c) || (c.includes('_') && !!st.settings.ignored?.includes(otherIn(c, st.me)))
   // A server counts as in a call when any of its channels is (their conversations are `${server}.${channel}`).

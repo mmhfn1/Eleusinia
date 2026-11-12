@@ -74,6 +74,9 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
   let id = 1
   const pending = new Map()
   ws.send(JSON.stringify({ id: 1, method: 'Runtime.enable' }))
+  // Every status line the splash shows, from the page's first moments (also after a reload)
+  const splashSeen = `window.__splash ??= (setInterval(() => { const t = document.querySelector('.splash-status')?.textContent; if (t && window.__splash.at(-1) !== t) window.__splash.push(t) }, 50), [])`
+  ws.send(JSON.stringify({ id: ++id, method: 'Page.addScriptToEvaluateOnNewDocument', params: { source: splashSeen } }))
   ws.onmessage = (e) => {
     const m = JSON.parse(e.data)
     if (m.method === 'Runtime.exceptionThrown') console.error(port, m.params.exceptionDetails.exception?.description)
@@ -90,6 +93,7 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
     })
   // DevTools lists the page before it has loaded, when its title is still empty; read it once loading is done.
   let title = ''
+  await ev(splashSeen).catch(() => {})
   for (let i = 0; i < 50 && !title; i++) {
     title = await ev(`document.readyState === 'complete' ? document.title : ''`).catch(() => '')
     if (!title) await sleep(200)
@@ -118,8 +122,16 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
       pending.set(++id, (m) => (m.result?.data && writeFileSync(join(process.env.ELEUSINIA_SMOKE_SHOTS, name + '.png'), Buffer.from(m.result.data, 'base64')), resolve()))
       ws.send(JSON.stringify({ id, method: 'Page.captureScreenshot' }))
     })
+  // Every window starts behind the splash, which closes by itself (nothing here clicks or types) once startup is done
+  await ev(splashSeen)
+  if (await ev(`!!document.querySelector('.splash:not(.gone)')`)) await shot('splash')
+  const closed = await until(`${port}: the splash closes by itself`, () => ev(`!document.querySelector('.splash') && performance.now()`), 30)
+  const startup = await ev(`api.call('startup')`)
+  if (!startup.ready && !startup.gaveUp) throw new Error('the splash closed before startup was done')
+  // What each step said when the splash closed, and what was still pending if it gave up
+  console.log(`     ${port}: startup ${startup.ready ? 'ready' : 'GAVE UP'} ${(closed / 1000).toFixed(1)}s after the page opened:`, startup.steps.map((s) => `${s.id}${s.done ? '' : ' (pending)'}: ${s.detail}`).join('; '), startup.pending.length ? `| pending: ${startup.pending.join(', ')}` : '')
   await ev(`(() => { window.__pcs = []; const P = RTCPeerConnection; window.RTCPeerConnection = class extends P { constructor(...a) { super(...a); window.__pcs.push(this) } } })()`)
-  return { child, ev, dir, title, windowState, crash, shot, focused }
+  return { child, ev, dir, title, windowState, crash, shot, focused, startup, closed }
 }
 
 // What one of the live connection's slots has received (see slotsOf in call.ts): 'sound' is the second audio.
@@ -688,6 +700,11 @@ try {
   await b.ev(rightClick(railDm))
   await b.ev(item('Unmute'))
   await until('unmuting shows it again', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '3'`), 5)
+  // Ignore (the person menu's): an ignored person's DM leaves the rail counts; un-ignoring brings it back
+  await b.ev(`api.call('setSettings', { ignored: ['${await a.ev(`api.call('state').then((s) => s.me)`)}'] })`)
+  await until("ignoring Ann takes her DM's count off the rail", () => b.ev(`!!${railDm} && !${railDm}.querySelector('.rail-count')`), 5)
+  await b.ev(`api.call('setSettings', { ignored: [] })`)
+  await until('un-ignoring brings it back', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '3'`), 5)
   await b.ev(`${railDm}.click()`)
   await until('opening the DM reads it: the count is gone', () => b.ev(`!!document.querySelector('.chat-person') && !${railDm}.querySelector('.rail-count')`), 5)
   // Shown but not focused (on a second screen during a game) is not read. The page is told it has no focus, so the
@@ -836,13 +853,16 @@ try {
   await until('B hides the screens (so A stops sending them)', () => b.ev(`!document.querySelector('.stage .screen') && document.querySelector('.stage').classList.contains('collapsed')`), 5)
   await b.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Show video').click()`)
   await until('B shows them again and frames flow', () => b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight > 0`), 30)
-  // Leaving the stream stops it reaching B and offers it again
+  // Leaving the stream stops it reaching B and offers it again, and A hears its viewer go
+  const viewerLeaves = async () => (await sounds(a)).filter((x) => x.startsWith('viewerLeave')).length
+  const leavesBefore = await viewerLeaves()
   await b.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Leave stream').click()`)
   await until('B leaves the stream: Join stream again, no video playing', () => b.ev(`!!document.querySelector('.stage .screen.invite.big') && !document.querySelector('.stage .screen video')`), 5)
   const left = await b.ev(received('screen'))
   await sleep(3000)
   if ((await b.ev(received('screen'))) > left + 30) throw new Error('A kept sending its screen after B left the stream')
   console.log('ok   after leaving, the stream no longer reaches B')
+  await until('A heard its viewer leave the stream', async () => (await viewerLeaves()) > leavesBefore, 5)
   await a.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent === 'Stop sharing').click()`)
   await until('A stops; the stage closes for B', () => b.ev(`!document.querySelector('.stage')`), 10)
 
@@ -859,6 +879,13 @@ try {
   // A camera starts small while the connection measures its bandwidth, then climbs to the chosen quality.
   await until("Bob's camera reaches A at the chosen 720p", () => a.ev(`document.querySelector('.stage .video-grid video')?.videoHeight === 720`), 30)
   if (!(await a.ev(received('camera')))) throw new Error('no camera packets arrived')
+  // Disable video (the person menu's): Bob's camera stops reaching A, and comes back once turned off again
+  const camFrames = () => a.ev(received('camera', 'framesReceived'))
+  const camFlowing = async () => { const n = await camFrames(); await sleep(1500); return (await camFrames()) > n + 5 }
+  await a.ev(`api.call('setSettings', { noVideo: ['${await b.ev(`api.call('state').then((s) => s.me)`)}'] })`)
+  await until("with Bob's video disabled, his camera frames stop arriving at A", async () => !(await camFlowing()), 15)
+  await a.ev(`api.call('setSettings', { noVideo: [] })`)
+  await until('enabled again, they arrive again', camFlowing, 30)
   await until('B sees itself, mirrored', () => b.ev(`!!document.querySelector('.stage .screen.mirror video')`), 5)
   await b.ev(press('Turn off camera'))
   await until("Bob turns his camera off; A's stage closes", () => a.ev(`!document.querySelector('.stage')`), 10)
@@ -1353,6 +1380,12 @@ try {
   const restartAnn = async (port) => {
     a.child.kill()
     a = await launch(port, a.dir, annEnv)
+    // A restart has real work behind the splash (links, presence, catch-up): it must finish, not give up, and show it
+    if (!a.startup.ready || a.closed > 15000) throw new Error(`the splash on Ann's restart did not get ready well within 20 s: ${JSON.stringify(a.startup.pending)} ${JSON.stringify(await diagLines(a, 'startup'))}`)
+    // Linked with both and caught up is real work, but it can finish before the page paints, so the splash may show
+    // only Ready: what it showed is logged, not counted
+    if (!/^linked with 2 of 2/.test(a.startup.steps.find((s) => s.id === 'links').detail)) throw new Error('the restart was ready before linking with Bob and Cy')
+    console.log('ok   the splash showed', (await a.ev('window.__splash')).join(' → '))
     await until('Ann is back on Home', () => a.ev(`!!document.querySelector('main.home')`), 30)
     await a.ev(`document.querySelector('.rail-server').click()`)
     await until('Ann links with someone', async () => (await diagLines(a, 'linked with')).length > 0, 30)
@@ -1364,9 +1397,15 @@ try {
   await until('as soon as she is linked, the freshly opened Ann sees Bob and Cy in Lounge and online, without joining', async () =>
     (await inLounge(a, 'Bob', 'Cy')) && (await a.ev(`!document.querySelector('.voice-bar') && !!document.querySelector('aside.members')?.textContent.includes('Online — 3')`)), 3)
   console.log('     ', (await diagLines(a, 'first person shown'))[0])
+  // A normal join keeps its first connections: nobody takes it for a restart (only a different known session is one)
+  const restarts = (p) => p.ev(`api.diagnostics().then((d) => d.events.filter((e) => e.text.includes('restarted: dropping the old connection')).length)`)
+  const restartsBC = async () => (await restarts(b)) + (await restarts(c))
+  const seenRestarts = await restartsBC()
   let t = Date.now()
   await a.ev(`${channel('Lounge')}.click()`)
   await until('Ann joins Lounge and hears Bob and Cy at once', () => a.ev(hearsAll(2)), 4)
+  if ((await restarts(a)) || (await restartsBC()) > seenRestarts) throw new Error('a normal join was taken for a restart and its connection dropped')
+  console.log('ok   the normal join was not taken for a restart')
   console.log(`      heard both ${Date.now() - t} ms after clicking join;`, (await diagLines(a, 'joined:')).join(', '))
   // Bob and Cy still hold connections to Ann's old copy that look alive; her new copy's join replaces them at once
   // A window that reloaded since it was launched (the crash step) has lost the connection counter: put it back

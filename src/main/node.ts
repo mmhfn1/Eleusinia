@@ -44,6 +44,7 @@ import { type Activity, type Game, cleanActivity, shareable } from '../shared/ac
 import { type RelayLimits, RELAY_LIMITS, createNet } from './network'
 import { createRelay } from './relay'
 import { isNewer } from '../shared/updatesig'
+import { type Check, type StartupEvent, type StepId, startupEvent } from '../shared/startup'
 
 type Saved = {
   unread?: Record<string, number> // per conversation: messages from others and missed calls since it was last read
@@ -90,6 +91,8 @@ type Opts = {
   // Conversations kept in memory: as many recently used ones as fit in this many messages (the one in use always
   // stays), so a server's busy channels are not read back from disk for every catch-up page. Testing: a few.
   keepMsgs?: number
+  startupMs?: number // how long the startup checks wait before giving up (testing: shorter)
+  appMemory?: () => number // the app's memory in MB, logged once startup has tidied up (index.ts: every process)
 }
 
 // Conversations whose messages stay in memory; the open one and a couple being synced.
@@ -102,7 +105,7 @@ const CATCHUP_BACKLOG = 1 << 20 // no new round while this much is still unsent 
 const FLOOD = { burst: 400, perSecond: 20 }
 
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
-export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', newerApp, links, strict, relayLimits, maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8, keepMsgs = 50000 }: Opts) {
+export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, diag = () => {}, version = '0.0.0', newerApp, links, strict, relayLimits, maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8, keepMsgs = 50000, startupMs = 20000, appMemory = () => process.memoryUsage().rss / 2 ** 20 }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
   const file = join(dir, 'state.json')
   mkdirSync(join(dir, 'msgs'), { recursive: true })
@@ -366,6 +369,13 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const askedOlder = new Map<Key, number>()
   const floodRetry = new Map<string, ReturnType<typeof setTimeout>>()
   const sentUpTo = new Map<string, { have: Have; at: number }>() // per link and conversation: what catch-up just sent
+  // Startup (the splash): per link and conversation greeted, their first have, until we hold what it showed
+  const catching = new Map<string, Have | null>()
+  let starting = true
+  let newMsgs = 0 // new messages from others while starting
+  let mateHeard = false // a group or server mate greeted us, their presence snapshot first
+  let cardsOut = 0 // card fetches in flight (unlinked members' names and profiles)
+  const countedCard = (k: Key) => (cardsOut++, fetchCard(k).finally(() => cardsOut--))
   const few = (ks: Key[], n = forwardTo) => ks.sort(() => Math.random() - 0.5).slice(0, n)
   const sendReceipts = () => {
     for (const conv of receipts) for (const k of few(members(conv).filter((k) => k !== me && net.linked(k)), 3)) sendHave(k, conv, true)
@@ -380,10 +390,13 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     // Then who is online and in which call, so a freshly started copy shows them from its first link on
     if (shared.length || servers.shares(key)) for (const p of presence.snapshot(key)) net.send(key, { t: 'presence', p })
     hi(key)
-    if (s.friends[key] === 'friend') sendHave(key, dmId(me, key))
-    for (const g of shared) sendHave(key, g.id)
-    servers.greet(key)
-    for (const conv of servers.channelsWith(key)) sendHave(key, conv)
+    // Only where both of us are members: a group we left is still held (its doc carries our leave), but asking there
+    // gets no answer, and at startup would be waited on for nothing
+    const ask = (conv: string) => members(conv).includes(key) && (starting && catching.set(key + conv, null), sendHave(key, conv))
+    if (s.friends[key] === 'friend') ask(dmId(me, key))
+    for (const g of shared) ask(g.id)
+    servers.greet(key, starting)
+    for (const conv of servers.channelsWith(key)) ask(conv)
     sendActivity(key)
   }
   function reach(key: Key) {
@@ -417,6 +430,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     }
     if (w.t === 'hello') {
       if (typeof w.name !== 'string') return
+      if (inGroupWith(key) || servers.knows(key)) mateHeard = true // their presence snapshot came just before
       const st = s.friends[key]
       // Older versions do not say; they greeted only friends and people they asked, plus fellow group members.
       const said = typeof w.friend === 'boolean'
@@ -491,6 +505,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     if (w.t === 'have') {
       if (!members(w.conv).includes(key) || !w.have || typeof w.have !== 'object') return
       const have = haveOf(w.conv)
+      if (catching.has(key + w.conv)) catching.set(key + w.conv, w.have)
       const was = s.confirmed?.[w.conv]?.[key] ?? {}
       const now: Have = { ...was }
       for (const a of Object.keys(have)) now[a] = Math.max(was[a] ?? 0, Math.min(Number(w.have[a]) || 0, have[a]))
@@ -586,6 +601,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (old) return void (append(m, true), setTail(m.conv, m.author, m.seq - 1))
       if (m.seq > next) setTail(m.conv, m.author, m.seq - 1), (haveOf(m.conv)[m.author] = m.seq - 1)
       append(m)
+      if (starting) newMsgs++
       sendHave(key, m.conv, true) // delivery receipt
       if (Object.hasOwn(s.groups, m.conv) || servers.isChannel(m.conv)) receipts.add(m.conv)
       // Passed on to a few linked members, not all: in a big group that would be members² sends per message. Anyone
@@ -893,7 +909,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         diag('network', `link closed with …${key.slice(-6)}`)
         presence.closed(key)
         servers.closed(key)
-        for (const k of sentUpTo.keys()) if (k.startsWith(key)) sentUpTo.delete(k)
+        for (const m of [sentUpTo, catching]) for (const k of m.keys()) if (k.startsWith(key)) m.delete(k)
         theirs.delete(key)
         sentActivity.delete(key)
         // The call's relay port stays: the link comes back within seconds and WebRTC keeps using that candidate.
@@ -935,7 +951,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     accepts: (k) => (inGroupWith(k) || servers.knows(k)) && !s.blocked?.[k],
     version: (k) => s.profileV?.[k],
     async card(k, v) {
-      const c = await fetchCard(k)
+      const c = await countedCard(k)
       if (!c || !known(k) || net.linked(k)) return 'skip'
       if (JSON.stringify(c) === JSON.stringify(s.profiles[k])) return 'same'
       s.profiles[k] = c
@@ -980,7 +996,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   // and many offline friends would otherwise cost a steady stream of them. Coming back online, they dial us anyway.
   const retries = new Map<Key, { n: number; next: number }>()
   let joined = false
-  net.listening.then(() => (joined = true), () => {})
+  // Dials that failed before we were on the DHT said nothing (failed), so dial again at once, not at the next tick,
+  // and name unlinked members now rather than in 30 s
+  net.listening.then(() => ((joined = true), redial(), nameUnlinked(Infinity)), () => {})
   // While relaying, the first few retries skip the wait (a relay needs its contacts linked as soon as they can be, or
   // pairs wait minutes); after that it backs off too, or with relaying on by default nobody offline ever would.
   const due = (k: Key) => (retries.get(k)?.next ?? 0) <= Date.now() || (!!relayKey && (retries.get(k)?.n ?? 0) < 3)
@@ -1231,18 +1249,102 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   // A group member we have never linked with (two strict routers) would show as their key: their published card
   // names them. A few at a time, each at most hourly.
   const carded = new Map<Key, number>()
-  async function nameUnlinked() {
-    const keys = [...new Set([...ours().flatMap((g) => g.members), ...servers.list().flatMap((v) => Object.keys(v.members))])].filter((k) => k !== me && !s.profiles[k]?.name && !net.linked(k) && (carded.get(k) ?? 0) < Date.now() - 3600e3)
-    for (const k of keys.slice(0, 5)) {
-      carded.set(k, Date.now())
-      const card = await fetchCard(k)
-      if (card && known(k) && !s.profiles[k]?.name) (s.profiles[k] = card), changed()
-    }
+  const unnamed = () =>
+    [...new Set([...ours().flatMap((g) => g.members), ...servers.list().flatMap((v) => Object.keys(v.members))])].filter((k) => k !== me && !s.profiles[k]?.name && !net.linked(k) && (carded.get(k) ?? 0) < Date.now() - 3600e3)
+  async function nameUnlinked(most = 5) {
+    const keys = unnamed().slice(0, most)
+    for (const k of keys) carded.set(k, Date.now())
+    for (let i = 0; i < keys.length; i += 5)
+      await Promise.all(
+        keys.slice(i, i + 5).map(async (k) => {
+          const card = await countedCard(k)
+          if (card && known(k) && !s.profiles[k]?.name) (s.profiles[k] = card), changed()
+        }),
+      )
   }
   const namer = setInterval(nameUnlinked, redialMs * 2)
+
+  // Startup checks behind the splash (shared/startup.ts): each done when it really is, emitted at most every 200 ms
+  // when something changed, until all are done or startupMs has passed. index.ts reports the update check.
+  const startedAt = Date.now()
+  // holding: an update is being downloaded and installed, so the splash does not give up on it (index.ts relaunches)
+  let updates: Check & { holding?: boolean } = { done: true, detail: 'Updates are not checked in this copy' }
+  // shortcut: a stalled update download holds the splash at most this long, then the app opens on this version
+  const HOLD_MS = 5 * 60e3
+  let tidied = false
+  let lastStartup: StartupEvent | null = null
+  const nameOf = (k: Key) => s.profiles[k]?.name || `…${k.slice(-6)}`
+  function linkCheck(): Check {
+    const picks = [...ours().map((g) => g.members), ...servers.lists()].flatMap(linkPick)
+    const targets = [...new Set([...Object.keys(s.friends).filter((k) => s.friends[k] === 'friend'), ...picks])].filter((k) => k !== me && !s.blocked?.[k])
+    // Settled: linked, or its first dial failed and, for a friend we have something for, the relay attempt too
+    const failed = (k: Key) => (retries.get(k)?.n ?? 0) > 0 && !attempting.has(k) && (!demand.has(k) || s.friends[k] !== 'friend' || fails.has(k))
+    const linked = targets.filter((k) => net.linked(k)).length
+    const waiting = targets.filter((k) => !net.linked(k) && !failed(k))
+    return {
+      done: joined && !waiting.length,
+      detail: targets.length ? `linked with ${linked} of ${linked + waiting.length} online` : 'Nobody to connect to yet',
+      waiting: waiting.map((k) => `Still connecting to ${nameOf(k)}`),
+    }
+  }
+  // A greeted conversation is caught up once their first have came and we hold all it showed of its members
+  function caughtUp(x: string, h: Have | null) {
+    const conv = x.slice(64)
+    const ok = !!h && !members(conv).some((a) => (Number(h[a]) || 0) > (haveOf(conv)[a] ?? 0))
+    if (ok) catching.delete(x)
+    return ok
+  }
+  function startupChecks(): Record<StepId, Check> {
+    const friends = Object.values(s.friends).filter((f) => f === 'friend').length
+    const links = linkCheck()
+    const mates = new Set([...ours().flatMap((g) => g.members), ...servers.lists().flat()].filter((k) => k !== me))
+    const mateLinked = [...mates].filter((k) => net.linked(k)).length
+    const left = unnamed().length + cardsOut
+    const heard = !mates.size || mateHeard || (links.done && !mateLinked)
+    const behind = [...new Set([...[...catching].filter(([x, h]) => !caughtUp(x, h)).map(([x]) => x.slice(0, 64)), ...servers.behind()])]
+    // No prune of its own: every redial prunes, the first one as the node starts
+    if (links.done && heard && !left && !behind.length && !tidied) {
+      tidied = true
+      diag('app', `startup checks done in ${Date.now() - startedAt} ms; app memory ${Math.round(appMemory())} MB`)
+    }
+    return {
+      account: { done: true, detail: `${friends} friend${friends === 1 ? '' : 's'}, ${ours().length + servers.list().length} groups and servers` },
+      network: { done: joined, detail: joined ? 'On the network' : 'Finding the network' },
+      updates,
+      links,
+      presence: {
+        done: heard && !left,
+        detail: `${presence.online().length + mateLinked} online in your groups`,
+        waiting: [...(heard ? [] : ['Still waiting to hear who is around']), ...(left ? [`Still fetching ${left} name${left === 1 ? '' : 's'}`] : [])],
+      },
+      catchup: { done: !behind.length, detail: `${newMsgs} new message${newMsgs === 1 ? '' : 's'}`, waiting: behind.map((k) => `Still catching up with ${nameOf(k)}`) },
+      memory: { done: tidied, detail: tidied ? `${Math.round(appMemory())} MB in use` : 'Waiting for the rest' },
+    }
+  }
+  function startupTick() {
+    const e = startupEvent(startupChecks(), Date.now() - startedAt > (updates.holding ? HOLD_MS : startupMs))
+    if (JSON.stringify(e) !== JSON.stringify(lastStartup)) emit(e)
+    lastStartup = e
+    if (!e.ready && !e.gaveUp) return
+    // Which catch-ups held it up: a conversation with no answer, or one whose answer showed what we still lack
+    const held = [...catching].map(([x, h]) => `…${x.slice(58, 64)} ${x.slice(64)} ${h ? `lacking ${JSON.stringify(h)} of ${JSON.stringify(haveOf(x.slice(64)))}` : 'no answer'}`)
+    if (e.gaveUp) diag('app', `startup gave up after ${startupMs / 1000} s: ${e.pending.join(', ')}${held.length ? `; catch-up: ${held.join('; ')}` : ''}`)
+    starting = false
+    catching.clear()
+    clearInterval(startupTimer)
+  }
+  const startupTimer = setInterval(startupTick, 200)
   return {
     state,
     ready,
+    // The latest startup event, for a window that subscribes late
+    startup: () => lastStartup ?? startupEvent(startupChecks(), false),
+    // index.ts: the startup update check answered, or is installing a newer version (holding)
+    updateStep(u: Check & { holding?: boolean }) {
+      updates = u
+    },
+    // Still behind the splash: index.ts installs an update found now at once, and only offers one found later
+    starting: () => !lastStartup?.ready && !lastStartup?.gaveUp,
     // The first call also takes a username and fixes the handle for good; later calls cannot change it.
     async setProfile(p: Partial<Profile> & { username?: string }) {
       const clean = cleanProfile({ ...p, handle: s.profile.handle })
@@ -1657,6 +1759,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       for (const j of pending.values()) j.done(new Error('Closed'))
       clearInterval(watcher)
       clearInterval(namer)
+      clearInterval(startupTimer)
       clearInterval(probeReset)
       clearInterval(receiptTimer)
       relay.closeAll()

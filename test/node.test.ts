@@ -7,7 +7,7 @@ import createTestnet from 'hyperdht/testnet'
 import { afterAll, beforeAll, expect, onTestFailed, test } from 'vitest'
 import { createNode } from '../src/main/node'
 import { type RelayLimits, createNet, relayKeyPair } from '../src/main/network'
-import { CALL_VERSION, type Group, type Msg, cleanProfile, dmId, identicon, isHandle, keyTail, normHandle, stack, versionOf } from '../src/shared/protocol'
+import { CALL_VERSION, type Event, type Group, type Msg, cleanProfile, dmId, identicon, isHandle, keyTail, mutedNow, normHandle, stack, versionOf } from '../src/shared/protocol'
 import { inviteKeyPair, joinProof, signOp } from '../src/shared/server'
 import { makeInvite, parseInvite } from '../src/shared/invite'
 import { heldFrom, mergeGroup, missing, signAdd, signLeft, signMsg, signPresence, validGroup, verifyAdd, verifyMsg, verifyPresence } from '../src/shared/sync'
@@ -92,6 +92,14 @@ test('friend IDs are username#1234 and forgiving to type', () => {
   expect(isHandle('a#1234')).toBe(false)
   expect(isHandle('Ann#1234')).toBe(false)
   expect(normHandle(' Ann #1234 ')).toBe('ann#1234')
+})
+
+test('a conversation is muted for good or until its end time', () => {
+  const st = { muted: { a: true, b: 2000, c: 1000 } } as any
+  expect(mutedNow(st, 'a', 1500)).toBe(true)
+  expect(mutedNow(st, 'b', 1500)).toBe(true)
+  expect(mutedNow(st, 'c', 1500)).toBe(false)
+  expect(mutedNow(st, 'd', 1500)).toBe(false)
 })
 
 test('generated pictures are stable, mirrored and differ between keys', () => {
@@ -1728,6 +1736,63 @@ test('a node that starts while two members it is not linked with are in a group 
   const linked = Date.now()
   const joined = (k: string) => heard.some((e) => e.from === k && e.conv === gid && e.data.k === 'join')
   // Delivery only: the notes come in A's greeting, right behind the link opening
-  await expect.poll(() => [c.key, d.key].every((k) => b.node.state().present.includes(k) && joined(k)), { timeout: 1000, interval: 5 }).toBe(true)
+  await expect.poll(() => [c.key, d.key].every((k) => b.node.state().present.includes(k) && joined(k)), { timeout: 1000, interval: 5 }).toBe(true).catch((e) => {
+    const t = (k: string) => k.slice(-6)
+    console.log('what B had when the check gave up', JSON.stringify({ c: t(c.key), d: t(d.key), present: b.node.state().present.map(t), online: b.node.state().online.map(t), heard: heard.map((e) => [t(e.from), e.data?.k]), aOnline: a.node.state().online.map(t), aPresent: a.node.state().present.map(t) }))
+    throw e
+  })
   console.log(`snapshot: both present and in the call ${Date.now() - linked} ms after the first link opened`)
+}, 120000)
+
+test('startup checks: a restarted node with two friends online gets ready, and one never reached is named when it gives up', async () => {
+  let a = start()
+  const b = start()
+  const c = start()
+  await c.node.setProfile({ username: 'cy' + c.key.slice(0, 6), name: 'Cy' })
+  await befriend(a, b)
+  await befriend(a, c)
+  const gid = a.node.createGroup('splash', [b.key, c.key])
+  const left = a.node.createGroup('left', [b.key, c.key]) // A leaves it: still held, but nobody answers A there
+  await until(() => !!b.node.state().groups[gid] && !!c.node.state().groups[gid] && !!c.node.state().groups[left])
+  a.node.leaveGroup(left)
+  await until(() => !b.node.state().groups[left]?.members.includes(a.key))
+  await a.node.destroy()
+  await until(() => !b.node.state().online.includes(a.key) && !c.node.state().online.includes(a.key))
+  b.node.send(gid, 'while a was away')
+  c.node.send(dmId(a.key, c.key), 'a dm too')
+
+  const seen: Extract<Event, { type: 'startup' }>[] = []
+  const t0 = Date.now()
+  a = start(a.dir, a.keyPair, { emit: (e) => void (e.type === 'startup' && seen.push(e)) })
+  await until(() => !!seen.at(-1)?.ready)
+  const last = seen.at(-1)!
+  expect(Date.now() - t0).toBeLessThan(10000)
+  expect(last.steps.filter((s) => !s.done)).toEqual([])
+  expect(last.steps.find((s) => s.id === 'links')!.detail).toBe('linked with 2 of 2 online')
+  expect(last.steps.find((s) => s.id === 'catchup')!.detail).toBe('2 new messages')
+  expect(texts(a, gid)).toContain('while a was away')
+  await new Promise((r) => setTimeout(r, 600))
+  expect(seen.at(-1)).toBe(last) // no more events once ready
+  expect(a.node.startup()).toEqual(last)
+
+  // Cy is online but A can never link with them: the checks give up and say so
+  await a.node.destroy()
+  const late: typeof seen = []
+  a = start(a.dir, a.keyPair, { startupMs: 3000, links: (k) => k !== c.key, emit: (e) => void (e.type === 'startup' && late.push(e)) })
+  await until(() => !!late.at(-1)?.gaveUp)
+  expect(late.at(-1)!.ready).toBe(false)
+  expect(late.at(-1)!.pending).toContain('Still connecting to Cy')
+
+  // An update installing behind the splash holds it past the usual limit; then the checks finish as normal
+  await a.node.destroy()
+  const held: typeof seen = []
+  a = start(a.dir, a.keyPair, { startupMs: 1000, emit: (e) => void (e.type === 'startup' && held.push(e)) })
+  a.node.updateStep({ done: false, holding: true, label: 'Updating Eleusinia', detail: 'Downloading Eleusinia 9.9.9, 40%' })
+  await new Promise((r) => setTimeout(r, 2500))
+  expect(held.at(-1)!.gaveUp).toBe(false)
+  expect(a.node.starting()).toBe(true)
+  expect(held.at(-1)!.steps.find((s) => s.id === 'updates')!.label).toBe('Updating Eleusinia')
+  a.node.updateStep({ done: true, detail: 'Could not download Eleusinia 9.9.9; it is tried again later' })
+  await until(() => !!held.at(-1)?.ready)
+  expect(a.node.starting()).toBe(false)
 }, 120000)

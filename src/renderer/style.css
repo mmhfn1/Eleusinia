@@ -1,4 +1,7 @@
-/* Eleusinia, Ink and fog: the black and white of the emblem, with the Shattered Throne's fog as the only light.
+/* Eleusinia, Lamplight: ink and fog lit by the splash's lamp. Gold is light, not paint: a low glow rising from below,
+   the emblem, edges that catch it (bars, the selected channel, the rail blade), primary buttons and gilded section
+   labels and titles; text is a few degrees warm and messages are never gold (design/mockups/theme-showcase.html).
+   Before Lamplight, Ink and fog: the black and white of the emblem, with the Shattered Throne's fog as the only light.
    The colours were sampled from the reference art: blue-black shadows, fog and stone (#425a6b), cyan-grey haze (#b5c3c6).
    Colour roles: void/abyss/obsidian = surfaces (darkest outside, lighter inward), silver = text, identity and the one
    interactive accent (selection, focus, primary actions: white on black, like the emblem), mist = secondary text,
@@ -13,21 +16,30 @@
   --obsidian-2: #111418;
   --obsidian-3: #171b20;
   --obsidian-4: #20252b;
-  --line: #1b1f24;
-  --line-strong: #2c3238;
+  /* Lamplight: lines are where the lamp's light catches an edge, so they lean warm */
+  --line: #201e1a;
+  --line-strong: #36312a;
   --fog: #425a6b; /* the throne's fog, sampled; only ever used faintly */
   --stone: #596273;
 
-  --silver: #f4f5f6;
-  --silver-2: #d4d8dc;
-  --mist: #b4b9bf;
-  --mist-2: #9a9fa5;
+  /* Text a few degrees warmer, as if lit by the lamp rather than a screen */
+  --silver: #f5f3ef;
+  --silver-2: #d9d6d0;
+  --mist: #b9b5ad;
+  --mist-2: #9e9a92;
 
-  --accent: #f4f5f6;
+  /* The splash's lamp (design/mockups/theme-showcase.html): gold is light, never a fill for messages */
+  --lamp: #eadedc;
+  --ember: #d8c39c;
+  --wick: #8c6f4e;
+  --leaf: #d5bf92;
+  --glow: 0.12;
+
+  --accent: #f5f3ef;
   --accent-strong: #ffffff;
-  --accent-deep: #f4f5f6;
-  --accent-veil: rgb(244 245 246 / 0.07);
-  --accent-glow: rgb(220 226 230 / 0.30);
+  --accent-deep: #f5f3ef;
+  --accent-veil: rgb(216 195 156 / 0.085);
+  --accent-glow: rgb(216 195 156 / 0.37);
   --cyan: #b5c3c6;
   --violet: #a998d6;
   --gold: #d8c39c;
@@ -53,7 +65,7 @@
   --r-lg: 10px;
   --control-h: 36px;
 
-  --focus-ring: 0 0 0 2px var(--abyss), 0 0 0 4px var(--accent);
+  --focus-ring: 0 0 0 2px var(--abyss), 0 0 0 4px var(--ember);
   --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
   --t-fast: 120ms;
   --t: 220ms;
@@ -72,7 +84,12 @@ body,
 body {
   margin: 0;
   color: var(--silver);
-  background: radial-gradient(90% 60% at 50% -10%, rgb(66 90 107 / 0.5), transparent 62%), var(--void);
+  /* Fog from above, the lamp's light rising from below and a little at the emblem */
+  background:
+    radial-gradient(90% 60% at 50% -10%, rgb(66 90 107 / 0.4), transparent 62%),
+    radial-gradient(28% 22% at 3% 3%, rgb(216 195 156 / 0.05), transparent 72%),
+    radial-gradient(70% 45% at 50% 118%, rgb(216 195 156 / var(--glow)), transparent 72%),
+    var(--void);
   -webkit-font-smoothing: antialiased;
 }
 h1,
@@ -83,12 +100,13 @@ p {
 h1 {
   font: 600 22px/1.2 var(--display);
   letter-spacing: 0.01em;
+  color: color-mix(in srgb, #ebdcbc 50%, var(--silver));
 }
 h2 {
   font: 600 11px/1.4 var(--sans);
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--mist);
+  color: color-mix(in srgb, var(--leaf) 85%, var(--mist-2)); /* section labels are faintly gilded */
 }
 b {
   font-weight: 600;
@@ -376,7 +394,7 @@ input[type='range'] {
   font: 600 15px/1 var(--display);
   letter-spacing: 0.42em;
   text-transform: uppercase;
-  color: var(--silver);
+  color: #e6d6b4;
   padding-left: 0.42em; /* balances the trailing letter-spacing */
 }
 .wordmark.large {
@@ -575,7 +593,7 @@ b.tail {
   width: 4px;
   height: 0;
   border-radius: 0 4px 4px 0;
-  background: linear-gradient(180deg, var(--accent), var(--accent));
+  background: linear-gradient(180deg, var(--lamp), var(--ember));
   translate: 0 -50%;
   transition: height var(--t) var(--ease);
 }
@@ -2277,8 +2295,9 @@ aside {
   box-shadow: 0 0 22px var(--accent-glow);
 }
 .rail-mark .emblem {
-  background: var(--silver);
-  filter: none;
+  /* the splash's lamp, held still */
+  background: radial-gradient(circle at 50% 56%, var(--lamp) 0%, var(--ember) 40%, var(--wick) 85%);
+  filter: drop-shadow(0 0 8px rgb(216 195 156 / 0.22));
 }
 .emblem.glow {
   background: var(--silver);
@@ -2296,14 +2315,14 @@ aside {
   border-color: color-mix(in srgb, var(--silver) 40%, transparent);
 }
 .button.primary {
-  border-color: var(--silver);
-  background: var(--silver);
-  color: var(--void);
+  border-color: #efe4cc;
+  background: linear-gradient(180deg, #f5ecda, #e4d2ac); /* pale gold, lit from above */
+  color: #1a140c;
   font-weight: 600;
   box-shadow: none;
 }
 .button.primary:hover:not(:disabled) {
-  background: #ffffff;
+  background: linear-gradient(180deg, #faf3e6, #ead9b6);
   box-shadow: 0 0 20px -4px var(--accent-glow);
 }
 .button.danger {
@@ -2361,9 +2380,9 @@ kbd {
   color: var(--gold);
 }
 .round.primary {
-  border-color: var(--silver);
-  background: var(--silver);
-  color: var(--void);
+  border-color: #efe4cc;
+  background: linear-gradient(180deg, #f5ecda, #e4d2ac);
+  color: #1a140c;
 }
 .round.leave {
   border-color: color-mix(in srgb, var(--danger) 55%, transparent);
@@ -2728,7 +2747,8 @@ dialog.menu-dialog .dialog-close {
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: var(--cyan);
+  background: var(--ember);
+  box-shadow: 0 0 6px rgb(216 195 156 / 0.6);
 }
 .window-buttons {
   display: flex;
@@ -4235,7 +4255,7 @@ aside.server-side {
   color: var(--silver-2);
 }
 .channel.active {
-  background: var(--obsidian-3);
+  background: linear-gradient(90deg, rgb(216 195 156 / calc(var(--glow) + 0.02)), transparent 75%), var(--obsidian-3);
   color: var(--silver);
 }
 .channel > .icon {
@@ -4360,6 +4380,7 @@ aside.server-side {
   border-top: 1px solid var(--line);
   border-right: 1px solid var(--line);
   background: rgb(5 6 8 / 0.55);
+  box-shadow: inset 0 1px 0 rgb(216 195 156 / calc(var(--glow) * 0.8)); /* the top edge catches the lamp */
 }
 .voice-bar {
   display: grid;

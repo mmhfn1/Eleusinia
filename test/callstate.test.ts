@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { ASKS, type IceCandidate, OFFLINE_GRACE, REJOIN_MS, RESTART_AFTER, RESTART_GRACE, backoff, createCandidates, createWatchdog, offers, quickVideo, rejoinFrom, restartAfterFor, restarted, viewerCue } from '../src/shared/callstate'
+import { ASKS, type IceCandidate, OFFLINE_GRACE, REJOIN_MS, RESTART_AFTER, RESTART_GRACE, backoff, createCandidates, createWatchdog, offers, quickVideo, rejoinFrom, restartAfterFor, restarted, sessionOf, viewerCue } from '../src/shared/callstate'
 
 // Stands in for RTCPeerConnection: rejects candidates until a remote description is set, as the real one does.
 function fakePc() {
@@ -358,12 +358,25 @@ test('a call saved before an update restart is rejoined only soon after', () => 
 })
 
 test('a join from another session means the peer restarted', () => {
-  expect(restarted(undefined, 'a1')).toBe(true) // first heard: only acted on with a connection already there
   expect(restarted('a1', 'a1')).toBe(false)
   expect(restarted('a1', 'b2')).toBe(true)
   expect(restarted('a1', undefined)).toBe(false) // an older copy sends none
-  expect(restarted(undefined, 5)).toBe(false)
-  expect(restarted(undefined, 'x'.repeat(65))).toBe(false)
+  expect(restarted('a1', 5)).toBe(false)
+  expect(restarted('a1', 'x'.repeat(65))).toBe(false)
+})
+
+test('the first session seen is not a restart, so a normal join keeps its first connection', () => {
+  // Ann offers Bob at once; Bob's reply join (or his answer) is the first we hear of his session
+  const known = new Map<string, string>()
+  const heard = (s: unknown) => {
+    const was = restarted(known.get('bob'), s)
+    if (sessionOf(s)) known.set('bob', sessionOf(s)!)
+    return was
+  }
+  expect(heard('b1')).toBe(false) // the answer or the reply join, whichever comes first
+  expect(heard('b1')).toBe(false) // the other one
+  expect(heard('b2')).toBe(true) // Bob's window reloaded: the connection to the old copy goes at once
+  expect(sessionOf('')).toBe(undefined)
 })
 
 test('a viewer joining or leaving our stream is heard, changes in between and a stopped share are not', () => {

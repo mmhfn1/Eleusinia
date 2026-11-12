@@ -180,11 +180,16 @@ export function rejoinFrom(saved: string | null, now: number): string | null {
   }
 }
 
-// Each window load joins with a random session id (`s` in `join`). A join from a session other than the one we
-// know (or the first we hear while a connection already exists) comes from a restarted copy: our connection to the
-// old one only looks alive until it times out, so it is dropped at once. Older copies send none and keep the old way.
-export const restarted = (known: string | undefined, got: unknown) =>
-  typeof got === 'string' && got.length > 0 && got.length <= 64 && got !== known
+// Each window load has a random session id (`s` in every `join`, `offer` and `answer`), so the first connection to
+// someone already tells us their session. A join from a different session than the one we know comes from a
+// restarted copy: our connection to the old one only looks alive until it times out, so it is dropped at once. The
+// first session we hear is never a restart (their reply join arrives while our first offer is still connecting).
+// Older copies send none and keep the old way.
+export const sessionOf = (got: unknown) => (typeof got === 'string' && got.length > 0 && got.length <= 64 ? got : undefined)
+export const restarted = (known: string | undefined, got: unknown) => {
+  const s = sessionOf(got)
+  return known !== undefined && s !== undefined && s !== known
+}
 
 // A viewer opening or closing our stream, from their `want` for our screen leaving or returning to `off` ('audio',
 // a joined stream in a hidden window, still counts as watching). Nothing while we share nothing: a stopped share

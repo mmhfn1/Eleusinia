@@ -45,7 +45,7 @@ export function Chat({ st, conv, title, people, run, home, go, menu, stage, head
   const list = useRef<HTMLDivElement>(null)
   const atBottom = useRef(true)
   const box = useRef<HTMLTextAreaElement>(null)
-  const { prof, name, user, isOnline, show } = people
+  const { prof, name, isOnline, show } = people
   const [attached, setAttached] = useState<FileRef[]>([])
   const [preparing, setPreparing] = useState(0)
   const [files, setFiles] = useState<Record<string, FileState>>({})

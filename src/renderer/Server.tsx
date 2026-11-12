@@ -1,12 +1,12 @@
 // A server: its channels on the left, the open channel's chat in the middle, its members by role on the right, and
 // the dialogs opened from there (invite, poke into a voice channel, new channel, nickname, leave, kick and ban).
 import { type MouseEvent, type ReactNode, memo, useState } from 'react'
-import { type Key, type Profile, type ServerView, type State, dmId } from '../shared/protocol'
+import { type Key, type Profile, type ServerView, type State, dmId, mutedNow } from '../shared/protocol'
 import * as call from './call'
 import { ActivityLine } from './Activity'
 import { Chat } from './Chat'
 import { Oculus, ShareDialog, Stage, VoiceMark, useSpeaking } from './Media'
-import { type Modal, type People, type Run, api, card, isMuted } from './common'
+import { type Modal, type People, type Run, api, card } from './common'
 import { ContextMenu, type Item, useMenus } from './Rail'
 import { ServerSettings } from './ServerSettings'
 import { CopyButton, Dialog, GroupEmblem, Icon, Splitter, useWidth, Avatar } from './ui'
@@ -130,7 +130,7 @@ export function Server({ st, sv, channel, people: everyone, run, go, show }: Pro
     const here = voiceIn(`${sv.id}.${c.id}`, me)
     // A full voice channel is not joined (0 or none: no limit); its chat still opens
     const full = voice && !!c.userLimit && here.length >= c.userLimit && call.conv !== `${sv.id}.${c.id}`
-    const unread = isMuted(st, sv.id) || isMuted(st, `${sv.id}.${c.id}`) ? 0 : (st.chats[`${sv.id}.${c.id}`]?.unread ?? 0)
+    const unread = mutedNow(st.settings, sv.id) || mutedNow(st.settings, `${sv.id}.${c.id}`) ? 0 : (st.chats[`${sv.id}.${c.id}`]?.unread ?? 0)
     return (
       <div key={c.id} className="channel-row">
         <button

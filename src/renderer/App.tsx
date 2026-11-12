@@ -1,7 +1,7 @@
 import { type FormEvent, type KeyboardEvent, useEffect, useReducer, useRef, useState } from 'react'
 import { type Offset, clampOffset, cropRect } from '../shared/crop'
 import { usable } from '../shared/devices'
-import { type Group, type Key, type Profile, type State, dmId, keyTail } from '../shared/protocol'
+import { type Group, type Key, type Profile, type State, dmId, keyTail, mutedNow } from '../shared/protocol'
 import * as call from './call'
 import { Avatar, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Splitter, Wordmark, useWidth } from './ui'
 import { Chat } from './Chat'
@@ -10,8 +10,9 @@ import { DeleteAccount, ReportDialog, SettingsDialog } from './Settings'
 import { ActivityLine, ProfileActivity } from './Activity'
 import { MemberRow, Server, Speaking, channelOf, newId } from './Server'
 import { ProfileBanner, ProfilePop } from './Profile'
-import { type Modal, NOBODY, type People, type Run, api, card, groupName, isMuted, labelOf } from './common'
+import { type Modal, NOBODY, type People, type Run, api, card, groupName, labelOf } from './common'
 import { ContextMenu, type Item, Rail, useMenus } from './Rail'
+import { Splash, StillConnecting } from './Splash'
 
 type Poke = { from: Key; server: string; channel: string }
 // "Ann invites you to Lounge in Ashen Vanguard", or null when that is not a channel we can see.
@@ -22,7 +23,26 @@ function pokeText(s: State | null, p: Poke) {
   return `${s.settings.nicknames?.[p.from] || sv.members[p.from]?.nick || labelOf(s.profiles[p.from] ?? NOBODY, p.from)} invites you to ${ch.name} in ${sv.name}`
 }
 
-export default function App() {
+// The splash covers the window until startup is done; the app loads and takes events underneath, out of reach meanwhile.
+export default function Root() {
+  const [loaded, setLoaded] = useState(false)
+  const [after, setAfter] = useState<string[] | null>(null) // set once the splash has closed: who is still connecting
+  return (
+    <>
+      <div style={{ display: 'contents' }} inert={!after}>
+        <App loaded={() => setLoaded(true)} />
+        {after && <StillConnecting first={after} />}
+      </div>
+      {!after && (
+        <Splash loaded={loaded} closed={setAfter}>
+          <TitleBar place="" />
+        </Splash>
+      )}
+    </>
+  )
+}
+
+function App({ loaded }: { loaded: () => void }) {
   const [st, setSt] = useState<State | null>(null)
   const [sel, setSel] = useState<string | null>(null)
   const [modal, setModal] = useState<Modal>(null)
@@ -69,6 +89,7 @@ export default function App() {
     const got = (s: State) => {
       latest.current = s
       setSt(s)
+      loaded()
       call.onState(s)
     }
     const poked = (p: Poke) => {
@@ -79,7 +100,7 @@ export default function App() {
       setPoke(p)
       setTimeout(() => setPoke((x) => (x === p ? null : x)), 120000)
       // The toast shows while the window has focus; the desktop notice is for when it has not, unless muted
-      if (!document.hasFocus() && !isMuted(latest.current!, p.server) && !isMuted(latest.current!, `${p.server}.${p.channel}`)) new Notification('Eleusinia', { body: text })
+      if (!document.hasFocus() && !mutedNow(latest.current!.settings, p.server) && !mutedNow(latest.current!.settings, `${p.server}.${p.channel}`)) new Notification('Eleusinia', { body: text })
     }
     api.call('state').then(got)
     call.onChange(tick)
@@ -102,7 +123,7 @@ export default function App() {
     asked.current = now
   }, [st])
 
-  if (!st) return <TitleBar place="" />
+  if (!st) return null
   if (!st.profile.handle || editing)
     return (
       <>
@@ -1117,7 +1138,7 @@ function Conversation({ st, conv, people, run, go, show: showModal }: ConvProps)
   const home = () => go(null)
   const [left, setLeft] = useWidth('voice', 320)
   const [right, setRight] = useWidth('members', 230)
-  const { prof, name, user, isOnline, show } = people
+  const { prof, name, isOnline, show } = people
   const group = st.groups[conv]
   const other = conv.split('_').find((k) => k !== st.me)!
   const title = group ? groupName(group) : name(other)
