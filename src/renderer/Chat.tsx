@@ -7,6 +7,7 @@ import { type FileState, type Key, type Msg, type Profile, type State, MAX_TEXT,
 import * as call from './call'
 import { Avatar, Dialog, Emblem, GroupEmblem, Icon } from './ui'
 import { type People, type Run, api } from './common'
+import { pendingWords, reachOf } from '../shared/reach'
 
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString()
 const dayLabel = (ts: number) =>
@@ -133,6 +134,9 @@ export function Chat({ st, conv, title, people, run, home, go, menu, stage, head
   const removable = group?.owner === st.me ? group.members.filter((k) => k !== st.me) : []
   const sorted = [...msgs].sort((a, b) => a.ts - b.ts)
   const lastDelivered = [...sorted].reverse().find((m) => m.author === st.me && m.seq <= acked)
+  // Why our messages still wait, in a DM: they are offline, or online and we are still linking (or could not yet)
+  const reach = !group && st.friends[other] ? reachOf(st, other) : 'offline'
+  const waitingWords = pendingWords(reach)
 
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -177,6 +181,7 @@ export function Chat({ st, conv, title, people, run, home, go, menu, stage, head
         continued={continued}
         mine={mine}
         pending={pending}
+        waiting={pending ? waitingWords : ''}
         delivered={m === lastDelivered}
         p={prof(m.author)}
         name={name(m.author)}
@@ -384,6 +389,7 @@ type RowProps = {
   continued: boolean
   mine: boolean
   pending: boolean
+  waiting: string // what the pending line says
   delivered: boolean
   p: Profile
   name: string
@@ -395,7 +401,7 @@ type RowProps = {
 // One message. Kept from redrawing unless it changed: every state push (someone coming online) would otherwise redraw
 // the whole history. show and view are left out of the comparison: they only open things and never change what shows.
 const MsgRow = memo(
-  function MsgRow({ m, continued, mine, pending, delivered, p, name, files, show, view, go }: RowProps) {
+  function MsgRow({ m, continued, mine, pending, waiting, delivered, p, name, files, show, view, go }: RowProps) {
     // An invite link shows as its card instead of its text
     const invites = m.text ? findInvites(m.text) : []
     const text = invites.reduce((t, l) => t.split(l).join(''), m.text ?? '').trim()
@@ -431,7 +437,7 @@ const MsgRow = memo(
           )}
           {pending && (
             <span className="msg-status pending" title="Not delivered yet. It will be sent automatically when they are online.">
-              <Icon name="clock" size={12} /> pending, sends when they are online
+              <Icon name="clock" size={12} /> {waiting}
             </span>
           )}
           {delivered && (
@@ -448,6 +454,7 @@ const MsgRow = memo(
     a.continued === b.continued &&
     a.mine === b.mine &&
     a.pending === b.pending &&
+    a.waiting === b.waiting &&
     a.delivered === b.delivered &&
     a.name === b.name &&
     a.p.name === b.p.name &&

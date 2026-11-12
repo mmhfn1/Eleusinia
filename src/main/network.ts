@@ -31,10 +31,14 @@ type Handlers = {
   admit?(key: Key): boolean
   // Someone turned away by `admit`: they learn nothing, but their (verified) key says someone is at the door.
   knock?(key: Key): void
+  // Someone admitted is dialing us while we are not linked: their dial may fail at our router, while ours to them works
+  incoming?(key: Key): void
 }
 type KeyPair = { publicKey: Buffer; secretKey: Buffer }
 export type RelayLimits = { pairs: number; perContact: number; bytesPerSec: number }
-export const RELAY_LIMITS: RelayLimits = { pairs: 4, perContact: 2, bytesPerSec: 24 * 1024 } // per direction: 48 KB/s a pair
+// Per direction 24 KB/s a pair, voice only (State.relayed), about 8 KB/s. 8 pairs and 4 per contact: in a server where
+// several pairs cannot link, one well-placed member carries several of them, and 4 pairs ran out (0.1.3 reports).
+export const RELAY_LIMITS: RelayLimits = { pairs: 8, perContact: 4, bytesPerSec: 24 * 1024 }
 
 // The key our blind relay listens on: separate from the identity, so relay connections never look like a peer link.
 export const relayKeyPair = (secretKey: Buffer): KeyPair =>
@@ -98,7 +102,7 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
   // Anyone not admitted is turned away, directly or through a relay.
   const firewall = (key: Buffer) => {
     const k = key.toString('hex')
-    if (on.admit?.(k) ?? true) return false
+    if (on.admit?.(k) ?? true) return links.has(k) || on.incoming?.(k), false
     on.knock?.(k)
     return true
   }

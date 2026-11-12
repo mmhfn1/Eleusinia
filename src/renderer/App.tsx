@@ -5,12 +5,13 @@ import { type Group, type Key, type Profile, type State, dmId, keyTail, mutedNow
 import * as call from './call'
 import { Avatar, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Splitter, Wordmark, useWidth } from './ui'
 import { Chat } from './Chat'
-import { CameraDialog, Oculus, PersonVolume, Pip, RingBar, STATE_WORDS, ShareDialog, Stage, VoiceMark, VoiceSignal } from './Media'
+import { CameraDialog, Oculus, PersonVolume, Pip, RingBar, ShareDialog, Stage, VoiceMark, VoiceSignal } from './Media'
 import { DeleteAccount, ReportDialog, SettingsDialog } from './Settings'
 import { ActivityLine, ProfileActivity } from './Activity'
 import { MemberRow, Server, Speaking, channelOf, newId } from './Server'
 import { ProfileBanner, ProfilePop } from './Profile'
 import { type Modal, NOBODY, type People, type Run, api, card, groupName, labelOf } from './common'
+import { REACH_WORDS, callWords, reachOf } from '../shared/reach'
 import { ContextMenu, type Item, Rail, useMenus } from './Rail'
 import { Splash, StillConnecting } from './Splash'
 
@@ -317,7 +318,7 @@ function Home({ st, people, run, open, ring, newGroup }: { st: State; people: Pe
         <Avatar k={k} p={prof(k)} size={40} online={isOnline(k)} />
         <span className="row-text">
           <span className="row-title">{name(k)}</span>
-          <span className="row-sub">{st.activity[k]?.game ? <ActivityLine a={st.activity[k]} /> : prof(k).handle}</span>
+          <span className="row-sub">{st.activity[k]?.game ? <ActivityLine a={st.activity[k]} /> : reachOf(st, k) === 'connecting' || reachOf(st, k) === 'unreachable' ? REACH_WORDS[reachOf(st, k)] : prof(k).handle}</span>
         </span>
         {inCallIn(k) && <span className="row-where">In a call in {groupName(inCallIn(k)!)}</span>}
         {call.active.get(dmId(st.me, k))?.size ? (
@@ -338,8 +339,9 @@ function Home({ st, people, run, open, ring, newGroup }: { st: State; people: Pe
       </span>
     </div>
   )
-  const online = friends.filter((k) => st.online.includes(k))
-  const offline = friends.filter((k) => !st.online.includes(k))
+  // Online by a presence note counts too: seen online but not linked yet, which the row says
+  const online = friends.filter(isOnline)
+  const offline = friends.filter((k) => !isOnline(k))
   const incoming = byStatus('incoming')
   const outgoing = byStatus('outgoing')
   const groups = Object.values(st.groups).sort((a, b) => groupName(a).localeCompare(groupName(b)))
@@ -813,12 +815,12 @@ function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
       <ProfileBanner st={st} k={k} p={p} />
       <div className="card">
         <div className="card-portrait">
-          <Avatar k={k} p={p} size={96} online={k === st.me ? undefined : st.online.includes(k)} />
+          <Avatar k={k} p={p} size={96} online={k === st.me ? undefined : reachOf(st, k) !== 'offline'} />
         </div>
         <h1>{p.name}</h1>
         {k !== st.me && (
           <p className="row-sub">
-            {st.online.includes(k) ? (st.relayed.includes(k) ? 'Online through a friend: voice and text only' : 'Online') : 'Offline'}
+            {st.relayed.includes(k) ? 'Online through a friend: voice and text only' : REACH_WORDS[reachOf(st, k)]}
             {st.versions[k] && ` · Eleusinia ${st.versions[k].app}`}
           </p>
         )}
@@ -1243,7 +1245,7 @@ function Conversation({ st, conv, people, run, go, show: showModal }: ConvProps)
                             <VoiceMark {...call.voices.get(k)} />
                           </span>
                           <span className="row-sub">
-                            {STATE_WORDS[p.pc.connectionState] ?? p.pc.connectionState}
+                            {callWords(st, k, p.pc.connectionState)}
                             {p.relayed && p.pc.connectionState === 'connected' && ' · relayed through the chat link'}
                           </span>
                           <PersonVolume st={st} k={k} name={name(k)} />

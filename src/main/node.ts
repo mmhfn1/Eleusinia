@@ -42,6 +42,7 @@ import { type ServerState, joinProof, verifyJoin } from '../shared/server'
 import { createFiles } from './files'
 import { type Activity, type Game, cleanActivity, shareable } from '../shared/activity'
 import { type RelayLimits, RELAY_LIMITS, createNet } from './network'
+import { pickRelays } from '../shared/relaypick'
 import { createRelay } from './relay'
 import { isNewer } from '../shared/updatesig'
 import { type Check, type StartupEvent, type StepId, startupEvent } from '../shared/startup'
@@ -247,6 +248,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     chats: Object.fromEntries(Object.entries(s.lastAt ?? {}).filter(([c]) => members(c).length).map(([c, at]) => [c, { unread: s.unread?.[c] ?? 0, at }])),
     blocked: Object.keys(s.blocked ?? {}),
     present: presence.online().filter(known),
+    // Both a direct dial and a round of relay asks failed, and nothing is being tried right now; tried again later
+    unreachable: [...fails.keys()].filter((k) => directFailed.has(k) && !attempting.has(k) && !net.linked(k) && known(k)),
     servers: servers.summary(),
   })
   const push = () => emit({ type: 'state', state: state() })
@@ -650,12 +653,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     } else if (w.t === 'reach') {
       if (!isKey(w.key)) return
       if (typeof w.ok === 'boolean') return reaching.get(w.key)?.(key, w.ok)
-      // Yes only for two of our contacts, with the target linked to us and on a version that accepts relayed links.
-      const n = (asked.get(key) ?? 0) + 1
-      asked.set(key, n)
-      const ok = !!relayKey && n <= 10 && w.key !== key && known(w.key) && net.linked(w.key) && (reachable.has(w.key) || relayKeys.has(w.key))
-      if (!ok) tell(`cant:${key}:${w.key}`, `can't relay for …${key.slice(-6)} to …${w.key.slice(-6)}: ${!relayKey ? 'relaying off' : !known(w.key) ? 'not a contact' : !net.linked(w.key) ? 'not linked with them' : !(reachable.has(w.key) || relayKeys.has(w.key)) ? 'their version cannot be reached through a friend' : 'too many asks'}`)
-      net.send(key, { t: 'reach', key: w.key, ok })
+      relayFor(key, w.key)
     } else if (w.t === 'relayed') {
       if (!isKey(w.by) || !known(w.by)) return
       relayedVia.set(key, { by: w.by, path: net.path(key), at: Date.now() })
@@ -670,6 +668,34 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const probes = new Map<number, () => void>()
   let probeId = 0
   const asked = new Map<Key, number>() // reach questions per contact this minute
+  const dialingFor = new Set<Key>() // targets we are linking with because someone asked us to relay to them
+  const dialedBack = new Map<Key, number>() // contacts whose dial reached us unlinked, when we last dialed back (incoming)
+  const REACH_DIAL_MS = 10000 // a hole punch to a strict router can take 8 to 9 s
+  const MAX_DIALS_FOR_OTHERS = 4
+  // Someone asks us to relay to target. Yes only for two of our contacts, with the target on a version that accepts
+  // relayed links. Not linked with the target yet: we link first (0.1.3 reports: most refusals were only that), within
+  // 10 s and at most 4 such links at a time, since one asker must not make us dial a whole server.
+  async function relayFor(asker: Key, target: Key) {
+    const n = (asked.get(asker) ?? 0) + 1
+    asked.set(asker, n)
+    const why = !relayKey ? 'relaying off' : n > 10 ? 'too many asks' : target === asker || !known(target) ? 'not a contact' : ''
+    const ready = () => net.linked(target) && (reachable.has(target) || relayKeys.has(target))
+    if (!why && !ready() && !s.blocked?.[target]) {
+      if (!net.linked(target)) {
+        if (!dialingFor.has(target) && dialingFor.size >= MAX_DIALS_FOR_OTHERS) return answer(asker, target, 'busy linking for others')
+        tell(`first:${asker}:${target}`, `relaying for …${asker.slice(-6)} to …${target.slice(-6)}: linking with them first`)
+        if (!dialingFor.has(target)) dialingFor.add(target), net.dial(target)
+      }
+      const t0 = Date.now()
+      while (!ready() && Date.now() - t0 < REACH_DIAL_MS) await new Promise((r) => setTimeout(r, 200))
+      dialingFor.delete(target)
+    }
+    answer(asker, target, why || (!net.linked(target) ? 'could not link with them' : !ready() ? 'their version cannot be reached through a friend' : ''))
+  }
+  function answer(asker: Key, target: Key, why: string) {
+    if (why) tell(`cant:${asker}:${target}`, `can't relay for …${asker.slice(-6)} to …${target.slice(-6)}: ${why}`)
+    net.send(asker, { t: 'reach', key: target, ok: !why })
+  }
   const probeReset = setInterval(() => (probed.clear(), asked.clear()), 60000)
 
   // Relaying through a mutual contact, for peers no direct dial reaches (both behind strict routers). The relay
@@ -719,22 +745,25 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     fails.set(k, n)
     retryAt.set(k, later(n, RETRY))
     if (by) avoid.set(by + k, Date.now() + 600000)
+    push() // State.unreachable: the window stops saying "connecting"
   }
-  // Ask up to 3 relaying contacts, the last one that worked first; dial through the first that says yes.
+  // Ask up to 6 relaying contacts, those most likely to reach them first (shared/relaypick.ts); dial through the first
+  // that says yes. A yes can take a few seconds, as the relay may link with them first (relayFor).
   async function tryRelay(k: Key) {
     attempting.add(k)
     const now = Date.now()
-    const cands = net
-      .keys()
-      .filter((c) => c !== k && relayKeys.has(c) && known(c) && (avoid.get(c + k) ?? 0) <= now)
-      .sort(() => Math.random() - 0.5)
-      .sort((a, b) => +(b === lastGood.get(k)) - +(a === lastGood.get(k)))
-      .slice(0, 3)
+    const callOf = new Map(presence.calls())
+    const shares = (c: Key) => ours().some((g) => g.members.includes(c) && g.members.includes(k)) || servers.lists().some((l) => l.includes(c) && l.includes(k))
+    const cands = pickRelays(
+      net.keys().filter((c) => c !== k && relayKeys.has(c) && known(c) && (avoid.get(c + k) ?? 0) <= now),
+      k,
+      { last: lastGood.get(k), callOf: (c) => callOf.get(c), shares },
+    )
     tell(`ask:${k}`, `asking ${cands.length} contact${cands.length === 1 ? '' : 's'} to relay for …${k.slice(-6)}`)
     const by = await new Promise<Key | null>((resolve) => {
       let left = cands.length
       if (!left) return resolve(null)
-      const timer = setTimeout(() => resolve(null), 3000)
+      const timer = setTimeout(() => resolve(null), REACH_DIAL_MS + 2000) // room for the relay to link with them first
       reaching.set(k, (from, ok) => {
         if (!cands.includes(from)) return
         if (ok || !--left) clearTimeout(timer), resolve(ok ? from : null)
@@ -889,6 +918,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       // A stranger dialing is how a new request rings: they announce it first, then dial, so looking now finds it at
       // once instead of at the next 30 s check.
       knock: (key) => !s.friends[key] && !declinedRecently(key) && (ring(key), lookJoiner(key)),
+      // A contact dialing us while unlinked (a relay linking with us for someone, a friend coming back): when our router
+      // turns their dial away, ours to them often works, so we dial back once their attempt has had its chance
+      incoming(key) {
+        if (!known(key) || (dialedBack.get(key) ?? 0) > Date.now() - 10000) return
+        dialedBack.set(key, Date.now())
+        if (dialedBack.size > 1000) dialedBack.clear()
+        setTimeout(() => !net.linked(key) && net.dial(key), 1500)
+      },
       open(key, replaced) {
         const by = pendingVia.get(key)
         if (by) {

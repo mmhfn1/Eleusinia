@@ -1796,3 +1796,47 @@ test('startup checks: a restarted node with two friends online gets ready, and o
   await until(() => !!held.at(-1)?.ready)
   expect(a.node.starting()).toBe(false)
 }, 120000)
+
+test('a relay asked to reach someone it is not linked with links to them first, then relays', async () => {
+  const a = start(undefined, undefined, { strict: true, groupLinks: 0 })
+  const b = start(undefined, undefined, { strict: true, groupLinks: 0 })
+  let open = false // r refuses links with b until a asks, so r is not linked with them when asked
+  const said: string[] = []
+  const r = start(undefined, undefined, { groupLinks: 0, links: (k) => k !== b.key || open, diag: (_area, text) => said.push(text) })
+  onTestFailed(() => console.log(['--- r', ...said].join(String.fromCharCode(10))))
+  const o = start(undefined, undefined, { groupLinks: 0 }) // friends with everyone, not relaying
+  await setUp([a, b, r])
+  await setUp([o], false)
+  await befriend(o, a)
+  await befriend(o, b)
+  await befriend(o, r)
+  await befriend(a, r)
+  // r knows b only as a member of o's group, and nothing makes them link (groupLinks 0, not friends)
+  const gid = o.node.createGroup('four', [a.key, b.key, r.key])
+  await until(() => !!r.node.state().groups[gid]?.members.includes(b.key) && !!b.node.state().groups[gid]?.members.includes(r.key))
+  expect(linked(r, b)).toBe(false)
+  open = true
+
+  await befriendUnlinked(a, b)
+  const dm = dmId(a.key, b.key)
+  a.node.send(dm, 'through r')
+  await until(() => texts(b, dm).includes('through r'))
+  expect(a.node.state().relayed).toContain(b.key)
+  expect(said.some((t) => t.includes(`to …${b.key.slice(-6)}: linking with them first`))).toBe(true)
+}, 180000)
+
+test('a friend seen online through presence notes whom neither a direct dial nor a relay reaches is listed as unreachable, not offline', async () => {
+  const a = peer({ strict: true })
+  const b = peer({ strict: true })
+  const o = peer()
+  await setUp([a, b, o], false) // nobody relays
+  await befriend(a, o)
+  await befriend(b, o)
+  await befriendUnlinked(a, b)
+  o.node.createGroup('three', [a.key, b.key]) // b's presence notes reach a through o
+  await until(() => a.node.state().present.includes(b.key))
+  a.node.send(dmId(a.key, b.key), 'waiting for a way through')
+  await until(() => a.node.state().unreachable.includes(b.key))
+  expect(linked(a, b)).toBe(false)
+  expect(a.node.state().unreachable).not.toContain(o.key) // linked people never are
+}, 180000)
