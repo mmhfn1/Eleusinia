@@ -96,7 +96,10 @@ export function createPresence({ keyPair, net, emit, few, tell, ownProfile, arou
       present.set(p.key, p)
       gone.delete(p.key)
       pass(p, from)
-      if (!net.linked(p.key)) callMoved(p.key, before, p.call)
+      // A newer note's call always counts, linked or not: a linked person's join signal may never come (their link to
+      // a restarted copy is replaced, not closed, so they never see it go offline), and a copy passed on by someone
+      // else may be stale (it was rate-limited there). A repeated join is harmless.
+      callMoved(p.key, before, p.call)
       if (!net.linked(p.key) && version(p.key) !== p.v) refresh(p.key, p.v)
       changed()
     },
@@ -110,6 +113,15 @@ export function createPresence({ keyPair, net, emit, few, tell, ownProfile, arou
         changed()
       }
     },
+    // Ours and the live notes we hold of members `k` shares a group or server with, sent when a link opens, so a freshly
+    // started copy learns who is online and in which call from its first link instead of over the next minute
+    snapshot(k: Key): Presence[] {
+      const near = around(k)
+      const live = [...present.values()].filter((p) => p.key !== k && near.has(p.key) && !gone.has(p.key) && p.at > Date.now() - PRESENCE_TTL)
+      return [note(), ...live.slice(0, 200)]
+    },
+    // Who is in which call by their live notes (linked or not)
+    calls: () => [...present.values()].filter((p) => p.call && !gone.has(p.key) && p.at > Date.now() - PRESENCE_TTL).map((p) => [p.key, p.call!] as const),
     // Online by note, not linked with us
     online: () => [...present.values()].filter((p) => p.at > Date.now() - PRESENCE_TTL && !gone.has(p.key) && !net.linked(p.key)).map((p) => p.key),
     forget(k: Key) {

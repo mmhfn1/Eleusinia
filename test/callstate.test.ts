@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { ASKS, type IceCandidate, OFFLINE_GRACE, REJOIN_MS, RESTART_AFTER, RESTART_GRACE, backoff, createCandidates, createWatchdog, offers, quickVideo, rejoinFrom, restartAfterFor } from '../src/shared/callstate'
+import { ASKS, type IceCandidate, OFFLINE_GRACE, REJOIN_MS, RESTART_AFTER, RESTART_GRACE, backoff, createCandidates, createWatchdog, offers, quickVideo, rejoinFrom, restartAfterFor, restarted, viewerCue } from '../src/shared/callstate'
 
 // Stands in for RTCPeerConnection: rejects candidates until a remote description is set, as the real one does.
 function fakePc() {
@@ -355,4 +355,24 @@ test('a call saved before an update restart is rejoined only soon after', () => 
   expect(rejoinFrom(null, 1000)).toBe(null)
   expect(rejoinFrom('not json', 1000)).toBe(null)
   expect(rejoinFrom(JSON.stringify({ conv: 5, at: 1000 }), 1000)).toBe(null)
+})
+
+test('a join from another session means the peer restarted', () => {
+  expect(restarted(undefined, 'a1')).toBe(true) // first heard: only acted on with a connection already there
+  expect(restarted('a1', 'a1')).toBe(false)
+  expect(restarted('a1', 'b2')).toBe(true)
+  expect(restarted('a1', undefined)).toBe(false) // an older copy sends none
+  expect(restarted(undefined, 5)).toBe(false)
+  expect(restarted(undefined, 'x'.repeat(65))).toBe(false)
+})
+
+test('a viewer joining or leaving our stream is heard, changes in between and a stopped share are not', () => {
+  expect(viewerCue(undefined, 'full', true)).toBe('viewerJoin')
+  expect(viewerCue('off', 'audio', true)).toBe('viewerJoin')
+  expect(viewerCue('full', 'thumb', true)).toBe(null)
+  expect(viewerCue('full', 'audio', true)).toBe(null)
+  expect(viewerCue('audio', 'off', true)).toBe('viewerLeave')
+  expect(viewerCue(undefined, 'off', true)).toBe(null)
+  expect(viewerCue('full', 'off', false)).toBe(null)
+  expect(viewerCue(undefined, 'full', false)).toBe(null)
 })

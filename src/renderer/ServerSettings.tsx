@@ -79,9 +79,10 @@ async function shrink(file: File): Promise<string> {
   throw new Error('That picture is too detailed to use')
 }
 
-export function ServerSettings({ st, id, close, run }: { st: State; id: string; close: () => void; run: Run }) {
+// channel: open on the Channels page with that channel chosen (Edit channel in its right-click menu)
+export function ServerSettings({ st, id, channel, close, run }: { st: State; id: string; channel?: string; close: () => void; run: Run }) {
   const s = st.servers[id]
-  const [page, setPage] = useState<Page>('Overview')
+  const [page, setPage] = useState<Page>(channel ? 'Channels' : 'Overview')
   if (!s)
     return (
       <Dialog label="Server settings" close={close}>
@@ -92,7 +93,7 @@ export function ServerSettings({ st, id, close, run }: { st: State; id: string; 
       </Dialog>
     )
   const act = (kind: string, body: object) => run(api.call('serverAct', id, kind, body))
-  const p = { st, s, act, run }
+  const p = { st, s, act, run, channel }
   return (
     <Dialog label={`${s.name} settings`} close={close} className="server-settings">
       <nav className="settings-nav" aria-label="Server settings">
@@ -123,7 +124,7 @@ export function ServerSettings({ st, id, close, run }: { st: State; id: string; 
   )
 }
 
-type P = { st: State; s: Srv; act: (kind: string, body: object) => Promise<void>; run: Run }
+type P = { st: State; s: Srv; act: (kind: string, body: object) => Promise<void>; run: Run; channel?: string }
 const has = (s: Srv, perm: string) => s.mine.perms.includes(perm)
 const name = (st: State, k: Key) => labelOf(st.profiles[k] ?? (k === st.me ? st.profile : NOBODY), k)
 // Who or what an audit entry acted on: a person's name, a role's or channel's current name; nothing for an invite or
@@ -501,9 +502,9 @@ const ACCESS: [string, string][] = [
 ]
 const VOICE_ACCESS: [string, string][] = [...ACCESS, ['connect', 'Connect'], ['speak', 'Speak']]
 
-function Channels({ st, s, act }: P) {
+function Channels({ st, s, act, channel }: P) {
   const list = [...s.channels].sort((a, b) => a.position - b.position)
-  const [sel, setSel] = useState(list[0]?.id)
+  const [sel, setSel] = useState(channel ?? list[0]?.id)
   const [adding, setAdding] = useState(false)
   const can = has(s, 'manageChannels')
   const ch = s.channels.find((c) => c.id === sel)

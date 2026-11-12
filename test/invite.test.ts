@@ -2,8 +2,9 @@ import { randomBytes } from 'node:crypto'
 import DHT from 'hyperdht'
 import { expect, test } from 'vitest'
 import {
-  INVITE_PREFIX, type JoinAsk, askOrder, checkJoinAsk, cleanJoinAsk, isJoinAnswer, isJoinAsk, limiter, makeInvite, newInvite, parseInvite, serverTopic,
+  INVITE_PREFIX, type JoinAsk, askOrder, checkJoinAsk, cleanInviteCard, cleanJoinAsk, inviteCard, isJoinAnswer, isJoinAsk, limiter, makeInvite, newInvite, parseInvite, serverTopic,
 } from '../src/shared/invite'
+import { findInvites, isInviteLink } from '../src/shared/invitelink'
 import { type Op, createServer, isCut, joinProof, replay, signOp } from '../src/shared/server'
 
 type KP = ReturnType<typeof DHT.keyPair>
@@ -174,4 +175,37 @@ test('limiter lets one ask per stranger per period and forgets past its cap', ()
   expect(ok('c', 5000)).toBe(true) // 'a' forgotten
   expect(ok('a', 5001)).toBe(true)
   expect(ok('c', 5001)).toBe(false)
+})
+
+test('findInvites picks whole invite links out of chat text; isInviteLink only a lone one', () => {
+  const one = makeInvite(sample())
+  const two = makeInvite({ ...sample(), contacts: [contact(), contact()] })
+  expect(findInvites(`join us: ${one}, or ${two}
+and ${one}`)).toEqual([one, two])
+  expect(findInvites(`(${one.toUpperCase().replace('ELEUSINIA://INVITE/', 'Eleusinia://Invite/')})`)).toHaveLength(1)
+  expect(findInvites(one.slice(0, -1) + ' ' + one + 'A' + ' https://example.com')).toEqual([])
+  expect(isInviteLink(`  ${one}
+`)).toBe(true)
+  expect(isInviteLink(`see ${one}`)).toBe(false)
+  expect(isInviteLink('')).toBe(false)
+})
+
+test('inviteCard shows the server and why a link no longer works; cleanInviteCard checks one from a peer', () => {
+  const w = world()
+  const ok = w.invite()
+  const old = w.invite({ expires: NOW - 1, maxUses: 1 })
+  w.accept(w.ask(DHT.keyPair(), old))
+  const gone = w.invite()
+  w.by(w.o, 'invite.revoke', { id: gone.id })
+  const s = w.state()
+  expect(inviteCard(s, ok.id, 5, NOW)).toEqual({ server: w.id, name: 'test', avatar: '', members: 2, online: 2 })
+  expect(inviteCard(s, old.id, 1, NOW)).toMatchObject({ expired: true, usedUp: true, online: 1 })
+  expect(inviteCard(s, gone.id, 1, NOW).revoked).toBe(true)
+  expect(inviteCard(s, randomBytes(16).toString('hex'), 1, NOW).revoked).toBe(true)
+
+  const card = inviteCard(s, old.id, 1, NOW)
+  expect(cleanInviteCard({ ...card, extra: 1 }, w.id)).toEqual(card)
+  for (const bad of [null, { ...card, server: 'x' }, { ...card, name: '' }, { ...card, avatar: 'data:image/svg+xml;base64,AA' }, { ...card, members: -1 }, { ...card, online: 3 }, { ...card, members: 1e9 }])
+    expect(cleanInviteCard(bad, w.id)).toBeNull()
+  expect(cleanInviteCard({ ...card, revoked: 'yes' }, w.id)).not.toHaveProperty('revoked')
 })

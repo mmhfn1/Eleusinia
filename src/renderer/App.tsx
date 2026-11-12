@@ -1,16 +1,17 @@
 import { type FormEvent, type KeyboardEvent, useEffect, useReducer, useRef, useState } from 'react'
 import { type Offset, clampOffset, cropRect } from '../shared/crop'
+import { usable } from '../shared/devices'
 import { type Group, type Key, type Profile, type State, dmId, keyTail } from '../shared/protocol'
 import * as call from './call'
 import { Avatar, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Splitter, Wordmark, useWidth } from './ui'
 import { Chat } from './Chat'
-import { CameraDialog, Oculus, PersonVolume, RingBar, STATE_WORDS, ShareDialog, Stage, VoiceMark, VoiceSignal } from './Media'
+import { CameraDialog, Oculus, PersonVolume, Pip, RingBar, STATE_WORDS, ShareDialog, Stage, VoiceMark, VoiceSignal } from './Media'
 import { DeleteAccount, ReportDialog, SettingsDialog } from './Settings'
 import { ActivityLine, ProfileActivity } from './Activity'
 import { MemberRow, Server, Speaking, channelOf, newId } from './Server'
 import { ProfileBanner, ProfilePop } from './Profile'
-import { type Modal, NOBODY, type People, type Run, api, card, groupName, labelOf } from './common'
-import { Rail } from './Rail'
+import { type Modal, NOBODY, type People, type Run, api, card, groupName, isMuted, labelOf } from './common'
+import { ContextMenu, type Item, Rail, useMenus } from './Rail'
 
 type Poke = { from: Key; server: string; channel: string }
 // "Ann invites you to Lounge in Ashen Vanguard", or null when that is not a channel we can see.
@@ -72,12 +73,13 @@ export default function App() {
     }
     const poked = (p: Poke) => {
       const text = pokeText(latest.current, p)
-      if (!text) return
+      // An ignored person's pokes show nothing and make no sound
+      if (!text || latest.current!.settings.ignored?.includes(p.from)) return
+      call.cue('poke')
       setPoke(p)
       setTimeout(() => setPoke((x) => (x === p ? null : x)), 120000)
       // The toast shows while the window has focus; the desktop notice is for when it has not, unless muted
-      const muted = latest.current!.settings.muted
-      if (!document.hasFocus() && !muted?.[p.server] && !muted?.[`${p.server}.${p.channel}`]) new Notification('Eleusinia', { body: text })
+      if (!document.hasFocus() && !isMuted(latest.current!, p.server) && !isMuted(latest.current!, `${p.server}.${p.channel}`)) new Notification('Eleusinia', { body: text })
     }
     api.call('state').then(got)
     call.onChange(tick)
@@ -87,6 +89,7 @@ export default function App() {
       if (e.type === 'hotkey') call.onHotkey(e.action, e.down)
       if (e.type === 'update') setUpdate(e.version)
       if (e.type === 'poke') poked({ from: e.from, server: e.server, channel: e.channel })
+      if (e.type === 'voiceOrder') call.onOrder(e)
     })
   }, [])
 
@@ -140,20 +143,30 @@ export default function App() {
   const place = open ? convName(open) : 'Friends'
   const callAway = call.conv && call.conv !== open ? call.conv : null
   // Direct calls ringing for us, shown wherever we are (the open conversation shows its own); joining one opens it.
-  const incoming = call.ringingCalls().filter((c) => c !== open && st.friends[other(c)] === 'friend')
+  const incoming = call.ringingCalls().filter((c) => c !== open && st.friends[other(c)] === 'friend' && !st.settings.ignored?.includes(other(c)))
   const callName = callAway && convName(callAway)
+  // The voice bar names a channel call "Raid · Ashen Vanguard"
+  const callWhere = (c: string) => {
+    const s = serverOf(c)
+    const ch = s?.channels.find((x) => x.id === c.split('.')[1])
+    return s && ch ? `${ch.name} · ${s.name}` : convName(c)
+  }
   return (
     <>
     <TitleBar place={place} call={callAway ? { name: callName!, back: () => go(callAway) } : undefined} />
     <div className="app">
       <Rail st={st} people={people} open={open} go={go} show={setModal} run={run} />
       {sv ? (
-        <Server key={sv.id} st={st} sv={sv} channel={open!.split('.')[1]} people={people} run={run} go={go} />
+        <Server key={sv.id} st={st} sv={sv} channel={open!.split('.')[1]} people={people} run={run} go={go} show={setModal} />
       ) : open ? (
-        <Conversation key={open} st={st} conv={open} people={people} run={run} home={() => go(null)} />
+        <Conversation key={open} st={st} conv={open} people={people} run={run} go={go} show={setModal} />
       ) : (
         <Home st={st} people={people} run={run} open={go} ring={(c) => (go(c), run(call.join(c)))} newGroup={() => setModal({ kind: 'group' })} />
       )}
+      <Bars st={st} people={people} where={call.conv ? callWhere(call.conv) : ''} back={() => call.conv && go(call.conv)} show={setModal} />
+      <div className="pip-layer">
+        <Pip st={st} name={people.name} back={() => call.conv && go(call.conv)} />
+      </div>
       {incoming.length > 0 && (
         <div className="incoming-calls">
           {incoming.map((c) => (
@@ -313,7 +326,7 @@ function Home({ st, people, run, open, ring, newGroup }: { st: State; people: Pe
 
   return (
     <>
-      <aside className="sidebar" style={{ width }} aria-label="Your groups">
+      <aside className="sidebar side" style={{ width }} aria-label="Your groups">
         <header className="sidebar-head">
           <Wordmark />
         </header>
@@ -1059,7 +1072,7 @@ function Menu({ st, people, close, go, report }: { st: State; people: People; cl
   )
 }
 
-type ConvProps = { st: State; conv: string; people: People; run: Run; home: () => void }
+type ConvProps = { st: State; conv: string; people: People; run: Run; go: (c: string | null) => void; show: (m: Modal) => void }
 
 // A group or direct chat: the voice chamber on the left, text in the middle, group members on the right.
 // A group's name, renamed in place: click it, type, Enter or click away saves, Escape keeps the old name.
@@ -1097,10 +1110,11 @@ function GroupName({ g, run }: { g: Group; run: Run }) {
   )
 }
 
-function Conversation({ st, conv, people, run, home }: ConvProps) {
+function Conversation({ st, conv, people, run, go, show: showModal }: ConvProps) {
   const [shareDialog, setShareDialog] = useState(false)
   const [picking, setPicking] = useState<File | null>(null)
-  const [cameraDialog, setCameraDialog] = useState(false)
+  const menus = useMenus({ st, people, open: conv, go, show: showModal, run })
+  const home = () => go(null)
   const [left, setLeft] = useWidth('voice', 320)
   const [right, setRight] = useWidth('members', 230)
   const { prof, name, user, isOnline, show } = people
@@ -1114,13 +1128,6 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
   const member = (k: Key) => (
     <MemberRow key={k} k={k} p={prof(k)} name={name(k)} you={k === st.me} online={isOnline(k)} speaking={!!ring(k)} a={st.activity[k]} show={show} />
   )
-  // One round, icon-only call button; its name stays readable to screen readers (and to the smoke test).
-  const control = (label: string, icon: Parameters<typeof Icon>[0]['name'], onClick: () => void, pressed?: boolean, extra = '') => (
-    <button className={`round ${pressed ? 'on' : ''} ${extra}`} aria-pressed={pressed} title={label} onClick={onClick}>
-      <Icon name={icon} size={18} />
-      <span className="visually-hidden">{label}</span>
-    </button>
-  )
   const ringing = !group && !inCall && others > 0
   // A direct chat lists its two people the way a group lists its members.
   const members = group ? group.members : [st.me, other]
@@ -1129,7 +1136,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
 
   return (
     <>
-      <aside className={`voice ${inCall ? 'live' : ''}`} style={{ width: left }} aria-label="Voice call">
+      <aside className={`voice side ${inCall ? 'live' : ''}`} style={{ width: left }} aria-label="Voice call">
         <button className="home back" onClick={home}>
           <Icon name="back" size={16} /> Home
         </button>
@@ -1183,7 +1190,6 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
           <h2 id="voice-title">Voice</h2>
           {inCall ? (
             <>
-              <VoiceSignal name={name} />
               <div className="callers" aria-live="polite">
                 <Speaking>
                   {() => (
@@ -1204,7 +1210,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
                       </span>
                     </div>
                     {[...call.peers].map(([k, p]) => (
-                      <div className={`caller state-${p.pc.connectionState}${ring(k)}`} key={k} onContextMenu={card(show, k)}>
+                      <div className={`caller state-${p.pc.connectionState}${ring(k)}`} key={k} aria-haspopup="menu" onContextMenu={menus.open(`${k} ${conv}`)}>
                         <button className="caller-who" onClick={(e) => show(k, e.currentTarget.closest('.caller') as HTMLElement)} aria-label={`${name(k)}: open profile`}>
                           <Avatar k={k} p={prof(k)} size={44} />
                         </button>
@@ -1233,24 +1239,7 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
                   {n}
                 </p>
               ))}
-              {call.mismatched().map((m) => (
-                <p className="call-notice" role="status" key={m.k}>
-                  {m.newer
-                    ? `${name(m.k)} is on a newer Eleusinia (${m.app}) that cannot call this one. Restart Eleusinia once its update has downloaded to join them.`
-                    : `${name(m.k)} is on an older Eleusinia (${m.app}) that cannot join this call. They need to update.`}
-                </p>
-              ))}
-              <div className="call-controls" role="toolbar" aria-label="Call controls">
-                {control(call.muted || call.deafened ? 'Unmute' : 'Mute', call.muted || call.deafened ? 'micOff' : 'mic', call.toggleMute, call.muted || call.deafened)}
-                {control(call.deafened ? 'Undeafen' : 'Deafen', call.deafened ? 'headphonesOff' : 'headphones', call.toggleDeafen, call.deafened)}
-                {control(call.sharing() ? 'Stream settings' : 'Share screen', 'screen', () => setShareDialog(true), !!call.sharing())}
-                {call.sharing() && control('Stop sharing', 'screenOff', () => call.stopShare())}
-                {control(call.filming() ? 'Camera settings' : 'Turn on camera', 'camera', () => setCameraDialog(true), !!call.filming())}
-                {call.filming() && control('Turn off camera', 'cameraOff', call.stopCamera)}
-                {control('Leave call', 'phone', call.leave, undefined, 'leave')}
-              </div>
               {shareDialog && <ShareDialog close={() => setShareDialog(false)} />}
-              {cameraDialog && <CameraDialog st={st} close={() => setCameraDialog(false)} />}
             </>
           ) : (
             <>
@@ -1270,6 +1259,8 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
         people={people}
         run={run}
         home={home}
+        go={go}
+        menu={menus.open(conv)}
         stage={
           inCall ? (
             <>
@@ -1290,6 +1281,120 @@ function Conversation({ st, conv, people, run, home }: ConvProps) {
         <h2>Offline ({offlineMembers.length})</h2>
         <Speaking>{() => offlineMembers.map(member)}</Speaking>
       </aside>
+      {menus.node}
     </>
+  )
+}
+
+// The two bars under the rail and the left column, as wide as both: the call, only while in one, wherever we are
+// (design/mockups/voice.html frames 2 and 3), and ourselves, always (frame 11).
+function Bars({ st, people, where, back, show }: { st: State; people: People; where: string; back: () => void; show: (m: Modal) => void }) {
+  const [devices, setDevices] = useState<MediaDeviceInfo[]>([])
+  const [menu, setMenu] = useState<{ x: number; y: number; kind: 'audioinput' | 'audiooutput' } | null>(null)
+  const [dialog, setDialog] = useState<'share' | 'camera' | null>(null)
+  const set = (p: Partial<State['settings']>) => api.call('setSettings', p)
+  const noise = st.settings.noiseSuppression !== false
+  // An icon-only button; its name stays readable to screen readers (and to the smoke test).
+  const control = (label: string, icon: Parameters<typeof Icon>[0]['name'], onClick: () => void, pressed?: boolean, extra = 'round') => (
+    <button className={`${extra} ${pressed ? 'on' : ''}`} aria-pressed={pressed} title={label} onClick={onClick}>
+      <Icon name={icon} size={18} />
+      <span className="visually-hidden">{label}</span>
+    </button>
+  )
+  // The small arrow beside mute and deafen: the microphones or speakers to pick from (frame 4)
+  const arrow = (kind: 'audioinput' | 'audiooutput', label: string) => (
+    <button
+      className="bar-arrow"
+      aria-label={label}
+      title={label}
+      aria-haspopup="menu"
+      aria-expanded={menu?.kind === kind}
+      onClick={(e) => {
+        const r = e.currentTarget.getBoundingClientRect()
+        navigator.mediaDevices.enumerateDevices().then(setDevices)
+        setMenu({ x: r.left, y: r.top - 6, kind })
+      }}
+    >
+      <Icon name="chevron" size={14} />
+    </button>
+  )
+  const field = menu?.kind === 'audioinput' ? 'mic' : 'out'
+  const chosen = menu ? usable(st.settings[field], menu.kind, devices, st.settings[`${field}Label`]) || st.settings[field] || '' : ''
+  const pick = (id: string, label: string) => set({ [field]: id, [`${field}Label`]: label })
+  const pct = Math.round(call.outVolume() * 100)
+  const held = call.serverVoice() // a server mute or deafen on us in a voice channel
+  const sections: Item[][] = menu
+    ? [
+        [
+          { label: 'head', node: <p className="context-head">{menu.kind === 'audioinput' ? 'Input device' : 'Output device'}</p> },
+          { label: 'System default', checked: !chosen, act: () => pick('', '') },
+          ...devices
+            .filter((d) => d.kind === menu.kind && d.deviceId !== 'default')
+            .map((d) => ({ label: d.label || d.deviceId.slice(0, 8), checked: chosen === d.deviceId, act: () => pick(d.deviceId, d.label) })),
+        ],
+        menu.kind === 'audiooutput'
+          ? [
+              {
+                label: 'Output volume',
+                node: (
+                  <>
+                    <p className="context-head">Output volume</p>
+                    <label className="person-volume">
+                      <Icon name="volume" size={14} />
+                      <input type="range" min={0} max={200} step={5} value={pct} aria-label="Output volume" onChange={(e) => set({ outVolume: Number(e.target.value) / 100 })} />
+                      <span className="person-volume-pct">{pct}%</span>
+                    </label>
+                  </>
+                ),
+              },
+            ]
+          : [],
+        [{ label: 'Voice settings', act: () => show({ kind: 'settings' }) }],
+      ]
+    : []
+  return (
+    <div className="bars">
+      {call.conv && (
+        <div className="voice-bar">
+          <div className="voice-bar-head">
+            <span className="row-text">
+              <VoiceSignal name={people.name} />
+              <button className="voice-where" title="Back to your call" onClick={back}>
+                {where}
+              </button>
+            </span>
+            {control('Noise suppression', 'wave', () => set({ noiseSuppression: !noise }), noise, 'icon-button')}
+            {control('Disconnect', 'phone', call.leave, undefined, 'icon-button leave')}
+          </div>
+          <div className="voice-bar-row">
+            {control(call.filming() ? 'Camera settings' : 'Turn on camera', 'camera', () => setDialog('camera'), !!call.filming(), 'round wide')}
+            {call.filming() && control('Turn off camera', 'cameraOff', call.stopCamera)}
+            {control(call.sharing() ? 'Stream settings' : 'Share screen', 'screen', () => setDialog('share'), !!call.sharing(), 'round wide')}
+            {call.sharing() && control('Stop sharing', 'screenOff', () => call.stopShare())}
+          </div>
+        </div>
+      )}
+      <div className="user-bar">
+        <button className="user-bar-me" aria-label="Your profile" onClick={() => show({ kind: 'card', k: st.me })}>
+          <Avatar k={st.me} p={st.profile} size={32} online />
+          <span className="row-text">
+            <span className="row-title">{st.profile.name || st.profile.handle}</span>
+            <span className="row-sub">{call.conv ? 'In voice' : st.activity[st.me]?.game ? <ActivityLine a={st.activity[st.me]} /> : st.profile.handle}</span>
+          </span>
+        </button>
+        {held.mute || held.deafen
+          ? control(held.deafen ? 'Server deafened: your microphone stays off' : 'Server muted: your microphone stays off', 'micOff', () => {}, true, 'icon-button held')
+          : control(call.muted || call.deafened ? 'Unmute' : 'Mute', call.muted || call.deafened ? 'micOff' : 'mic', call.toggleMute, call.muted || call.deafened, 'icon-button')}
+        {arrow('audioinput', 'Input devices')}
+        {held.deafen
+          ? control('Server deafened: you hear nobody', 'headphonesOff', () => {}, true, 'icon-button held')
+          : control(call.deafened ? 'Undeafen' : 'Deafen', call.deafened ? 'headphonesOff' : 'headphones', call.toggleDeafen, call.deafened, 'icon-button')}
+        {arrow('audiooutput', 'Output devices')}
+        {control('Settings', 'settings', () => show({ kind: 'settings' }), undefined, 'icon-button')}
+      </div>
+      {menu && <ContextMenu x={menu.x} y={menu.y} up sections={sections} close={() => setMenu(null)} />}
+      {dialog === 'share' && <ShareDialog close={() => setDialog(null)} />}
+      {dialog === 'camera' && <CameraDialog st={st} close={() => setDialog(null)} />}
+    </div>
   )
 }

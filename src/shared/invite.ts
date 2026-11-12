@@ -1,11 +1,12 @@
 import { createHash, randomBytes } from 'node:crypto'
-import { type Key, type Profile, cleanProfile, isGroupId, isKey } from './protocol'
+import { INVITE_PREFIX } from './invitelink'
+import { type Key, type Profile, cleanProfile, isGroupId, isKey, isPicture } from './protocol'
 import { MAX_MEMBERS, type ServerState, inviteKeyPair, verifyJoin } from './server'
 
 // Invite links and the join handshake, with no networking. The link carries the server, the invite, its secret and one
 // or two members likely online; a stranger asks one of them with `joinAsk`, and that member writes the `join` op.
 
-export const INVITE_PREFIX = 'eleusinia://invite/'
+export { INVITE_PREFIX }
 const HEAD = 1 + 16 + 16 + 32 // version, server id, invite id, secret
 const MAX_LINK = 400 // well past the longest real link (2 contacts: 172 payload chars plus the prefix), so junk is cut early
 
@@ -100,4 +101,25 @@ export function limiter(everyMs: number, keep = 1000) {
     if (last.size > keep) last.delete(last.keys().next().value!)
     return true
   }
+}
+
+// What an invite card shows of a server. A link whose invite the log does not hold counts as revoked.
+export type InviteCard = { server: string; name: string; avatar: string; members: number; online: number; expired?: true; revoked?: true; usedUp?: true }
+export function inviteCard(s: ServerState, invite: string, online: number, now: number): InviteCard {
+  const inv = Object.hasOwn(s.invites, invite) ? s.invites[invite] : undefined
+  const members = Object.keys(s.members).length
+  return {
+    server: s.id, name: s.name, avatar: s.avatar, members, online: Math.min(online, members),
+    ...((!inv || inv.revoked) && { revoked: true as const }),
+    ...(inv?.expires !== undefined && now > inv.expires && { expired: true as const }),
+    ...(inv?.maxUses !== undefined && inv.uses >= inv.maxUses && { usedUp: true as const }),
+  }
+}
+// A card from a member we asked, checked field by field
+export function cleanInviteCard(x: any, server: string): InviteCard | null {
+  const count = (n: unknown, max: number) => Number.isSafeInteger(n) && (n as number) >= 0 && (n as number) <= max
+  if (!x || typeof x !== 'object' || x.server !== server || typeof x.name !== 'string' || !x.name.trim() || x.name.length > 100 ||
+    (x.avatar !== '' && !isPicture(x.avatar)) || !count(x.members, MAX_MEMBERS) || !count(x.online, x.members)) return null
+  const flag = (k: 'expired' | 'revoked' | 'usedUp') => x[k] === true && { [k]: true as const }
+  return { server, name: x.name, avatar: x.avatar, members: x.members, online: x.online, ...flag('expired'), ...flag('revoked'), ...flag('usedUp') }
 }

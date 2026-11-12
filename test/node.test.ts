@@ -1415,21 +1415,24 @@ async function letIn(owner: N, joiner: N, id: string) {
 const chan = () => randomBytes(16).toString('hex')
 const lines = (f: string) => (existsSync(f) ? readFileSync(f, 'utf8').split('\n').filter(Boolean).length : 0)
 
-test('a server: the owner makes a text channel, a member let in gets the whole log, and messages cross the channel', async () => {
+test('a server: the owner makes a text channel, a member let in gets the whole log, messages cross the channel and count as unread', async () => {
   const a = start()
   const b = start()
   const id = a.node.createServer('Hall')
   const general = chan()
   a.node.serverAct(id, 'channel.add', { id: general, kind: 'text', name: 'general' })
   expect(() => a.node.serverAct(id, 'kick', { key: a.key })).toThrow() // the replay refuses it, so it is never written
+  const conv = `${id}.${general}`
+  a.node.send(conv, 'before you came')
   await letIn(a, b, id)
   await until(() => JSON.stringify(b.node.servers()) === JSON.stringify(a.node.servers()))
   expect(b.node.state().servers[id]).toMatchObject({ name: 'Hall', owner: a.key, channels: [{ id: general, name: 'general', kind: 'text' }] })
   expect(Object.keys(b.node.state().servers[id].members).sort()).toEqual([a.key, b.key].sort())
-  expect(b.node.state().chats).toEqual({}) // channels are not direct messages on the rail
-  const conv = `${id}.${general}`
   a.node.send(conv, 'welcome')
-  await until(() => texts(b, conv).includes('welcome'))
+  await until(() => texts(b, conv).includes('welcome') && texts(b, conv).includes('before you came'))
+  expect(b.node.state().chats[conv].unread).toBe(1) // history from before the join is not unread
+  b.node.markRead(conv)
+  expect(b.node.state().chats[conv].unread).toBe(0)
   b.node.send(conv, 'thanks')
   await until(() => texts(a, conv).includes('thanks'))
   expect(() => a.node.send(`${id}.${chan()}`, 'nowhere')).toThrow()
@@ -1652,3 +1655,79 @@ test('a poke into a voice channel reaches a fellow member; from a non-member, in
   expect(pokes.slice(1)).toEqual([{ type: 'poke', from: xk, server: other, channel: far }])
   await raw.destroy()
 }, 90000)
+
+test('voice orders reach the member moved or disconnected, never from old history at start; server mute shows; key list settings are checked', async () => {
+  const orders: any[] = []
+  const a = start()
+  let b = start(undefined, undefined, { emit: (e: any) => e.type === 'voiceOrder' && orders.push(e) })
+  const id = a.node.createServer('Voice')
+  const lounge = chan()
+  a.node.serverAct(id, 'channel.add', { id: lounge, kind: 'voice', name: 'Lounge' })
+  await letIn(a, b, id)
+  await until(() => b.node.state().servers[id]?.channels.length === 1)
+  a.node.serverAct(id, 'voice.mute', { key: b.key, on: true })
+  a.node.serverAct(id, 'voice.move', { key: b.key, channel: lounge })
+  a.node.serverAct(id, 'voice.disconnect', { key: b.key })
+  await until(() => orders.length === 2)
+  expect(orders).toEqual([
+    { type: 'voiceOrder', server: id, kind: 'move', channel: lounge, by: a.key },
+    { type: 'voiceOrder', server: id, kind: 'disconnect', by: a.key },
+  ])
+  await until(() => !!b.node.state().servers[id].voice[b.key]?.mute)
+
+  // The same log replayed at the next start gives no orders
+  await b.node.destroy()
+  b = start(b.dir, b.keyPair, { emit: (e: any) => e.type === 'voiceOrder' && orders.push(e) })
+  expect(b.node.state().servers[id].voice).toEqual({ [b.key]: { mute: true } })
+  await wait(500)
+  expect(orders).toHaveLength(2)
+
+  await b.node.setSettings({ ignored: [a.key], localMuted: [], noVideo: [a.key] })
+  expect(b.node.state().settings).toMatchObject({ ignored: [a.key], noVideo: [a.key] })
+  for (const bad of [{ ignored: ['x'] }, { localMuted: [a.key, a.key] }, { noVideo: a.key }, { ignored: Array(5001).fill(a.key) }] as any[])
+    await expect(b.node.setSettings(bad)).rejects.toThrow()
+}, 60000)
+
+test('an invite card: from our own replay as a member, from a linked contact in the link otherwise, else null', async () => {
+  const a = start()
+  const b = start()
+  const c = start()
+  await befriend(a, c)
+  const id = a.node.createServer('Cards')
+  const link = a.node.createInvite(id, { maxUses: 3 })
+  expect(await a.node.invitePreview(link)).toEqual({ server: id, name: 'Cards', avatar: '', members: 1, online: 1, member: true })
+  expect(await c.node.invitePreview(link)).toEqual({ server: id, name: 'Cards', avatar: '', members: 1, online: 1, member: false })
+  expect(await b.node.invitePreview(link)).toBeNull() // not linked with the link's contact: nobody is dialed for a card
+  expect(await b.node.invitePreview('junk')).toBeNull()
+}, 60000)
+
+// Without the snapshot B would wait for C's and D's next note, up to a minute.
+test('a node that starts while two members it is not linked with are in a group call learns both within seconds of its first link', async () => {
+  const [kb, kc, kd] = [DHT.keyPair(), DHT.keyPair(), DHT.keyPair()]
+  const hex = (k: typeof kb) => k.publicKey.toString('hex')
+  const apart = (k: string) => k !== hex(kc) && k !== hex(kd)
+  const toA: any[] = []
+  const a = start(undefined, undefined, { emit: (e: any) => e.type === 'call' && toA.push(e) })
+  let b = start(undefined, kb, { links: apart })
+  const c = start(undefined, kc, { links: (k) => k !== hex(kb) })
+  const d = start(undefined, kd, { links: (k) => k !== hex(kb) })
+  for (const x of [b, c, d]) await befriend(a, x)
+  const gid = a.node.createGroup('snapshot', [b.key, c.key, d.key])
+  await until(() => [b, c, d].every((x) => !!x.node.state().groups[gid]))
+  await b.node.destroy()
+  c.node.signal(gid, null, { k: 'join' })
+  d.node.signal(gid, null, { k: 'join' })
+  await until(() => a.node.state().online.includes(c.key) && a.node.state().online.includes(d.key))
+  // Their join, and the notes sent with it, have reached A (polled, not a fixed wait: the full run can be slow)
+  await until(() => [c.key, d.key].every((k) => toA.some((e) => e.from === k && e.data?.k === 'join')))
+  await wait(200)
+
+  const heard: any[] = []
+  b = start(b.dir, kb, { links: apart, emit: (e: any) => e.type === 'call' && heard.push(e) })
+  await expect.poll(() => b.node.state().online.includes(a.key), { timeout: 20000, interval: 5 }).toBe(true)
+  const linked = Date.now()
+  const joined = (k: string) => heard.some((e) => e.from === k && e.conv === gid && e.data.k === 'join')
+  // Delivery only: the notes come in A's greeting, right behind the link opening
+  await expect.poll(() => [c.key, d.key].every((k) => b.node.state().present.includes(k) && joined(k)), { timeout: 1000, interval: 5 }).toBe(true)
+  console.log(`snapshot: both present and in the call ${Date.now() - linked} ms after the first link opened`)
+}, 120000)

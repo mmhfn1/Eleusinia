@@ -1,5 +1,6 @@
 // A conversation's messages: history, live updates, delivery marks and the message box.
-import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type ReactNode, memo, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react'
+import { type ClipboardEvent, type DragEvent, type FormEvent, type KeyboardEvent, type MouseEvent, type ReactNode, memo, useEffect, useLayoutEffect, useReducer, useRef, useState } from 'react'
+import { findInvites } from '../shared/invitelink'
 import { type LinkPreview, firstLink, splitLinks } from '../shared/links'
 import { type FileRef, MAX_FILES, inlineKind, sizeLabel } from '../shared/media'
 import { type FileState, type Key, type Msg, type Profile, type State, MAX_TEXT, stack } from '../shared/protocol'
@@ -14,13 +15,14 @@ const dayLabel = (ts: number) =>
 const iso = (ts: number) => (Number.isFinite(new Date(ts).getTime()) ? new Date(ts).toISOString() : undefined)
 const clock = (ts: number) => new Date(ts).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
 
-// head and about: a server channel's own header (name and topic) and empty-chat line, in place of a group's or person's
-type ChatProps = { st: State; conv: string; title: string; people: People; run: Run; home: () => void; stage: ReactNode; head?: ReactNode; about?: string }
+// head and about: a server channel's own header (name and topic) and empty-chat line, in place of a group's or person's;
+// go: opens a server joined from an invite card; menu: the header's right-click menu
+type ChatProps = { st: State; conv: string; title: string; people: People; run: Run; home: () => void; go: (c: string) => void; menu: (e: MouseEvent<HTMLElement>) => void; stage: ReactNode; head?: ReactNode; about?: string }
 
 // Messages a conversation opens with; older ones load on request, so a long history costs nothing until wanted.
 const PAGE = 200
 
-export function Chat({ st, conv, title, people, run, home, stage, head, about }: ChatProps) {
+export function Chat({ st, conv, title, people, run, home, go, menu, stage, head, about }: ChatProps) {
   const [leaving, setLeaving] = useState(false)
   const [removing, setRemoving] = useState<Key | null>(null)
   const [msgs, setMsgs] = useState<Msg[]>([])
@@ -58,6 +60,7 @@ export function Chat({ st, conv, title, people, run, home, stage, head, about }:
     document.addEventListener('visibilitychange', seen)
     return () => (window.removeEventListener('focus', seen), document.removeEventListener('visibilitychange', seen))
   }, [])
+  useEffect(() => () => invites.clear(), [])
   const unread = st.chats[conv]?.unread ?? 0
   useEffect(() => {
     if (unread && !document.hidden && document.hasFocus() && atBottom.current) api.call('markRead', conv)
@@ -180,13 +183,14 @@ export function Chat({ st, conv, title, people, run, home, stage, head, about }:
         files={m.files?.map((f) => files[f.h]) ?? []}
         show={show}
         view={setViewing}
+        go={go}
       />,
     )
   })
 
   return (
     <main className="workspace chat" onDragOver={(e) => e.dataTransfer.types.includes('Files') && e.preventDefault()} onDrop={drop}>
-      <header className="chat-head">
+      <header className="chat-head" onContextMenu={menu}>
         {head ?? (group ? (
           <>
             <GroupEmblem g={group} size={32} />
@@ -386,11 +390,15 @@ type RowProps = {
   files: (FileState | undefined)[]
   show: People['show']
   view: (f: FileRef) => void
+  go: (c: string) => void
 }
 // One message. Kept from redrawing unless it changed: every state push (someone coming online) would otherwise redraw
 // the whole history. show and view are left out of the comparison: they only open things and never change what shows.
 const MsgRow = memo(
-  function MsgRow({ m, continued, mine, pending, delivered, p, name, files, show, view }: RowProps) {
+  function MsgRow({ m, continued, mine, pending, delivered, p, name, files, show, view, go }: RowProps) {
+    // An invite link shows as its card instead of its text
+    const invites = m.text ? findInvites(m.text) : []
+    const text = invites.reduce((t, l) => t.split(l).join(''), m.text ?? '').trim()
     return (
       <div className={`msg ${mine ? 'mine' : ''} ${continued ? 'continued' : ''}`}>
         <div className="msg-gutter">{continued ? <time className="msg-hover-time">{clock(m.ts)}</time> : <Avatar k={m.author} p={p} size={36} />}</div>
@@ -405,11 +413,14 @@ const MsgRow = memo(
               </time>
             </div>
           )}
-          {m.text && (
+          {text && (
             <p className="msg-text">
-              <MsgText text={m.text} />
+              <MsgText text={text} />
             </p>
           )}
+          {invites.map((l) => (
+            <InviteCard key={l} link={l} go={go} />
+          ))}
           {m.link && <LinkCard l={m.link} />}
           {m.files && (
             <div className="msg-files">
@@ -444,6 +455,48 @@ const MsgRow = memo(
     a.files.length === b.files.length &&
     a.files.every((f, i) => f === b.files[i]),
 )
+
+type Invite = { server: string; name: string; avatar: string; members: number; online: number; member: boolean; expired?: boolean; revoked?: boolean; usedUp?: boolean } | null
+// Invite cards already asked for, while a chat is open (Chat clears it when it closes)
+const invites = new Map<string, Promise<Invite>>()
+
+// A server invite in a message: the server's picture and name, its members, and Join (Open once we are in).
+function InviteCard({ link, go }: { link: string; go: (c: string) => void }) {
+  const [c, setC] = useState<Invite | undefined>()
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const [joined, setJoined] = useState(false)
+  useEffect(() => {
+    if (!invites.has(link)) invites.set(link, api.call('invitePreview', link).catch(() => null))
+    let live = true
+    invites.get(link)!.then((x) => live && setC(x))
+    return () => void (live = false)
+  }, [link])
+  const dead = c && (c.expired || c.revoked || c.usedUp)
+  const join = () => {
+    if (c?.member || joined) return go(c!.server)
+    setBusy(true)
+    setErr('')
+    api.call('joinServer', link).then(
+      (r?: { server: string }) => (setJoined(true), setBusy(false), r?.server && go(r.server)),
+      (e: Error) => (setErr(String(e.message ?? e).replace(/^.*Error: /, '')), setBusy(false)),
+    )
+  }
+  const sub = c === undefined ? 'Loading…' : dead ? 'This invite has expired' : c ? `${c.members} ${c.members === 1 ? 'member' : 'members'}, ${c.online} online` : 'Nobody from this server can be reached right now'
+  return (
+    <div className={`invite-card ${dead ? 'dead' : ''}`}>
+      {c ? <GroupEmblem g={{ id: c.server, name: c.name, avatar: c.avatar }} size={44} /> : <span className="crest invite-blank" style={{ width: 44, height: 44 }} />}
+      <span className="row-text">
+        <span className="row-sub">Server invite</span>
+        <span className="row-title">{c?.name || 'Server invite'}</span>
+        <span className="row-sub">{err || sub}</span>
+      </span>
+      <button className={`button ${c?.member || joined ? '' : 'primary'}`} disabled={busy || !!dead} onClick={join}>
+        {c?.member || joined ? 'Open' : busy ? 'Joining…' : 'Join'}
+      </button>
+    </div>
+  )
+}
 
 function Attachment({ f, st, view }: { f: FileRef; st?: FileState; view: () => void }) {
   const kind = inlineKind(f.t)

@@ -1,6 +1,6 @@
 // Small pieces every screen shares: the IPC bridge, how people are named, and the types passed between screens.
 import { type ReactNode } from 'react'
-import { type Group, type Key, type Profile } from '../shared/protocol'
+import { type Group, type Key, type Profile, type State } from '../shared/protocol'
 
 export const api = window.api
 export const NOBODY: Profile = { handle: '', name: '', about: '', avatar: '' }
@@ -11,6 +11,11 @@ export const card = (show: People['show'], k: Key) => (e: { preventDefault: () =
 }
 export const labelOf = (p: Profile, k: Key) => p.name || p.handle || k.slice(0, 8)
 export const groupName = (g: Group) => g.name || 'Unnamed group'
+// A conversation is muted for good (true) or until a time (Settings → muted).
+export const isMuted = (st: State, c: string) => {
+  const m = st.settings.muted?.[c]
+  return m === true || (typeof m === 'number' && m > Date.now())
+}
 
 export type Run = (p: Promise<unknown>) => Promise<void>
 // What every screen needs to show people: their profile, their name, and their name as a button opening their card.

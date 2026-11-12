@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import crypto from 'hypercore-crypto'
 import { expect, test } from 'vitest'
-import { updateFileFor, verifyUpdate } from '../src/shared/updatesig'
+import { isNewer, updateFileFor, verifyUpdate } from '../src/shared/updatesig'
 
 test('an installer signed by the release script verifies, and nothing else does', () => {
   const kp = crypto.keyPair()
@@ -29,4 +29,12 @@ test('a Mac takes the zip for its own processor, Linux the AppImage, Windows non
   expect(updateFileFor(files, 'linux', 'x64')).toBe('Eleusinia-1.2.3.AppImage')
   expect(updateFileFor(files, 'win32', 'x64')).toBe(null)
   expect(updateFileFor([{ url: 'Eleusinia-1.2.3-x64-mac.zip' }], 'darwin', 'arm64')).toBe(null)
+})
+
+test('a newer version is told apart by number, not text', () => {
+  expect(isNewer('0.1.10', '0.1.9')).toBe(true)
+  expect(isNewer('1.0.0', '0.9.99')).toBe(true)
+  expect(isNewer('0.1.9', '0.1.10')).toBe(false)
+  expect(isNewer('0.1.9', '0.1.9')).toBe(false)
+  expect(isNewer('0.0.1 or older', '0.1.0')).toBe(false)
 })

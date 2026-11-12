@@ -447,12 +447,40 @@ b.tail {
   font: 600 1em/1 var(--display);
 }
 
-/* ---------- Shell ---------- */
+/* ---------- Shell ----------
+   A grid: the rail and the left column (.side) on top of the bars, which are exactly as wide as both and so widen
+   with the column's splitter; everything else (splitters, the chat, the members) runs the full height. */
 .app {
-  display: flex;
+  position: relative;
+  display: grid;
+  grid-template-columns: auto auto auto minmax(0, 1fr) auto auto;
+  grid-template-rows: minmax(0, 1fr) auto;
   height: 100vh;
   min-width: 0;
   overflow: hidden;
+}
+.app > * {
+  grid-row: 1 / 3;
+  min-height: 0;
+}
+.app > .rail {
+  grid-area: 1 / 1;
+}
+.app > .side {
+  grid-area: 1 / 2;
+}
+.app > .bars {
+  grid-area: 2 / 1 / 3 / 3;
+}
+/* The floating player sits over the middle column (absolutely placed in its grid area, so it takes no cell). */
+.app > .pip-layer {
+  position: absolute;
+  inset: 0;
+  grid-area: 1 / 4 / 3 / 5;
+  pointer-events: none;
+}
+.pip-layer > * {
+  pointer-events: auto;
 }
 
 /* Navigation rail */
@@ -957,17 +985,6 @@ aside {
   color: var(--gold);
   font-size: 13px;
   line-height: 1.4;
-}
-.call-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.call-controls .button {
-  flex: 1;
-}
-.call-controls .danger .icon {
-  rotate: 135deg;
 }
 details > summary {
   cursor: pointer;
@@ -2352,18 +2369,6 @@ kbd {
   border-color: color-mix(in srgb, var(--danger) 55%, transparent);
   background: #6e2433;
   color: #f5c2ca;
-}
-/* Wraps: with a share and a camera on there are seven, more than a narrow panel holds in one row. */
-.call-controls {
-  flex-wrap: wrap;
-  justify-content: center;
-  gap: 10px;
-}
-.call-controls .leave {
-  margin-left: 6px;
-}
-.call-controls .leave .icon {
-  rotate: 135deg;
 }
 
 /* Home: the whole width. Friends on the left, what is happening now on the right; sections sit on the background. */
@@ -4236,6 +4241,14 @@ aside.server-side {
 .channel > .icon {
   color: var(--mist-2);
 }
+.channel.unread {
+  color: var(--silver);
+  font-weight: 600;
+}
+.channel-count {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
 .channel-name {
   flex: 1;
   min-width: 0;
@@ -4296,20 +4309,6 @@ aside.server-side {
 .voice-person .user {
   font-weight: 500;
 }
-.voice-dock {
-  flex: none;
-  display: grid;
-  gap: 10px;
-  padding: 12px 14px 14px;
-  border-top: 1px solid var(--line);
-  background: rgb(5 6 8 / 0.35);
-}
-.voice-live {
-  color: var(--cyan);
-}
-.voice-dock .call-controls {
-  justify-content: flex-start;
-}
 /* The channel topic beside its name in the chat header. */
 .chat-head > .icon {
   flex: none;
@@ -4353,4 +4352,170 @@ aside.server-side {
 .invite-input,
 .invite-link b {
   font: 12.5px/1.3 var(--mono);
+}
+
+/* The bars under the rail and the left column (design/mockups/voice.html frames 2, 3 and 11). */
+.bars {
+  display: grid;
+  border-top: 1px solid var(--line);
+  border-right: 1px solid var(--line);
+  background: rgb(5 6 8 / 0.55);
+}
+.voice-bar {
+  display: grid;
+  gap: 10px;
+  padding: 10px 12px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.voice-bar-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.voice-bar-head > .row-text {
+  flex: 1;
+  min-width: 0;
+}
+.voice-bar .signal {
+  margin-left: -6px;
+  gap: 2px;
+  font-size: 13px;
+}
+.voice-bar .signal-text {
+  color: var(--good);
+}
+.voice-where {
+  max-width: 100%;
+  padding: 0 0 0 24px;
+  border: none;
+  background: none;
+  color: var(--mist);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.voice-where:hover {
+  color: var(--silver);
+  text-decoration: underline;
+}
+.bars .icon-button.on {
+  background: var(--obsidian-3);
+  color: var(--silver);
+}
+.bars .icon-button.leave {
+  color: #f0a3b0;
+}
+.bars .icon-button.leave .icon {
+  rotate: 135deg;
+}
+.voice-bar-row {
+  display: flex;
+  gap: 8px;
+}
+.round.wide {
+  flex: 1;
+  width: auto;
+  height: 36px;
+  border-radius: var(--r-lg);
+}
+.voice-bar-row .round:not(.wide) {
+  width: 36px;
+  height: 36px;
+}
+.user-bar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 8px 8px 10px;
+}
+.user-bar-me {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 6px 4px 4px;
+  border: none;
+  border-radius: var(--r-md);
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.user-bar-me:hover {
+  background: var(--obsidian-3);
+}
+.user-bar-me .row-text {
+  min-width: 0;
+}
+.user-bar-me .row-title,
+.user-bar-me .row-sub {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.user-bar .icon-button.on {
+  color: var(--danger);
+}
+.user-bar .icon-button.held {
+  cursor: not-allowed;
+}
+.bar-arrow {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 30px;
+  margin-left: -4px;
+  padding: 0;
+  border: none;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--mist-2);
+}
+.bar-arrow:hover,
+.bar-arrow[aria-expanded='true'] {
+  background: var(--obsidian-3);
+  color: var(--silver);
+}
+/* Headings and sliders inside a right-click menu (device lists, User volume). */
+.context-head {
+  margin: 0;
+  padding: 6px 10px 2px;
+  color: var(--mist);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.context-node .person-volume {
+  padding: 0 10px 6px;
+}
+
+/* An invite link in a message, shown as its server (frame 10). */
+.invite-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: 420px;
+  margin-top: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-lg);
+  background: linear-gradient(180deg, var(--obsidian-2), var(--obsidian));
+}
+.invite-card .row-text {
+  flex: 1;
+  min-width: 0;
+}
+.invite-card .row-title {
+  font-weight: 600;
+}
+.invite-card.dead .crest {
+  opacity: 0.6;
+}
+.invite-blank {
+  background: var(--obsidian-3);
 }

@@ -14,7 +14,7 @@ import { isWebUrl } from '../shared/links'
 import { isKey } from '../shared/protocol'
 import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared/reports'
 import { kindOf, shareable } from '../shared/sources'
-import { verifyUpdate } from '../shared/updatesig'
+import { isNewer, verifyUpdate } from '../shared/updatesig'
 import { DESTINY_APP, type Game, artUrl, sharing } from '../shared/activity'
 import type { Destiny } from '../shared/destiny'
 import type { Cs2 } from '../shared/cs2'
@@ -258,14 +258,17 @@ app.on('window-all-closed', () => {})
 app.whenReady().then(async () => firstCopy && (inboxMode ? startInbox() : (await updateFirst()) && startApp()))
 
 // Updates: the installed app looks for a newer release of github.com/mmhfn1/Eleusinia (published for every push to
-// main, see .github/workflows/release.yml) on start and every 4 hours, downloads it in the background and tells the
+// main, see .github/workflows/release.yml) on start, hourly, when a contact runs a newer version and when a call does not connect (startUpdates), downloads it in the background and tells the
 // window, which offers a restart; otherwise it installs the next time Eleusinia is closed. Copies run from source never
 // update. ELEUSINIA_UPDATE_URL points it at another folder of releases (testing), ELEUSINIA_NO_UPDATES=1 turns it off.
-const updatable = () => app.isPackaged && process.env.ELEUSINIA_NO_UPDATES !== '1'
+const updatable = () => app.isPackaged && process.env.ELEUSINIA_NO_UPDATES !== '1' && !process.env.ELEUSINIA_BOOTSTRAP
 // macOS and Linux install updates themselves (main/selfupdate.ts); electron-updater only finds them there.
 const own = process.platform !== 'win32'
 const releaseBase = (version: string) => process.env.ELEUSINIA_UPDATE_URL?.replace(/\/+$/, '') ?? `https://github.com/mmhfn1/Eleusinia/releases/download/v${version}`
 let staged: Staged | null = null
+// Set by startUpdates when this copy updates itself; the newest version a contact runs, so each is checked for once
+let checkUpdate = (_why: string): unknown => undefined
+let newest = ''
 const updateFeed = () => process.env.ELEUSINIA_UPDATE_URL && autoUpdater.setFeedURL({ provider: 'generic', url: process.env.ELEUSINIA_UPDATE_URL })
 
 // Every downloaded installer must carry a signature by Eleusinia's update key (shared/updatesig.ts), fetched from the
@@ -339,24 +342,43 @@ function startUpdates(ready: (version: string) => void, diag: (area: 'app' | 'er
   autoUpdater.autoDownload = !own
   autoUpdater.autoInstallOnAppQuit = !own
   autoUpdater.on('update-available', (i) => diag('app', `update ${i.version} found, downloading`))
+  let fetching = false // our own download (macOS, Linux), which can outlast the check that started it
+  let found = false
+  let quietUntil = 0 // after a download that failed (or cannot be installed here), an hour before trying again
   if (own)
     autoUpdater.on('update-available', async (i) => {
-      if (staged?.version === i.version) return
-      if (!canInstall()) return diag('error', `update ${i.version} found, but this copy cannot replace itself where it is (a folder it cannot write to, or a Mac app opened straight from Downloads)`)
+      if (staged?.version === i.version || fetching) return
+      if (!canInstall()) return (quietUntil = Date.now() + 3600e3), diag('error', `update ${i.version} found, but this copy cannot replace itself where it is (a folder it cannot write to, or a Mac app opened straight from Downloads)`)
+      fetching = true
       const s = await fetchUpdate(i.version, i.files, releaseBase(i.version), (u) => net.fetch(u)).catch(() => null)
-      if (!s) return diag('error', `update ${i.version} could not be downloaded or is not signed with the update key`)
+      fetching = false
+      if (!s) return (quietUntil = Date.now() + 3600e3), diag('error', `update ${i.version} could not be downloaded or is not signed with the update key`)
       staged = s
       diag('app', `update ${i.version} ready`)
       ready(i.version)
     })
   autoUpdater.on('update-downloaded', (i) => {
+    found = true
     diag('app', `update ${i.version} ready`)
     ready(i.version)
   })
   autoUpdater.on('error', (e) => diag('error', `update check failed: ${e.message}`))
-  const check = () => autoUpdater.checkForUpdates().catch(() => {}) // offline: the next check tries again
-  check()
-  setInterval(check, 4 * 3600e3)
+  // Checked when there is a reason (a contact on a newer version, a call that does not connect: checkUpdate) and
+  // hourly besides, to stay well clear of GitHub's limits. The GitHub provider reads github.com's release pages
+  // (releases.atom, releases/latest, latest.yml), not api.github.com. Nothing is downloaded unless a newer version is
+  // there, and no check starts while one, or the download it started, is running, nor once an update is ready.
+  let checking = false
+  checkUpdate = async (why) => {
+    if (checking || fetching || found || staged || Date.now() < quietUntil) return
+    checking = true
+    diag('app', `checking for updates: ${why}`)
+    try {
+      await (await autoUpdater.checkForUpdates())?.downloadPromise?.catch(() => (quietUntil = Date.now() + 3600e3))
+    } catch {} // offline: the next check tries again
+    checking = false
+  }
+  checkUpdate('started')
+  setInterval(() => checkUpdate('hourly'), 3600e3)
 }
 
 function startApp() {
@@ -387,6 +409,34 @@ function startApp() {
     webPreferences: { preload: join(__dirname, '../preload/index.js') },
   })
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+  // Events wait while the page loads, until it asks for its first state (App.tsx subscribes in the same effect), so
+  // nothing sent meanwhile is lost, such as the join of someone already in a call. State events from before that ask
+  // are dropped (the asked state supersedes them), and the oldest of them go first when the queue is full.
+  type PageEvent = { type: string; [k: string]: unknown }
+  let held: PageEvent[] | null = []
+  const toPage = (e: PageEvent) => {
+    if (win.isDestroyed()) return
+    if (!held) return win.webContents.send('event', e)
+    held.push(e)
+    if (held.length > 1000) held.splice(Math.max(0, held.findIndex((x) => x.type === 'state')), 1)
+  }
+  const asked = () => {
+    if (!held) return
+    held = held.filter((e) => e.type !== 'state')
+    // After the reply, so the page has its state before the signals that need it
+    setTimeout(() => {
+      const q = held ?? []
+      held = null
+      q.forEach(toPage)
+    })
+  }
+  // Only a real reload of the page holds again (did-start-loading also fires mid-session, and the page asks for its
+  // state once); never longer than 10 s, so a page that does not ask cannot be left without updates.
+  win.webContents.on('did-start-navigation', (e: { isMainFrame?: boolean; isSameDocument?: boolean }) => {
+    if (!e.isMainFrame || e.isSameDocument || held) return
+    held = []
+    setTimeout(asked, 10000)
+  })
   // The page's window buttons. Closing goes through the close handler below, so the tray setting still applies.
   ipcMain.handle('window', (_e, action: unknown) => {
     if (action === 'minimize') win.minimize()
@@ -394,7 +444,7 @@ function startApp() {
     else if (action === 'close') win.close()
     return win.isMaximized()
   })
-  const sized = () => !win.isDestroyed() && win.webContents.send('event', { type: 'window', maximized: win.isMaximized() })
+  const sized = () => toPage({ type: 'window', maximized: win.isMaximized() })
   win.on('maximize', sized)
   win.on('unmaximize', sized)
   win.webContents.on('will-navigate', (e) => e.preventDefault())
@@ -440,7 +490,7 @@ function startApp() {
   const node = createNode({
     dir,
     keyPair: loadIdentity(dir),
-    emit: (e) => !win.isDestroyed() && win.webContents.send('event', e),
+    emit: toPage,
     noDirect: process.env.ELEUSINIA_NO_DIRECT === '1',
     strict: process.env.ELEUSINIA_STRICT === '1', // testing: behave as behind a strict router (smoke's relayed mode)
     // testing, on a local test DHT only: how many members of each group to dial (0: only friends, so group members
@@ -463,9 +513,10 @@ function startApp() {
     inbox: isKey(process.env.ELEUSINIA_INBOX) ? process.env.ELEUSINIA_INBOX : app.isPackaged ? INBOX_KEY : undefined,
     diag: diagnostics.add,
     version: app.getVersion(),
+    newerApp: (v) => isNewer(v, newest || app.getVersion()) && ((newest = v), checkUpdate(`a contact runs ${v}`)),
   })
   startActivity(node, dir, (text) => diagnostics.add('app', text))
-  startUpdates((version) => !win.isDestroyed() && win.webContents.send('event', { type: 'update', version }), diagnostics.add)
+  startUpdates((version) => toPage({ type: 'update', version }), diagnostics.add)
   ipcMain.handle('installUpdate', async () => {
     if (!own) return autoUpdater.quitAndInstall(true, true) // quietly, then opens the new version
     if (!staged) return
@@ -499,7 +550,9 @@ function startApp() {
   app.on('render-process-gone', (_e, wc, d) => {
     if (d.reason === 'clean-exit') return
     crashed('The window crashed', `${d.reason}, exit code ${d.exitCode}`)
-    if (wc === win.webContents) setTimeout(() => !win.isDestroyed() && win.reload(), 500) // a crashed window stays blank otherwise
+    if (wc !== win.webContents) return
+    if (!held) (held = []), setTimeout(asked, 10000)
+    setTimeout(() => !win.isDestroyed() && win.reload(), 500) // a crashed window stays blank otherwise
   })
   app.on('child-process-gone', (_e, d) => {
     if (d.reason === 'clean-exit' || d.reason === 'killed') return
@@ -520,6 +573,7 @@ function startApp() {
     if (!Object.hasOwn(node, method) || MAIN_ONLY.has(method) || (method === 'dropLink' && !process.env.ELEUSINIA_BOOTSTRAP)) throw new Error('Unknown method')
     // The page picks no save path (that is saveFile's dialog); the smoke run on a local test DHT still passes one
     if (method === 'download' && !process.env.ELEUSINIA_BOOTSTRAP) args = args.slice(0, 1)
+    if (method === 'state') asked()
     const result = await (node as any)[method](...args)
     if (method === 'setSettings') hook(), activityChanged()
     if (method === 'deleteAccount') {
@@ -651,7 +705,7 @@ function startApp() {
   let recorded: ((h: Hotkey | null) => void) | null = null
   let hooked = false
   const fire = (events: { action: string; down: boolean }[]) =>
-    events.forEach((e) => !win.isDestroyed() && win.webContents.send('event', { type: 'hotkey', ...e }))
+    events.forEach((e) => toPage({ type: 'hotkey', ...e }))
   function hook() {
     const need = !!recorder || Object.values(bindings()).some((h) => h?.keys?.length)
     if (need === hooked) return
