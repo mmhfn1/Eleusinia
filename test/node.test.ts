@@ -1825,6 +1825,52 @@ test('a relay asked to reach someone it is not linked with links to them first, 
   expect(said.some((t) => t.includes(`to …${b.key.slice(-6)}: linking with them first`))).toBe(true)
 }, 180000)
 
+test('a contact whose dial reaches us unlinked is dialed back once, after their hole punch has had its chance', async () => {
+  const said: string[] = []
+  let calls = 0 // b turns away a's first two links (each dial reaches b's firewall first); b's own dial back is let through
+  const a = start(undefined, undefined, { groupLinks: 0, redialMs: 60000 }) // a's redial would link them itself: not within this test
+  const b = start(undefined, undefined, { groupLinks: 0, links: (k) => k !== a.key || ++calls > 2, diag: (_area, text) => said.push(text) })
+  onTestFailed(() => console.log(['--- b', ...said].join(String.fromCharCode(10))))
+  const o = start(undefined, undefined, { groupLinks: 0 })
+  await setUp([o, b], false)
+  await setUp([a]) // relaying: a's first retries skip the backoff (due), so its second dial happens even if the first failed
+  await befriend(o, a)
+  await befriend(o, b)
+  // a and b know each other only as members of o's group, and nothing makes b dial a (groupLinks 0, not friends)
+  const gid = o.node.createGroup('pair', [a.key, b.key])
+  await until(() => !!a.node.state().groups[gid]?.members.includes(b.key) && !!b.node.state().groups[gid]?.members.includes(a.key))
+  expect(linked(a, b)).toBe(false)
+  const back = () => said.filter((t) => t.includes(`…${a.key.slice(-6)} dialed us while unlinked`)).length
+  a.node.signal(gid, b.key, { k: 'join' }) // a call signal makes a dial b
+  await until(() => calls === 1)
+  await wait(1000)
+  a.node.signal(gid, b.key, { k: 'join' }) // and again, within 10 s
+  await until(() => calls === 2)
+  expect(linked(a, b)).toBe(false)
+  await until(() => linked(a, b) && linked(b, a))
+  expect(back()).toBe(1)
+}, 180000)
+
+test('startup checks: a friend with something pending whose direct dial failed does not hold the splash for the relay attempt', async () => {
+  let a = start(undefined, undefined, { strict: true })
+  const b = start(undefined, undefined, { strict: true })
+  const r = start(undefined, undefined, { links: (k) => k !== b.key }) // relays, but cannot link with b: answers no after 10 s
+  await setUp([a, b, r])
+  await befriend(a, r)
+  await befriendUnlinked(a, b)
+  await befriendUnlinked(r, b)
+  await a.node.destroy()
+  const seen: Extract<Event, { type: 'startup' }>[] = []
+  const t0 = Date.now()
+  a = start(a.dir, a.keyPair, { strict: true, emit: (e) => void (e.type === 'startup' && seen.push(e)) })
+  a.node.send(dmId(a.key, b.key), 'waiting for b') // something pending: b is sought through r once the direct dial fails
+  await until(() => !!seen.at(-1)?.ready || !!seen.at(-1)?.gaveUp)
+  console.log(`startup with a failed dial: ready in ${Date.now() - t0} ms`)
+  expect(seen.at(-1)!.ready).toBe(true)
+  expect(seen.at(-1)!.steps.find((s) => s.id === 'links')!.detail).toBe('linked with 1 of 1 online')
+  expect(Date.now() - t0).toBeLessThan(9000) // r's no takes 10 s
+}, 180000)
+
 test('a friend seen online through presence notes whom neither a direct dial nor a relay reaches is listed as unreachable, not offline', async () => {
   const a = peer({ strict: true })
   const b = peer({ strict: true })

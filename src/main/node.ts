@@ -919,12 +919,15 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       // once instead of at the next 30 s check.
       knock: (key) => !s.friends[key] && !declinedRecently(key) && (ring(key), lookJoiner(key)),
       // A contact dialing us while unlinked (a relay linking with us for someone, a friend coming back): when our router
-      // turns their dial away, ours to them often works, so we dial back once their attempt has had its chance
+      // turns their dial away, ours to them often works, so we dial back once their attempt has had its chance. Their
+      // hole punch can take 8 to 9 s through a strict router, so we wait REACH_DIAL_MS: dialing sooner races it, and the
+      // later of two links can replace the one that just formed (network.ts adopt).
       incoming(key) {
         if (!known(key) || (dialedBack.get(key) ?? 0) > Date.now() - 10000) return
         dialedBack.set(key, Date.now())
         if (dialedBack.size > 1000) dialedBack.clear()
-        setTimeout(() => !net.linked(key) && net.dial(key), 1500)
+        diag('network', `…${key.slice(-6)} dialed us while unlinked: dialing back in ${REACH_DIAL_MS / 1000} s`)
+        setTimeout(() => !net.linked(key) && net.dial(key), REACH_DIAL_MS)
       },
       open(key, replaced) {
         const by = pendingVia.get(key)
@@ -1331,8 +1334,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   function linkCheck(): Check {
     const picks = [...ours().map((g) => g.members), ...servers.lists()].flatMap(linkPick)
     const targets = [...new Set([...Object.keys(s.friends).filter((k) => s.friends[k] === 'friend'), ...picks])].filter((k) => k !== me && !s.blocked?.[k])
-    // Settled: linked, or its first dial failed and, for a friend we have something for, the relay attempt too
-    const failed = (k: Key) => (retries.get(k)?.n ?? 0) > 0 && !attempting.has(k) && (!demand.has(k) || s.friends[k] !== 'friend' || fails.has(k))
+    // Settled: linked, or its first dial failed. Not the relay attempt that may follow: it starts at the next redial
+    // (15 s in use) and waits up to 12 s for a yes, which held the splash ~14.5 s in 0.1.3 reports
+    const failed = (k: Key) => (retries.get(k)?.n ?? 0) > 0
     const linked = targets.filter((k) => net.linked(k)).length
     const waiting = targets.filter((k) => !net.linked(k) && !failed(k))
     return {
