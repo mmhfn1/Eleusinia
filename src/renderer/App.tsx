@@ -312,33 +312,36 @@ function Home({ st, people, run, open, ring, newGroup }: { st: State; people: Pe
   const friends = byStatus('friend').sort((a, b) => name(a).localeCompare(name(b)))
   // A group call a friend is in, so the row can say where to find them.
   const inCallIn = (k: Key) => Object.values(st.groups).find((g) => call.active.get(g.id)?.has(k))
-  const friend = (k: Key) => (
-    <div key={k} className="friend-row">
-      <button className="row-button" onClick={() => open(dmId(st.me, k))} onContextMenu={card(show, k)}>
-        <Avatar k={k} p={prof(k)} size={40} online={isOnline(k)} />
-        <span className="row-text">
-          <span className="row-title">{name(k)}</span>
-          <span className="row-sub">{st.activity[k]?.game ? <ActivityLine a={st.activity[k]} /> : reachOf(st, k) === 'connecting' || reachOf(st, k) === 'unreachable' ? REACH_WORDS[reachOf(st, k)] : prof(k).handle}</span>
-        </span>
-        {inCallIn(k) && <span className="row-where">In a call in {groupName(inCallIn(k)!)}</span>}
-        {call.active.get(dmId(st.me, k))?.size ? (
-          <span className="call-chip">
-            <Icon name="phone" size={14} /> Calling
+  const friend = (k: Key) => {
+    const r = reachOf(st, k)
+    return (
+      <div key={k} className="friend-row">
+        <button className="row-button" onClick={() => open(dmId(st.me, k))} onContextMenu={card(show, k)}>
+          <Avatar k={k} p={prof(k)} size={40} online={isOnline(k)} />
+          <span className="row-text">
+            <span className="row-title">{name(k)}</span>
+            <span className="row-sub">{st.activity[k]?.game ? <ActivityLine a={st.activity[k]} /> : r === 'connecting' || r === 'unreachable' ? REACH_WORDS[r] : prof(k).handle}</span>
           </span>
-        ) : null}
-      </button>
-      <span className="row-actions">
-        <button className="round" aria-label={`Message ${name(k)}`} title="Message" onClick={() => open(dmId(st.me, k))}>
-          <Icon name="send" size={16} />
+          {inCallIn(k) && <span className="row-where">In a call in {groupName(inCallIn(k)!)}</span>}
+          {call.active.get(dmId(st.me, k))?.size ? (
+            <span className="call-chip">
+              <Icon name="phone" size={14} /> Calling
+            </span>
+          ) : null}
         </button>
-        {isOnline(k) && (
-          <button className="round" aria-label={`Call ${name(k)}`} title="Call" onClick={() => ring(dmId(st.me, k))}>
-            <Icon name="phone" size={16} />
+        <span className="row-actions">
+          <button className="round" aria-label={`Message ${name(k)}`} title="Message" onClick={() => open(dmId(st.me, k))}>
+            <Icon name="send" size={16} />
           </button>
-        )}
-      </span>
-    </div>
-  )
+          {isOnline(k) && (
+            <button className="round" aria-label={`Call ${name(k)}`} title="Call" onClick={() => ring(dmId(st.me, k))}>
+              <Icon name="phone" size={16} />
+            </button>
+          )}
+        </span>
+      </div>
+    )
+  }
   // Online by a presence note counts too: seen online but not linked yet, which the row says
   const online = friends.filter(isOnline)
   const offline = friends.filter((k) => !isOnline(k))
