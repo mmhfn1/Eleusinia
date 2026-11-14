@@ -3601,7 +3601,7 @@ img.crest {
 .pop-block {
   align-self: flex-start;
   margin-top: 4px;
-  color: var(--stone);
+  color: #747e93; /* --stone lifted to 4.5:1 on the card; the token stays for the dot and borders */
   font-size: 12px;
 }
 .pop-block:hover,
