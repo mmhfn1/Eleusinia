@@ -668,6 +668,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const probes = new Map<number, () => void>()
   let probeId = 0
   const asked = new Map<Key, number>() // reach questions per contact this minute
+  let stopped = false // destroy ran: timers still pending must not dial on a closed DHT
   const dialingFor = new Set<Key>() // targets we are linking with because someone asked us to relay to them
   const dialedBack = new Map<Key, number>() // contacts whose dial reached us unlinked, when we last dialed back (incoming)
   const REACH_DIAL_MS = 10000 // a hole punch to a strict router can take 8 to 9 s
@@ -689,6 +690,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const t0 = Date.now()
       while (!ready() && Date.now() - t0 < REACH_DIAL_MS) await new Promise((r) => setTimeout(r, 200))
       dialingFor.delete(target)
+      if (stopped) return
     }
     answer(asker, target, why || (!net.linked(target) ? 'could not link with them' : !ready() ? 'their version cannot be reached through a friend' : ''))
   }
@@ -927,7 +929,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         dialedBack.set(key, Date.now())
         if (dialedBack.size > 1000) dialedBack.clear()
         diag('network', `…${key.slice(-6)} dialed us while unlinked: dialing back in ${REACH_DIAL_MS / 1000} s`)
-        setTimeout(() => !net.linked(key) && net.dial(key), REACH_DIAL_MS)
+        setTimeout(() => !stopped && !net.linked(key) && net.dial(key), REACH_DIAL_MS)
       },
       open(key, replaced) {
         const by = pendingVia.get(key)
@@ -1804,6 +1806,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     // Writes pending changes now, for when the app is ended without destroy (Windows shutting down).
     flush: () => saving && (clearTimeout(saving), (saving = null), save()),
     async destroy() {
+      stopped = true
       if (saving) clearTimeout(saving), save()
       if (sharing) clearTimeout(sharing)
       if (pushing) clearTimeout(pushing)
