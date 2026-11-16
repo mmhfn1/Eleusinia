@@ -113,15 +113,40 @@ export function pullTargets(arg: string | undefined): Pull['to'] | null {
   return ok.length === ids.length && ok.length <= 50 ? ok : null
 }
 
-export function cleanPull(b: Buffer | null): Pull | null {
+const pullOf = (p: any): Pull | null => {
+  if (!/^[0-9a-f]{16}$/.test(p?.id) || !Number.isSafeInteger(p.at)) return null
+  const to = p.to === 'all' ? 'all' : Array.isArray(p.to) && p.to.length <= 50 && p.to.every((t: unknown) => typeof t === 'string' && t.length <= 30) ? p.to : null
+  return to ? { id: p.id, at: p.at, to } : null
+}
+const parse = (b: Buffer | null) => {
   try {
-    const p = JSON.parse(String(b))
-    if (!/^[0-9a-f]{16}$/.test(p?.id) || !Number.isSafeInteger(p.at)) return null
-    const to = p.to === 'all' ? 'all' : Array.isArray(p.to) && p.to.length <= 50 && p.to.every((t: unknown) => typeof t === 'string' && t.length <= 30) ? p.to : null
-    return to ? { id: p.id, at: p.at, to } : null
+    return JSON.parse(String(b))
   } catch {
     return null
   }
+}
+// The newest pull in the inbox's record (all a 0.1.4 or 0.1.5 copy reads)
+export const cleanPull = (b: Buffer | null) => pullOf(parse(b))
+// Every pull in the record: the newest at the top, as 0.1.4 reads it, and the day's earlier ones in `more`, so a pull
+// made right after another does not hide it
+export function pullsIn(b: Buffer | null): Pull[] {
+  const r = parse(b)
+  const more = Array.isArray(r?.more) ? r.more.slice(0, 20) : []
+  return [r, ...more].map(pullOf).filter((p): p is Pull => !!p)
+}
+// The record the inbox publishes (pullsIn reads it): the pulls of the last day, newest first, within the 1000 bytes a
+// DHT record holds
+export function pullRecord(pulls: Pull[], now = Date.now()): Buffer {
+  const recent = pulls
+    .filter((p) => p.at > now - PULL_TTL)
+    .sort((a, b) => b.at - a.at)
+    .map(({ id, at, to }) => ({ id, at, to })) // only what testers read, never the inbox's own bookkeeping
+  for (let n = recent.length; n > 0; n--) {
+    const [top, ...more] = recent.slice(0, n)
+    const b = Buffer.from(JSON.stringify(more.length ? { ...top, more } : top))
+    if (b.length <= 1000) return b
+  }
+  return Buffer.from(JSON.stringify(recent[0] ?? {}))
 }
 
 // A pull this copy should answer: recent, not answered yet, and naming everyone, our Unique Key or our friend ID

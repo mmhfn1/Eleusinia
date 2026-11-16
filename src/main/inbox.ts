@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import { type Key, keyTail } from '../shared/protocol'
-import { type Pull, type Report, cleanReport, describe, eventLine } from '../shared/reports'
+import { type Pull, type Report, cleanReport, describe, eventLine, pullRecord } from '../shared/reports'
 import { createNet } from './network'
 
 // The developers' inbox, run with `npm run inbox`: receives problem and crash reports from anyone with the app,
@@ -18,7 +18,7 @@ type Opts = {
   gatherMs?: number // how long after a log pull its issue is filed with the answers so far (testing: shorter)
 }
 // A log pull and the logs that answered it, kept in pulls.json: one issue per pull, later answers as comments on it
-type PullRecord = Pull & { reports: string[]; posted: string[]; issue: number | null }
+type PullRecord = Pull & { seq?: number; reports: string[]; posted: string[]; issue: number | null } // seq: the DHT record number it went out with
 type Saved = { report: Report; from: string; received: number; issue: number | null }
 
 // Reports accepted per hour from one sender, and from everyone together (new keys cost nothing), so nobody can
@@ -144,8 +144,11 @@ export function createInbox({ dir, keyPair, dht, github, log = () => {}, fileEve
     async pull(to: Pull['to']): Promise<Pull | null> {
       await net.listening
       const p: Pull = { id: randomBytes(8).toString('hex'), at: Date.now(), to }
-      if (!(await net.publish(Buffer.from(JSON.stringify(p)), Math.floor(p.at / 1000)))) return null
-      pulls.push({ ...p, reports: [], posted: [], issue: null })
+      // The day's earlier pulls go along (pullRecord), so this one does not hide them; the record's number only rises,
+      // even for two pulls in one second
+      const seq = Math.max(Math.floor(p.at / 1000), ...pulls.map((q) => q.seq ?? 0).map((n) => n + 1))
+      if (!(await net.publish(pullRecord([...pulls, p]), seq))) return null
+      pulls.push({ ...p, seq, reports: [], posted: [], issue: null })
       savePulls()
       return p
     },

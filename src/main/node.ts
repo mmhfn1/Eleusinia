@@ -31,7 +31,7 @@ import DHT from 'hyperdht'
 import { idSeed, readClaims, signClaim, withClaim, writeClaims } from '../shared/idcard'
 import { type FileRef, validFiles } from '../shared/media'
 import { cleanLink } from '../shared/links'
-import { type Area, type Pull, type Report, PULL_EVERY, cleanPull, cleanReport, pullFor } from '../shared/reports'
+import { type Area, type Pull, type Report, PULL_EVERY, cleanReport, pullFor, pullsIn } from '../shared/reports'
 import { EDIT_AHEAD_MS, groupIdOf, heldFrom, mergeGroup, missing, ownerOf, signAdd, signEdit, signLeft, signMsg, profileVersion, signRemoved, validGroup, verifyAdd, verifyMsg, withLink } from '../shared/sync'
 import { openRequest, requestSeed, sealRequest } from '../shared/sealed'
 import { createImpairment, parseNetSim } from '../shared/netsim'
@@ -1143,12 +1143,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   // Tester builds: a developer's log pull, read from the inbox's own signed record, answered once each
   async function checkPull() {
     if (!inbox || !pullLogs || !joined || s.settings.shareLogs === false) return
-    const p = cleanPull(await net.fetch(inbox, true))
-    if (!pullFor(p, { tail: me.slice(-6), handle: s.profile.handle }, s.pulled ?? [])) return
-    s.pulled = [...(s.pulled ?? []).slice(-19), p.id]
-    changed()
-    diag('app', `the developers asked for logs (pull ${p.id.slice(0, 6)}); sending them`)
-    pullLogs(p, createHash('sha256').update(p.id + me).digest('hex').slice(0, 16))
+    // Every pull of the day in the record, oldest first, so one made right after another does not hide it
+    for (const p of pullsIn(await net.fetch(inbox, true)).reverse()) {
+      if (!pullFor(p, { tail: me.slice(-6), handle: s.profile.handle }, s.pulled ?? [])) continue
+      s.pulled = [...(s.pulled ?? []).slice(-19), p.id]
+      changed()
+      diag('app', `the developers asked for logs (pull ${p.id.slice(0, 6)}); sending them`)
+      pullLogs(p, createHash('sha256').update(p.id + me).digest('hex').slice(0, 16))
+    }
   }
   const pulls = setInterval(checkPull, PULL_EVERY)
 

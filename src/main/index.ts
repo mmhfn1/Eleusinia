@@ -35,9 +35,15 @@ if (inboxMode) app.setPath('userData', process.env.ELEUSINIA_INBOX_DIR || join(a
 else if (process.env.ELEUSINIA_DATA) app.setPath('userData', process.env.ELEUSINIA_DATA)
 // One copy per data folder: opening Eleusinia while it waits in the tray brings that copy back rather than starting a
 // second one with the same identity. The inbox too (its own folder): two would file every report twice.
-const firstCopy = app.requestSingleInstanceLock()
+// `npm run logs [all | name#1234 | a1b2c3 ...]`: what follows --pull, read from our own command line and handed to a
+// running inbox as data, since Windows passes it the arguments reordered (the app path after them)
+const pullArg = (() => {
+  const i = process.argv.indexOf('--pull')
+  return i < 0 ? null : process.argv.slice(i + 1).filter((a) => !a.startsWith('-')).join(' ') || 'all'
+})()
+const firstCopy = app.requestSingleInstanceLock({ pull: pullArg })
 if (!firstCopy) {
-  if (inboxMode) console.log(process.argv.includes('--pull') ? 'Asked the running inbox to pull logs; see its window.' : 'An inbox is already running here; this one stops.')
+  if (inboxMode) console.log(pullArg ? `Asked the running inbox to pull logs from ${pullArg}; see its window.` : 'An inbox is already running here; this one stops.')
   app.quit()
 }
 
@@ -81,16 +87,16 @@ function startInbox() {
   log(token && repo ? `filing issues in ${repo}` : `not filing issues: put {"token": "...", "repo": "owner/name"} in ${config}`)
   if (inbox.key !== INBOX_KEY && !process.env.ELEUSINIA_BOOTSTRAP) log('warning: the app sends reports to a different inbox (INBOX_KEY in src/shared/reports.ts)')
   process.on('SIGINT', () => inbox.destroy().then(() => app.exit(0)))
-  // `npm run logs [all | name#1234 | a1b2c3 ...]`: here at start, or handed over by a second copy while this one runs
-  const pull = (argv: string[]) => {
-    const i = argv.indexOf('--pull')
-    if (i < 0) return
-    const to = pullTargets(argv.slice(i + 1).filter((a) => !a.startsWith('-')).join(' ') || 'all')
-    if (!to) return log('pull: name testers by friend ID (name#1234) or Unique Key (6 characters), or say all')
+  // A log pull (pullArg): here at start, or handed over by a second copy while this one runs
+  const pull = (arg: unknown) => {
+    if (typeof arg !== 'string') return
+    log(`pull asked for ${arg}`)
+    const to = pullTargets(arg)
+    if (!to) return log(`pull: "${arg}" is not a friend ID (name#1234) or Unique Key (6 characters); say all for everyone`)
     inbox.pull(to).then((p) => log(p ? `pull ${p.id.slice(0, 6)} published for ${to === 'all' ? 'every tester' : to.join(', ')}; logs arrive as [logs] reports in the folder above` : 'pull: the DHT did not take it; try again in a minute'))
   }
-  pull(process.argv)
-  app.on('second-instance', (_e, argv) => pull(argv))
+  pull(pullArg)
+  app.on('second-instance', (_e, _argv, _cwd, data) => pull((data as { pull?: unknown } | undefined)?.pull))
 }
 
 function loadIdentity(dir: string) {
