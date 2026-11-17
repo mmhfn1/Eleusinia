@@ -6,11 +6,11 @@ import DHT from 'hyperdht'
 import createTestnet from 'hyperdht/testnet'
 import { afterAll, beforeAll, expect, onTestFailed, test } from 'vitest'
 import { createNode } from '../src/main/node'
-import { type RelayLimits, createNet, relayKeyPair } from '../src/main/network'
+import { type RelayLimits, HOSTED_LIMITS, createNet, relayKeyPair, startBlindRelay } from '../src/main/network'
 import { CALL_VERSION, type Event, type Group, type Msg, cleanProfile, dmId, identicon, isHandle, keyTail, mutedNow, normHandle, stack, versionOf } from '../src/shared/protocol'
 import { inviteKeyPair, joinProof, signOp } from '../src/shared/server'
 import { makeInvite, parseInvite } from '../src/shared/invite'
-import { heldFrom, mergeGroup, missing, signAdd, signLeft, signMsg, signPresence, validGroup, verifyAdd, verifyMsg, verifyPresence } from '../src/shared/sync'
+import { heldFrom, mergeGroup, missing, noteNat, signAdd, signLeft, signMsg, signPresence, validGroup, verifyAdd, verifyMsg, verifyPresence, withNat } from '../src/shared/sync'
 
 test('a tampered or re-attributed message fails verification', () => {
   const a = DHT.keyPair()
@@ -34,6 +34,21 @@ test('a presence note verifies only as signed, by its author, and not dated far 
   const vc = 'ab'.repeat(16) + '.' + 'cd'.repeat(16) // a server voice channel's call
   expect(verifyPresence(signPresence(1000, vc, 'ab12ab12ab12ab12', kp), 1000)).toBe(true)
   for (const bad of [vc + '.', vc.toUpperCase(), 'ab'.repeat(16) + '.', vc.replace('.', '_')]) expect(verifyPresence(signPresence(1000, bad, 'ab12ab12ab12ab12', kp), 1000)).toBe(false)
+})
+
+test('a presence note carries nat under its own signature, taken only when that checks out, and older copies still take the note', () => {
+  const kp = DHT.keyPair()
+  const plain = signPresence(1000, null, 'ab12ab12ab12ab12', kp)
+  const p = withNat(plain, 'strict', kp.secretKey)
+  expect(verifyPresence(p, 1000)).toBe(true) // the note's own signature is untouched, which is all an older copy checks
+  expect(noteNat(p)).toBe('strict')
+  expect(noteNat(plain)).toBeNull()
+  expect(noteNat({ ...p, nsig: undefined })).toBeNull()
+  expect(noteNat({ ...p, nat: 'ok' })).toBeNull()
+  expect(noteNat({ ...p, nsig: 'ab'.repeat(64) })).toBeNull()
+  expect(noteNat({ ...p, at: 1001 })).toBeNull() // bound to the note's time, so an old nat cannot ride a newer note
+  expect(noteNat(withNat(plain, 'strict', DHT.keyPair().secretKey))).toBeNull() // signed by someone else
+  expect(noteNat({ ...p, nat: 'odd' as any })).toBeNull()
 })
 
 test('a message must carry a time a date can show', () => {
@@ -1057,8 +1072,8 @@ test('friend requests arrive and are accepted even when no direct link can ever 
 }, 120000)
 
 // Peers behind strict routers (`strict`: their direct connections fail for real on the test DHT), linked through a
-// mutual friend's blind relay.
-function peer(opts: { strict?: boolean; relayLimits?: RelayLimits } = {}) {
+// mutual friend's blind relay. Every copy that is not strict relays; `noRelay` stands in for one that cannot.
+function peer(opts: { strict?: boolean; relayLimits?: RelayLimits; noRelay?: boolean; hostedRelays?: string[] } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'eleusinia-'))
   const keyPair = DHT.keyPair()
   const node = createNode({ dir, keyPair, emit: () => {}, dht: { bootstrap: testnet.bootstrap }, redialMs: 300, ...opts })
@@ -1067,9 +1082,8 @@ function peer(opts: { strict?: boolean; relayLimits?: RelayLimits } = {}) {
   return n
 }
 let names = 0
-async function setUp(ns: N[], relay = true) {
+async function setUp(ns: N[]) {
   await Promise.all(ns.map((n) => n.node.setProfile({ username: 'relay' + names++, name: 'R', about: '', avatar: '' })))
-  await Promise.all(ns.map((n) => n.node.setSettings({ relay })))
 }
 // Friends through the request topics, as two strict peers can only become.
 async function befriendUnlinked(x: N, y: N) {
@@ -1095,8 +1109,7 @@ test('two peers that can never link directly chat, sync a group and carry a call
   const a = peer({ strict: true })
   const b = peer({ strict: true })
   const r = peer()
-  await setUp([a, b], false) // only the friend in the middle relays: being reached through one needs no setting
-  await setUp([r])
+  await setUp([a, b, r]) // only the friend in the middle relays: a and b are strict
   await befriendUnlinked(a, b)
   const dm = dmId(a.key, b.key)
   a.node.send(dm, 'queued')
@@ -1137,8 +1150,8 @@ test('two peers that can never link directly chat, sync a group and carry a call
 test('a group member we can never link with is named from their published card, not shown as a key', async () => {
   const a = peer({ strict: true })
   const b = peer({ strict: true })
-  const owner = peer()
-  await setUp([a, b, owner], false) // nobody relays, so a and b never link
+  const owner = peer({ noRelay: true })
+  await setUp([a, b, owner]) // nobody relays, so a and b never link
   await befriend(a, owner)
   await befriend(b, owner)
   const gid = owner.node.createGroup('strangers', [a.key, b.key])
@@ -1168,17 +1181,13 @@ test('when the relaying friend leaves, the pair moves to another mutual friend',
   expect(a.node.state().relayed).toContain(b.key)
 }, 180000)
 
-test('nobody relays for strangers or with relaying off', async () => {
+test('nobody relays for strangers', async () => {
   const a = peer({ strict: true })
   const b = peer({ strict: true })
-  const off = peer() // friends with both, relaying off
   const half = peer() // relaying, but only friends with a
   const stranger = DHT.keyPair()
   await setUp([a, b, half])
-  await setUp([off], false)
   await befriendUnlinked(a, b)
-  await befriend(a, off)
-  await befriend(b, off)
   await befriend(a, half)
   a.node.send(dmId(a.key, b.key), 'nobody can carry this')
   await wait(8000)
@@ -1797,16 +1806,17 @@ test('startup checks: a restarted node with two friends online gets ready, and o
   expect(a.node.starting()).toBe(false)
 }, 120000)
 
-test('a relay asked to reach someone it is not linked with links to them first, then relays', async () => {
+// With b's note (through o's group) already at r, r says yes at once, since the target dials r's relay itself; without
+// one it links with them first. Which comes first is a race, so either answer counts here
+test('a relay asked to reach someone it is not linked with says yes at once or links to them first, then relays', async () => {
   const a = start(undefined, undefined, { strict: true, groupLinks: 0 })
   const b = start(undefined, undefined, { strict: true, groupLinks: 0 })
   let open = false // r refuses links with b until a asks, so r is not linked with them when asked
   const said: string[] = []
   const r = start(undefined, undefined, { groupLinks: 0, links: (k) => k !== b.key || open, diag: (_area, text) => said.push(text) })
   onTestFailed(() => console.log(['--- r', ...said].join(String.fromCharCode(10))))
-  const o = start(undefined, undefined, { groupLinks: 0 }) // friends with everyone, not relaying
-  await setUp([a, b, r])
-  await setUp([o], false)
+  const o = start(undefined, undefined, { groupLinks: 0, noRelay: true }) // friends with everyone, not relaying
+  await setUp([a, b, r, o])
   await befriend(o, a)
   await befriend(o, b)
   await befriend(o, r)
@@ -1822,18 +1832,17 @@ test('a relay asked to reach someone it is not linked with links to them first, 
   a.node.send(dm, 'through r')
   await until(() => texts(b, dm).includes('through r'))
   expect(a.node.state().relayed).toContain(b.key)
-  expect(said.some((t) => t.includes(`to …${b.key.slice(-6)}: linking with them first`))).toBe(true)
+  expect(said.some((t) => t.includes(`to …${b.key.slice(-6)}: online by their note, yes at once`) || t.includes(`to …${b.key.slice(-6)}: linking with them first`))).toBe(true)
 }, 180000)
 
 test('a contact whose dial reaches us unlinked is dialed back once, after their hole punch has had its chance', async () => {
   const said: string[] = []
   let calls = 0 // b turns away a's first two links (each dial reaches b's firewall first); b's own dial back is let through
   const a = start(undefined, undefined, { groupLinks: 0, redialMs: 60000 }) // a's redial would link them itself: not within this test
-  const b = start(undefined, undefined, { groupLinks: 0, links: (k) => k !== a.key || ++calls > 2, diag: (_area, text) => said.push(text) })
+  const b = start(undefined, undefined, { groupLinks: 0, noRelay: true, links: (k) => k !== a.key || ++calls > 2, diag: (_area, text) => said.push(text) })
   onTestFailed(() => console.log(['--- b', ...said].join(String.fromCharCode(10))))
-  const o = start(undefined, undefined, { groupLinks: 0 })
-  await setUp([o, b], false)
-  await setUp([a]) // relaying: a's first retries skip the backoff (due), so its second dial happens even if the first failed
+  const o = start(undefined, undefined, { groupLinks: 0, noRelay: true })
+  await setUp([o, b, a]) // relaying: a's first retries skip the backoff (due), so its second dial happens even if the first failed
   await befriend(o, a)
   await befriend(o, b)
   // a and b know each other only as members of o's group, and nothing makes b dial a (groupLinks 0, not friends)
@@ -1874,8 +1883,8 @@ test('startup checks: a friend with something pending whose direct dial failed d
 test('a friend seen online through presence notes whom neither a direct dial nor a relay reaches is listed as unreachable, not offline', async () => {
   const a = peer({ strict: true })
   const b = peer({ strict: true })
-  const o = peer()
-  await setUp([a, b, o], false) // nobody relays
+  const o = peer({ noRelay: true })
+  await setUp([a, b, o]) // nobody relays
   await befriend(a, o)
   await befriend(b, o)
   await befriendUnlinked(a, b)
@@ -1885,4 +1894,86 @@ test('a friend seen online through presence notes whom neither a direct dial nor
   await until(() => a.node.state().unreachable.includes(b.key))
   expect(linked(a, b)).toBe(false)
   expect(a.node.state().unreachable).not.toContain(o.key) // linked people never are
+}, 180000)
+
+// The project's hosted relay (src/relay/main.ts) on the test DHT, stopped with the nodes
+async function hostedRelay(keyPair = DHT.keyPair()) {
+  const dht = new DHT({ bootstrap: testnet.bootstrap })
+  const relay = startBlindRelay(dht, keyPair, () => true, HOSTED_LIMITS)
+  await relay.listening
+  nodes.push({ node: { destroy: () => relay.stop().then(() => dht.destroy()) } } as any)
+  return keyPair.publicKey.toString('hex') as string
+}
+
+test('two strict friends with nobody to relay link through a hosted relay soon after start, with nothing pending', async () => {
+  const hk = await hostedRelay()
+  let a = start(undefined, undefined, { strict: true, hostedRelays: [hk] })
+  const b = start(undefined, undefined, { strict: true, hostedRelays: [hk] })
+  await setUp([a, b])
+  await befriendUnlinked(a, b)
+  await until(() => linked(a, b)) // the sweep after startup found b online and unlinked
+  await a.node.destroy()
+  await until(() => !linked(b, a))
+  const t0 = Date.now()
+  a = start(a.dir, a.keyPair, { strict: true, hostedRelays: [hk] })
+  await until(() => linked(a, b) && a.node.state().hostedRelayed.includes(b.key))
+  console.log(`hosted relay: linked ${Date.now() - t0} ms after start`)
+  expect(Date.now() - t0).toBeLessThan(15000)
+  expect(a.node.state().relayed).not.toContain(b.key) // relayed is friend relays only: call.ts holds video back on those
+  await until(() => b.node.state().hostedRelayed.includes(a.key))
+  const dm = dmId(a.key, b.key)
+  a.node.send(dm, 'over the hosted relay')
+  await until(() => texts(b, dm).includes('over the hosted relay'))
+}, 180000)
+
+test('two strict friends who know it of each other never dial directly', async () => {
+  let dials = 0
+  const said: string[] = []
+  const b = peer({ strict: true })
+  const a = start(undefined, undefined, { strict: true, links: (k) => (k === b.key && dials++, true), diag: (_area, text) => said.push(text) })
+  const o = peer({ noRelay: true })
+  await setUp([a, b, o])
+  await befriend(a, o)
+  await befriend(b, o)
+  await befriendUnlinked(a, b)
+  o.node.createGroup('nat', [a.key, b.key]) // b's notes, with its nat, reach a through o
+  await until(() => said.some((t) => t.includes(`…${b.key.slice(-6)} and we are both behind strict routers`)))
+  await wait(1000) // a dial already in flight
+  const before = dials
+  await wait(8000) // longer than the longest redial backoff here (20 × 300 ms)
+  expect(dials).toBe(before)
+  expect(linked(a, b)).toBe(false)
+}, 180000)
+
+test('a strict contact is never asked to relay and runs no relay', async () => {
+  const said: string[] = []
+  const cSaid: string[] = []
+  const a = start(undefined, undefined, { diag: (_area, text) => said.push(text) })
+  const b = start()
+  const c = start(undefined, undefined, { strict: true, diag: (_area, text) => cSaid.push(text) })
+  await setUp([a, b, c])
+  await befriend(a, c)
+  await befriend(a, b)
+  await b.node.destroy() // a's dials to b now fail: it looks for a relay
+  a.node.send(dmId(a.key, b.key), 'for later')
+  await until(() => said.some((t) => t.includes(`no contact could relay for …${b.key.slice(-6)}`)))
+  expect(said.filter((t) => t.includes(`to relay for …${b.key.slice(-6)}`))).toEqual([]) // nobody was asked
+  expect(cSaid.filter((t) => t.includes('relay for'))).toEqual([])
+  expect(await toRelay(c, a.keyPair)).toBeNull()
+}, 180000)
+
+test('with no relay anywhere a strict friend is unreachable, and a message waiting for them arrives once a hosted relay answers', async () => {
+  const hosted = DHT.keyPair() // listed, but not running yet
+  const hk = hosted.publicKey.toString('hex')
+  const a = peer({ strict: true, hostedRelays: [hk] })
+  const b = peer({ strict: true, hostedRelays: [hk] })
+  await setUp([a, b])
+  await befriendUnlinked(a, b)
+  const dm = dmId(a.key, b.key)
+  a.node.send(dm, 'waiting for a relay')
+  await until(() => a.node.state().unreachable.includes(b.key))
+  expect(linked(a, b)).toBe(false)
+  await hostedRelay(hosted)
+  await until(() => texts(b, dm).includes('waiting for a relay'))
+  await until(() => a.node.state().hostedRelayed.includes(b.key))
 }, 180000)

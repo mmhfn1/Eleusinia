@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { REACH_WORDS, callWords, pendingWords, reachOf } from '../src/shared/reach'
+import { REACH_WORDS, callWords, pendingWords, reachOf, routeWords } from '../src/shared/reach'
 
 const st = { online: ['linked'], present: ['noted', 'stuck'], unreachable: ['stuck', 'gone'] }
 
@@ -24,4 +24,11 @@ test('waiting messages say why they wait', () => {
   expect(pendingWords('offline')).toBe('pending, sends when they are online')
   expect(pendingWords('connecting')).toBe('pending, connecting to them')
   expect(pendingWords('unreachable')).toContain("can't connect to them yet")
+})
+
+test('a relayed link names its relay: a friend or an Eleusinia relay', () => {
+  const r = { relayed: ['viaFriend'], hostedRelayed: ['viaHosted'] }
+  expect(routeWords(r, 'viaFriend')).toBe('through a friend')
+  expect(routeWords(r, 'viaHosted')).toBe('through an Eleusinia relay')
+  expect(routeWords(r, 'direct')).toBeUndefined()
 })

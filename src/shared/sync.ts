@@ -2,19 +2,26 @@ import { createHash } from 'node:crypto'
 import crypto from 'hypercore-crypto'
 import { type LinkPreview, cleanLink, linkBody } from './links'
 import { filesBody, validFiles } from './media'
-import { type Add, type Group, type Have, type Key, type Msg, type Profile, MAX_TEXT, isGroupId, isKey, isPicture } from './protocol'
+import { type Add, type Group, type Have, type Key, type Msg, type Profile, MAX_TEXT, type Nat, isGroupId, isKey, isPicture } from './protocol'
 
 // A signed "online" note, passed along between group members so they know who is online without a link to everyone.
 // call: the group or server voice channel (`${serverId}.${channelId}`) whose call the author is in, if any, so members
 // not linked with them still see the call.
 // v: their profile's version (profileVersion), so members not linked with them notice a new name or picture.
-export type Presence = { key: Key; at: number; call: string | null; v: string; sig: string }
+// nat (with its own signature, nsig): whether the author is behind a strict router. Signed apart, like a message's link
+// preview, since older copies check the note's body as it was and would turn away every note with it inside.
+export type Presence = { key: Key; at: number; call: string | null; v: string; sig: string; nat?: Nat; nsig?: string }
 const presenceBody = (key: string, at: number, call: string | null, v: string) => Buffer.from(`presence:${key}:${at}:${call ?? ''}:${v}`)
 export const profileVersion = (p: Profile) => createHash('sha256').update(JSON.stringify([p.handle, p.name, p.about, p.avatar])).digest('hex').slice(0, 16)
 export const signPresence = (at: number, call: string | null, v: string, kp: { publicKey: Buffer; secretKey: Buffer }): Presence => {
   const key = kp.publicKey.toString('hex')
   return { key, at, call, v, sig: crypto.sign(presenceBody(key, at, call, v), kp.secretKey).toString('hex') }
 }
+const natBody = (key: string, at: number, nat: string) => Buffer.from(`presence-nat:${key}:${at}:${nat}`)
+export const withNat = (p: Presence, nat: Nat, secretKey: Buffer): Presence => ({ ...p, nat, nsig: crypto.sign(natBody(p.key, p.at, nat), secretKey).toString('hex') })
+// A verified note's nat, or null without a valid nsig of its own
+export const noteNat = (p: Presence): Nat | null =>
+  (p.nat === 'strict' || p.nat === 'ok') && isSig(p.nsig) && crypto.verify(natBody(p.key, p.at, p.nat), Buffer.from(p.nsig, 'hex'), Buffer.from(p.key, 'hex')) ? p.nat : null
 export function verifyPresence(p: any, now = Date.now()): p is Presence {
   return (
     !!p &&

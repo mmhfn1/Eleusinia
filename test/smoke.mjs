@@ -1,13 +1,14 @@
 // Drives three real app instances over the DevTools protocol: profile setup, friend search, layout, voice, and DMs and
 // group messages with the recipient online and offline. They meet on a local test DHT, so a run depends on nothing
 // outside this machine; ELEUSINIA_SMOKE_PUBLIC=1 uses the public DHT instead, for an occasional real-network check.
-import { spawn } from 'node:child_process'
+import { execFileSync, execSync, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createServer } from 'node:http'
 import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { createRequire } from 'node:module'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import createTestnet from 'hyperdht/testnet.js'
 import { fakeBungie } from './fake-bungie.mjs'
 
@@ -57,6 +58,28 @@ const inboxed = () => {
 // and call can only go through Cy, the mutual friend, relaying. A shorter run of its own (see relayedRun).
 const relayedMode = process.env.ELEUSINIA_SMOKE_RELAYED === '1'
 const strictEnv = relayedMode ? { ELEUSINIA_STRICT: '1', ELEUSINIA_NO_DIRECT: '1' } : {}
+// ELEUSINIA_SMOKE_HOSTED=1 (with RELAYED): Cy relays for nobody, so Ann and Bob link through a hosted relay this run
+// starts on the test DHT (src/relay/main.ts, built into deploy/relay/relay.cjs), which carries screen video too.
+const hostedMode = relayedMode && process.env.ELEUSINIA_SMOKE_HOSTED === '1'
+if (hostedMode && publicDht) throw new Error('ELEUSINIA_SMOKE_HOSTED needs the local test DHT')
+async function hostedRelay() {
+  const root = fileURLToPath(new URL('..', import.meta.url))
+  execSync('npm run relay:build', { cwd: root, stdio: 'ignore' })
+  const js = join(root, 'deploy', 'relay', 'relay.cjs')
+  const dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-relay-'))
+  const key = execFileSync(process.execPath, [js, '--data', dir, '--print-key'], { encoding: 'utf8' }).trim() // the public key only
+  const relay = spawn(process.execPath, [js, '--data', dir], { env: { ...appEnv, ELEUSINIA_RELAY_PORT: '0' }, stdio: ['ignore', 'pipe', 'ignore'] })
+  children.push(relay)
+  await new Promise((resolve, reject) => {
+    let out = ''
+    relay.stdout.on('data', (d) => (out += d).includes('Eleusinia relay listening') && resolve())
+    setTimeout(() => reject(new Error('the hosted relay did not start')), 30000)
+  })
+  console.log(`hosted relay on the test DHT: ${key.slice(0, 8)}…`)
+  return key
+}
+// Every window knows this run's hosted relay or none (set but empty), never the project's real ones
+appEnv.ELEUSINIA_RELAYS = hostedMode ? await hostedRelay() : ''
 
 async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')), extraEnv = {}) {
   // The windows overlap, and Windows reports a covered window as hidden; the app then (rightly) asks not to be sent
@@ -232,16 +255,13 @@ async function bobQuiet(p, fn) {
 // A tiny real PNG, run through the same shrink path a picked file takes.
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
-// Ann and Bob can never link directly; Cy is friends with both and relays. Turned on from Settings, as a person would.
+// Ann and Bob can never link directly; Cy is friends with both and relays, as everyone not strict does. In hosted mode
+// Cy relays for nobody and the hosted relay links them instead.
 async function relayedRun(ownTitles) {
-  console.log('--- Relayed: Ann and Bob link only through Cy')
-  // Only Cy relays: being reached through a friend needs no setting
-  for (const [p, n] of [[c, 'Cy']]) {
-    await p.ev(`document.querySelector('.user-bar button[title="Settings"]').click()`)
-    await until(`${n} turns on relaying for friends in Settings`, () =>
-      p.ev(`(() => { const l = [...document.querySelectorAll('dialog[open] label')].find((x) => x.textContent.includes('Relay for friends')); if (!l) return false; const i = l.querySelector('input'); if (!i.checked) i.click(); return i.checked })()`), 10)
-    await p.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
-  }
+  const via = hostedMode ? 'the hosted relay' : 'Cy'
+  const route = hostedMode ? 'through an Eleusinia relay' : 'through a friend'
+  const list = hostedMode ? 'hostedRelayed' : 'relayed'
+  console.log(`--- Relayed: Ann and Bob link only through ${via}`)
   const key = (p) => p.ev(`api.call('state').then((s) => s.me)`)
   const [ka, kb, kc] = [await key(a), await key(b), await key(c)]
   for (const [x, kx, y, ky, names] of [[a, ka, b, kb, 'Ann and Bob'], [a, ka, c, kc, 'Ann and Cy'], [b, kb, c, kc, 'Bob and Cy']]) {
@@ -251,38 +271,50 @@ async function relayedRun(ownTitles) {
     await until(`${names} are friends`, () => x.ev(`api.call('state').then((s) => s.friends['${ky}'] === 'friend')`))
   }
   // They met only through the DHT, so their names arrive with the first hello over the relayed link.
-  await until('A and B link through Cy and learn each other\'s names', async () =>
+  await until(`A and B link through ${via} and learn each other's names`, async () =>
     (await a.ev(`api.call('state').then((s) => s.profiles['${kb}']?.name === 'Bob')`)) && b.ev(`api.call('state').then((s) => s.profiles['${ka}']?.name === 'Ann')`), 120)
   await a.ev(open('Bob'))
   await b.ev(open('Ann'))
-  await a.ev(say('through cy'))
-  await until('B shows a DM that could only come through Cy', () => b.ev(shows('through cy')))
-  await until('both see the link goes through a friend', async () =>
-    (await a.ev(`api.call('state').then((s) => s.relayed.includes('${kb}'))`)) && b.ev(`api.call('state').then((s) => s.relayed.includes('${ka}'))`))
-  await b.ev(say('reply via cy'))
-  await until('A shows the reply', () => a.ev(shows('reply via cy')))
-  // A friend's relay carries pictures, but a big file waits for a direct connection.
-  await a.ev(sendFiles(2, 'files via cy'))
-  await until('B shows the picture that came through Cy', () => b.ev(`${shows('files via cy')} && ${pictureShown}`), 30)
-  await b.ev(fetchBig(ka, join(mkdtempSync(join(tmpdir(), 'eleusinia-smoke-dl-')), 'big.bin')))
-  await until('B says the big file waits for a direct connection', () => b.ev(body('waiting for a direct connection')), 10)
+  await a.ev(say('through the relay'))
+  await until(`B shows a DM that could only come through ${via}`, () => b.ev(shows('through the relay')))
+  await until(`both see the link goes ${route}`, async () =>
+    (await a.ev(`api.call('state').then((s) => s.${list}.includes('${kb}'))`)) && b.ev(`api.call('state').then((s) => s.${list}.includes('${ka}'))`))
+  await b.ev(say('reply via the relay'))
+  await until('A shows the reply', () => a.ev(shows('reply via the relay')))
+  // Any relay carries pictures; through a friend's, a big file waits for a direct connection
+  await a.ev(sendFiles(2, 'files via the relay'))
+  await until(`B shows the picture that came through ${via}`, () => b.ev(`${shows('files via the relay')} && ${pictureShown}`), 30)
+  if (!hostedMode) {
+    await b.ev(fetchBig(ka, join(mkdtempSync(join(tmpdir(), 'eleusinia-smoke-dl-')), 'big.bin')))
+    await until('B says the big file waits for a direct connection', () => b.ev(body('waiting for a direct connection')), 10)
+  }
   await a.ev(`document.querySelector('.chat-person').click()`)
-  await until("Bob's panel says he is online through a friend", () => a.ev(pop((p) => p.textContent.includes('Online through a friend'))), 10)
+  await until(`Bob's panel says he is online ${route}`, () => a.ev(pop(`(p) => p.textContent.includes('Online ${route}')`)), 10)
   await a.ev(expandPop)
-  await until("Bob's full card says online through a friend, voice and text only", () => a.ev(`!!document.querySelector('dialog[open]')?.textContent.includes('Online through a friend: voice and text only')`), 10)
+  const card = hostedMode ? 'Online through an Eleusinia relay' : 'Online through a friend: voice and text only'
+  await until(`Bob's full card says: ${card}`, () => a.ev(`!!document.querySelector('dialog[open]')?.textContent.includes('${card}')`), 10)
   await a.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
 
-  console.log('--- Relayed: a voice call, and no screen share')
+  console.log(`--- Relayed: a voice call, and ${hostedMode ? 'a screen share' : 'no screen share'}`)
   await a.ev(press('Start call'))
   await until('B sees the call', () => b.ev(`[...document.querySelectorAll('aside.voice button')].some(x => x.textContent.includes('Join call'))`))
   await b.ev(press('Join call'))
   await until('A connected to Bob', () => a.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Bob')`))
   await until('B hears Ann through the relay', async () => (await bobQuiet(b, () => b.ev(received('voice')))) > 50, 30)
+  await until(`A's call panel says the call is relayed ${route}`, () => a.ev(`document.querySelector('.callers').textContent.includes('relayed ${route}')`), 10)
   await a.ev(press('Share screen'))
   await until('A sees the share picker', () => a.ev(`document.querySelectorAll('dialog[open] .source').length > 0`), 20)
   await a.ev(`document.querySelector('dialog[open] #share-tab-window').click()`)
   await pickOwn(a, ownTitles[1])
   await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Share').click()`)
+  if (hostedMode) {
+    // An Eleusinia relay carries video: B joins the stream and it plays
+    await until('B is offered the stream, with Join stream', () => b.ev(`document.querySelector('.stage .screen.invite.big button')?.textContent === 'Join stream'`), 20)
+    await b.ev(joinStream)
+    await until('B plays the shared window through the hosted relay', async () => (await b.ev(received('screen'))) > 100 && b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight > 0`), 30)
+    console.log(`ok   screen video crossed the hosted relay (${await b.ev(received('screen'))} packets)`)
+    return
+  }
   await sleep(8000)
   const screenIn = await b.ev(`(async () => { const pc = window.__pcs.find((p) => p.connectionState === 'connected'); const t = pc?.getTransceivers().filter((x) => x.receiver.track.kind === 'video')[0]; let n = 0; if (t) (await t.receiver.getStats()).forEach((r) => r.type === 'inbound-rtp' && (n = r.packetsReceived ?? 0)); return n })()`)
   if (screenIn > 20) throw new Error(`B received ${screenIn} screen packets through the relay, which carries voice only`)
@@ -307,7 +339,7 @@ let a = await launch(9231, undefined, annEnv)
 const bobGame = { name: 'Destiny 2', source: 'steam', app: 1085660, played: 211683 }
 const bungieFake = await fakeBungie()
 let b = await launch(9232, undefined, { ...strictEnv, ELEUSINIA_TEST_ACTIVITY: JSON.stringify(bobGame), ELEUSINIA_TEST_BUNGIE: bungieFake.base })
-const c = await launch(9233)
+const c = await launch(9233, undefined, hostedMode ? { ELEUSINIA_TEST_NO_RELAY: '1' } : {})
 let failed = false
 try {
   console.log('--- Profile setup')

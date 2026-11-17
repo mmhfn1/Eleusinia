@@ -10,6 +10,7 @@ import { autoUpdater } from 'electron-updater'
 import { UiohookKey, uIOhook } from 'uiohook-napi'
 import { type Bindings, type Hotkey, createMatcher, createRecorder } from '../shared/hotkeys'
 import { type FileRef, inlineKind, mimeOf, safeName } from '../shared/media'
+import { parseRelays } from '../shared/relays'
 import { isWebUrl } from '../shared/links'
 import { isKey } from '../shared/protocol'
 import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics, pullTargets } from '../shared/reports'
@@ -519,7 +520,10 @@ function startApp() {
     // testing, on a local test DHT only: how many members of each group to dial (0: only friends, so group members
     // who are not friends stay unlinked, as most pairs are in a big group)
     ...(process.env.ELEUSINIA_BOOTSTRAP && process.env.ELEUSINIA_TEST_GROUP_LINKS && { groupLinks: Number(process.env.ELEUSINIA_TEST_GROUP_LINKS) }),
+    noRelay: !!process.env.ELEUSINIA_BOOTSTRAP && process.env.ELEUSINIA_TEST_NO_RELAY === '1', // testing, local test DHT only: relay for nobody (smoke's hosted mode)
     netsim: process.env.ELEUSINIA_TEST_NET, // testing: a simulated bad line for calls (shared/netsim.ts)
+    // The project's hosted relays; ELEUSINIA_RELAYS replaces them only on a local test DHT
+    hostedRelays: parseRelays(process.env.ELEUSINIA_BOOTSTRAP ? process.env.ELEUSINIA_RELAYS : undefined),
     thumbnail: (avatar) => {
       const img = nativeImage.createFromDataURL(avatar)
       if (img.isEmpty()) return null

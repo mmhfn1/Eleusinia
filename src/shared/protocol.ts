@@ -51,7 +51,7 @@ export type Settings = {
   shareLogs?: boolean // tester builds: answer a developer's log pull (reports.ts Pull); on unless turned off
   closeToTray?: boolean // closing the window keeps Eleusinia running in the tray; on unless turned off
   noiseSuppression?: boolean // RNNoise on the microphone; on unless turned off
-  relay?: boolean // relay for mutual friends who cannot link directly; on unless turned off (being reached through one is always on)
+  relay?: boolean // ignored since relaying is always on (strict copies excepted, node.ts applyRelay); older copies stored it
   cacheMB?: number // how much room downloaded pictures may take before the oldest are deleted (DEFAULT_CACHE_MB)
   suggest?: boolean // be suggested to people typing the start of our username (announced while online); off unless turned on
   activity?: ActivitySettings // what we are playing, shared with friends and group members (shared/activity.ts); off unless turned on
@@ -84,6 +84,7 @@ export type State = {
   reports: number // problem and crash reports waiting to reach the developers' inbox
   versions: Record<Key, Version> // what each person we have greeted runs; memory only
   relayed: Key[] // online people whose link goes through a mutual friend's relay: voice and text only
+  hostedRelayed: Key[] // online people whose link goes through one of the project's hosted relays: carries everything
   present: Key[] // group members online but not linked with us, known from their presence notes
   // People we could not link with for now: a direct dial and a round of relay asks both failed (node.ts relayFailed).
   // Shown as "can't connect" only for someone known to be online (present, or in our call); for anyone else it just
@@ -122,15 +123,19 @@ export const versionOf = (w: { app?: unknown; call?: unknown }): Version => ({
   call: Number.isInteger(w.call) && (w.call as number) > 0 && (w.call as number) < 1000 ? (w.call as number) : 1,
 })
 
+// A strict router (symmetric NAT) picks a new port per destination: two of them never hole-punch, nor relay for others
+export type Nat = 'strict' | 'ok'
+
 export type Wire =
   // friend: whether the sender counts us as a friend or has asked to be one. Group members who are not friends
   // greet each other too, so a hello alone is not a friend request. Older versions leave it out.
   // app and call: the sender's version and call version (CALL_VERSION); 0.0.1 sent neither.
-  // relay: the sender's relay key, only while it relays for its contacts (Settings.relay); older versions never send it.
+  // relay: the sender's relay key, only while it relays for its contacts (never while strict); older versions never send it.
+  // nat: whether the sender is behind a strict router (dht.randomized); older versions never send it.
   // via: the sender accepts links through a friend's relay (from 0.0.45; older versions only while relaying themselves).
-  | ({ t: 'hello'; friend?: boolean; app?: string; call?: number; relay?: Key; via?: boolean } & Profile)
+  | ({ t: 'hello'; friend?: boolean; app?: string; call?: number; relay?: Key; via?: boolean; nat?: Nat } & Profile)
   | { t: 'reach'; key: Key; ok?: boolean } // asking a contact whether it can relay us to `key`, and its answer
-  | { t: 'relayed'; by: Key } // sent by whoever dialed: this link goes through `by`'s relay
+  | { t: 'relayed'; by: Key } // sent by whoever dialed: this link goes through `by`'s relay (a friend's identity key, or a hosted relay's key)
   | { t: 'group'; g: Group }
   | { t: 'have'; conv: string; have: Have; re?: boolean; held?: Have; tail?: boolean } // held: what the receiver already confirmed holding, which is not sent again; tail: a new member, who takes only recent history
   | { t: 'older'; conv: string; upTo: Have } // asking for messages at or below these, the newest first (a new member scrolling back)
