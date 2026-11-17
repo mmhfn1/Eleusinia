@@ -13,3 +13,8 @@ STANDUP.md
 .scratch/
 
 graphify-out/
+
+# hosted relay: built by npm run relay:build, and its local data (key included)
+deploy/relay/relay.cjs
+deploy/relay/node_modules/
+relay-data/

@@ -4,6 +4,7 @@
 import { type FormEvent, type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { type Key, type Profile, type State, MAX_TEXT, dmId } from '../shared/protocol'
+import { routeWords } from '../shared/reach'
 import { GameGlance } from './Activity'
 import * as call from './call'
 import { type People, type Run, api } from './common'
@@ -77,7 +78,7 @@ export function ProfilePop({ k, from, st, people, run, close, expand, chat, edit
     }
   }, [from])
 
-  const presence = inCall ? (voice?.deafened ? 'In your call, deafened' : voice?.muted ? 'In your call, muted' : call.speaking.has(k) ? 'Talking in your call' : 'In your call') : online ? (st.relayed.includes(k) ? 'Online through a friend' : 'Online') : 'Offline'
+  const presence = inCall ? (voice?.deafened ? 'In your call, deafened' : voice?.muted ? 'In your call, muted' : call.speaking.has(k) ? 'Talking in your call' : 'In your call') : online ? (routeWords(st, k) ? `Online ${routeWords(st, k)}` : 'Online') : 'Offline'
 
   // On the page itself: inside the app's layout, a blurred or animated ancestor would move where `fixed` measures from.
   return createPortal(

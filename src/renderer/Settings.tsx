@@ -237,13 +237,10 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
             Minimize to the system tray when the window is closed
           </span>
         </label>
-        <label className="check-row">
-          <input type="checkbox" role="switch" checked={st.settings.relay !== false} onChange={(e) => api.call('setSettings', { relay: e.target.checked })} />
-          <span>
-            Relay for friends who cannot connect to each other directly. Uses a little of your bandwidth; you can
-            see when they talk, never what they say. Voice, text and pictures only
-          </span>
-        </label>
+        <p className="hint">
+          Eleusinia may carry voice and text for friends and server members whose networks block direct connections,
+          using at most about 2 Mbit/s of upload.
+        </p>
         <label className="check-row">
           <input type="checkbox" role="switch" checked={!!st.settings.suggest} onChange={(e) => api.call('setSettings', { suggest: e.target.checked })} />
           <span>

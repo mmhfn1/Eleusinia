@@ -22,7 +22,8 @@ export function lineReader() {
 }
 
 type Handlers = {
-  open(key: Key, replaced?: boolean): void // replaced: a new stream took over from a half-dead one
+  // replaced: a new stream took over from a half-dead one; via: the relay key our dial went through, if any
+  open(key: Key, replaced?: boolean, via?: Key): void
   close(key: Key): void
   msg(key: Key, w: Wire): void
   packet?(key: Key, b: Buffer): void
@@ -33,16 +34,113 @@ type Handlers = {
   knock?(key: Key): void
   // Someone admitted is dialing us while we are not linked: their dial may fail at our router, while ours to them works
   incoming?(key: Key): void
+  // The network changed, or what the DHT knows of our router did (strict() may have changed)
+  network?(): void
 }
 type KeyPair = { publicKey: Buffer; secretKey: Buffer }
-export type RelayLimits = { pairs: number; perContact: number; bytesPerSec: number }
+// perContact and perIp count relay connections: each side of a pair is one, so a pair whose two sides share an
+// address (the same home, or a local test DHT) takes two of that address's. perIp unset: no address cap.
+export type RelayLimits = { pairs: number; perContact: number; perIp?: number; bytesPerSec: number }
 // Per direction 24 KB/s a pair, voice only (State.relayed), about 8 KB/s. 8 pairs and 4 per contact: in a server where
 // several pairs cannot link, one well-placed member carries several of them, and 4 pairs ran out (0.1.3 reports).
-export const RELAY_LIMITS: RelayLimits = { pairs: 8, perContact: 4, bytesPerSec: 24 * 1024 }
+// perIp is the whole budget, so a user's relay behaves as before; it only accepts contacts anyway.
+export const RELAY_LIMITS: RelayLimits = { pairs: 8, perContact: 4, perIp: 16, bytesPerSec: 24 * 1024 }
+// The project's hosted relays (src/relay/main.ts) accept anyone, and keys cost nothing, so the address cap matters
+// there. 400 KB/s a direction carries a 720p screen share plus voice (design/plan-public-relay.md, Addition).
+// shortcut: no separate cap on pairs carrying video yet (40 in the plan), add it with the video phase.
+export const HOSTED_LIMITS: RelayLimits = { pairs: 400, perContact: 4, perIp: 8, bytesPerSec: 400 * 1024 }
 
 // The key our blind relay listens on: separate from the identity, so relay connections never look like a peer link.
 export const relayKeyPair = (secretKey: Buffer): KeyPair =>
   DHT.keyPair(createHash('sha256').update('eleusinia-relay:').update(secretKey).digest())
+
+export type RelayServer = {
+  listening: Promise<void>
+  stop(): Promise<void>
+  // Since start: pairs open now, bytes relayed (each received byte is sent on once, natively by udx's relayTo, which
+  // does not count it as sent, so this is also the bytes out), connections turned away
+  stats(): { pairs: number; bytes: number; refused: number }
+}
+
+// A blind relay on `keyPair`: pairs two peers' encrypted streams without being able to read them (hyperdht's
+// relayThrough). Capped in pairs, per key, per address and in bytes, since it spends someone's bandwidth. No Electron
+// here: the hosted relay runs this from plain Node.
+export function startBlindRelay(dht: any, keyPair: KeyPair, accept: (key: Key) => boolean, limits: RelayLimits): RelayServer {
+  const sessions = new Map<any, { key: Key; host: string }>() // relay connection; one per relayed pair on each side
+  const banned = new Map<Key, number>()
+  const streams = new Set<any>()
+  let done = 0 // bytes from streams already closed
+  let refused = 0
+  let meter: ReturnType<typeof setInterval> | null = null
+  const blind = new BlindRelay.Server({
+    createStream(opts: object) {
+      const st = dht.createRawStream({ ...opts, framed: true })
+      st.mark = { at: Date.now(), bytes: 0 }
+      streams.add(st)
+      st.on('close', () => {
+        streams.delete(st)
+        done += st.bytesReceived
+      })
+      meter ??= setInterval(measure, 5000)
+      return st
+    },
+  })
+  // Each stream carries one direction of a pair; over budget for 20 s, it is cut and its sender refused for 10 minutes.
+  function measure() {
+    const now = Date.now()
+    for (const st of streams) {
+      if (st.bytesReceived - st.mark.bytes > limits.bytesPerSec * 20) {
+        for (const [sock, s] of sessions) {
+          if (sock.rawStream?.remoteHost !== st.remoteHost || sock.rawStream?.remotePort !== st.remotePort) continue
+          banned.set(s.key, now + 600000)
+          sock.destroy()
+        }
+        st.destroy()
+      } else if (now - st.mark.at >= 20000) st.mark = { at: now, bytes: st.bytesReceived }
+    }
+    if (!streams.size && meter) (clearInterval(meter), (meter = null))
+  }
+  const count = (f: (s: { key: Key; host: string }) => boolean) => [...sessions.values()].filter(f).length
+  // Decided before the handshake completes; `addr` is where the dial came from, as the DHT saw it. That address is
+  // the one counted: the connection itself may take a LAN shortcut with another address.
+  const from = new Map<Key, string>()
+  const refuse = (k: Buffer, _payload: unknown, addr?: { host: string }) => {
+    const key = k.toString('hex')
+    const no =
+      !accept(key) ||
+      (banned.get(key) ?? 0) > Date.now() ||
+      sessions.size >= limits.pairs * 2 ||
+      count((s) => s.key === key) >= limits.perContact ||
+      (limits.perIp !== undefined && !!addr && count((s) => s.host === addr.host) >= limits.perIp)
+    if (no) refused++
+    else if (addr) {
+      if (from.size > 4096) from.clear() // handshakes admitted but never completed
+      from.set(key, addr.host)
+    }
+    return no
+  }
+  const srv = dht.createServer({ firewall: refuse }, (sock: any) => {
+    sock.on('error', () => {})
+    const key = sock.remotePublicKey.toString('hex')
+    sessions.set(sock, { key, host: from.get(key) ?? sock.rawStream?.remoteHost ?? '' })
+    from.delete(key)
+    sock.on('close', () => sessions.delete(sock))
+    blind.accept(sock, { id: sock.remotePublicKey }).on('error', () => {})
+  })
+  return {
+    listening: srv.listen(keyPair),
+    async stop() {
+      if (meter) clearInterval(meter)
+      for (const sock of sessions.keys()) sock.destroy()
+      await srv.close()
+    },
+    stats() {
+      let bytes = done
+      for (const st of streams) bytes += st.bytesReceived
+      return { pairs: Math.floor(streams.size / 2), bytes, refused }
+    },
+  }
+}
 
 // Testing: what a strict router does on the local test DHT, where every direct path would otherwise work.
 const STRICT = { dht: { quickFirewall: false, ephemeral: true }, server: { holepunch: false, shareLocalAddress: false } }
@@ -57,7 +155,7 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
   const links = new Map<Key, { sock: any; initiator: Key; at: number }>()
   const dialing = new Set<string>()
 
-  function adopt(sock: any, initiator: Key) {
+  function adopt(sock: any, initiator: Key, via?: Key) {
     const key: Key = sock.remotePublicKey.toString('hex')
     if (!allow(key)) return sock.destroy()
     const old = links.get(key)
@@ -96,7 +194,7 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
       links.delete(key)
       on.close(key)
     })
-    on.open(key, !!old) // also after a replacement: greeting twice is harmless, a lost greeting is not
+    on.open(key, !!old, via) // also after a replacement: greeting twice is harmless, a lost greeting is not
   }
 
   // Anyone not admitted is turned away, directly or through a relay.
@@ -111,61 +209,15 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
     adopt(sock, sock.remotePublicKey.toString('hex'))
   })
   const listening = server.listen(keyPair)
+  dht.on('nat-update', () => on.network?.())
+  dht.on('network-change', () => on.network?.())
 
-  // Our blind relay, only while relaying is on: it pairs two contacts' encrypted streams without being able to read
-  // them. Capped in pairs, per contact and in bytes, since it spends our bandwidth.
-  let relay: { server: any; stop: () => Promise<void> } | null = null
+  // Our blind relay, only while relaying is on, on its own key (relayKeyPair).
+  let relay: RelayServer | null = null
   async function serveRelay(accept: (key: Key) => boolean, limits: RelayLimits) {
     if (relay) return
-    const sessions = new Map<any, Key>() // relay connection → contact; one per relayed pair on each side
-    const banned = new Map<Key, number>()
-    const streams = new Set<any>()
-    let meter: ReturnType<typeof setInterval> | null = null
-    const blind = new BlindRelay.Server({
-      createStream(opts: object) {
-        const st = dht.createRawStream({ ...opts, framed: true })
-        st.mark = { at: Date.now(), bytes: 0 }
-        streams.add(st)
-        st.on('close', () => streams.delete(st))
-        meter ??= setInterval(measure, 5000)
-        return st
-      },
-    })
-    // Each stream carries one direction of a pair; over budget for 20 s, it is cut and its sender refused for 10 minutes.
-    function measure() {
-      const now = Date.now()
-      for (const st of streams) {
-        if (st.bytesReceived - st.mark.bytes > limits.bytesPerSec * 20) {
-          for (const [sock, key] of sessions) {
-            if (sock.rawStream?.remoteHost !== st.remoteHost || sock.rawStream?.remotePort !== st.remotePort) continue
-            banned.set(key, now + 600000)
-            sock.destroy()
-          }
-          st.destroy()
-        } else if (now - st.mark.at >= 20000) st.mark = { at: now, bytes: st.bytesReceived }
-      }
-      if (!streams.size && meter) (clearInterval(meter), (meter = null))
-    }
-    const count = (key: Key) => [...sessions.values()].filter((k) => k === key).length
-    const refuse = (k: Buffer) => {
-      const key = k.toString('hex')
-      return !accept(key) || (banned.get(key) ?? 0) > Date.now() || sessions.size >= limits.pairs * 2 || count(key) >= limits.perContact
-    }
-    const srv = dht.createServer({ firewall: refuse }, (sock: any) => {
-      sock.on('error', () => {})
-      sessions.set(sock, sock.remotePublicKey.toString('hex'))
-      sock.on('close', () => sessions.delete(sock))
-      blind.accept(sock, { id: sock.remotePublicKey }).on('error', () => {})
-    })
-    relay = {
-      server: srv,
-      async stop() {
-        if (meter) clearInterval(meter)
-        for (const sock of sessions.keys()) sock.destroy()
-        await srv.close()
-      },
-    }
-    await srv.listen(relayKeyPair(keyPair.secretKey))
+    relay = startBlindRelay(dht, relayKeyPair(keyPair.secretKey), accept, limits)
+    await relay.listening
   }
 
   // `via`: a contact's relay key, for peers no direct dial reaches.
@@ -185,7 +237,7 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
     sock.on('open', () => {
       opened = true
       dialing.delete(id)
-      adopt(sock, me)
+      adopt(sock, me, via)
       // hyperdht reports open before the other side answers, and that side can already have dropped the stream
       // (it aborts a hole punch raced against a LAN shortcut). Its greeting comes within a round trip, so a stream
       // that has heard nothing in 3 s is dead: drop it and dial once more at once, instead of waiting ~13 s for
@@ -200,6 +252,21 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
 
   return {
     listening,
+    // Behind a strict router (symmetric NAT: dht-rpc's randomized), or simulating one: no hole punch with another
+    // strict copy, and nobody could reach a relay of ours
+    strict: () => strict || dht.randomized,
+    // One handshake to `key` (a hosted relay), closed at once: its time in ms, or null when it did not answer
+    rtt(key: Key): Promise<number | null> {
+      return new Promise((resolve) => {
+        const start = performance.now()
+        const sock = dht.connect(Buffer.from(key, 'hex'), { keyPair })
+        const end = (ms: number | null) => (clearTimeout(timer), resolve(ms), sock.destroy())
+        const timer = setTimeout(() => end(null), 10000)
+        sock.on('error', () => {})
+        sock.on('open', () => end(Math.round(performance.now() - start)))
+        sock.on('close', () => end(null))
+      })
+    },
     linked: (key: Key) => links.has(key),
     keys: () => [...links.keys()],
     // We dialed it, and when it opened: links we made and no longer need are ours to close

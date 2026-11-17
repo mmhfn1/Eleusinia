@@ -30,3 +30,8 @@ export const callWords = (st: Pick<State, 'unreachable'>, k: Key, pc: string) =>
 // What a DM's messages still waiting for the other side say
 export const pendingWords = (r: Reach) =>
   r === 'connecting' ? 'pending, connecting to them' : r === 'unreachable' ? "pending, can't connect to them yet; tried again soon" : 'pending, sends when they are online'
+
+// The relay a link goes through, in words (profile card, call tiles); undefined when direct or not linked. A friend's
+// relay carries voice and text only, an Eleusinia (hosted) relay everything.
+export const routeWords = (st: Pick<State, 'relayed' | 'hostedRelayed'>, k: Key) =>
+  st.hostedRelayed.includes(k) ? 'through an Eleusinia relay' : st.relayed.includes(k) ? 'through a friend' : undefined

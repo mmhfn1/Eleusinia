@@ -9,6 +9,7 @@ import {
   type Have,
   type Key,
   type Msg,
+  type Nat,
   type Profile,
   type Settings,
   type State,
@@ -31,11 +32,11 @@ import DHT from 'hyperdht'
 import { idSeed, readClaims, signClaim, withClaim, writeClaims } from '../shared/idcard'
 import { type FileRef, validFiles } from '../shared/media'
 import { cleanLink } from '../shared/links'
-import { type Area, type Pull, type Report, PULL_EVERY, cleanPull, cleanReport, pullFor } from '../shared/reports'
+import { type Area, type Pull, type Report, PULL_EVERY, cleanReport, pullFor, pullsIn } from '../shared/reports'
 import { EDIT_AHEAD_MS, groupIdOf, heldFrom, mergeGroup, missing, ownerOf, signAdd, signEdit, signLeft, signMsg, profileVersion, signRemoved, validGroup, verifyAdd, verifyMsg, withLink } from '../shared/sync'
 import { openRequest, requestSeed, sealRequest } from '../shared/sealed'
 import { createImpairment, parseNetSim } from '../shared/netsim'
-import { createPresence } from './presence'
+import { PRESENCE_TTL, createPresence } from './presence'
 import { createServers } from './servers'
 import { type InviteCard, type InviteLink, type JoinReason, askOrder, checkJoinAsk, cleanInviteCard, inviteCard, isJoinAnswer, isJoinAsk, joinTopic, limiter, makeInvite, newInvite, parseInvite, serverTopic } from '../shared/invite'
 import { type ServerState, joinProof, verifyJoin } from '../shared/server'
@@ -43,6 +44,7 @@ import { createFiles } from './files'
 import { type Activity, type Game, cleanActivity, shareable } from '../shared/activity'
 import { type RelayLimits, RELAY_LIMITS, createNet } from './network'
 import { pickRelays } from '../shared/relaypick'
+import { type Hop, nearest, routeFor } from '../shared/relays'
 import { createRelay } from './relay'
 import { isNewer } from '../shared/updatesig'
 import { type Check, type StartupEvent, type StepId, startupEvent } from '../shared/startup'
@@ -69,6 +71,7 @@ type Saved = {
   // Per conversation and peer: the most of each author's messages that peer has ever confirmed holding. What they
   // confirmed is never sent to them again, so someone who steals a key cannot ask friends for the old history.
   confirmed?: Record<string, Record<Key, Have>>
+  lastGood?: Record<Key, Hop> // per person, the relay our last relayed link with them went through
 }
 
 type Opts = {
@@ -84,6 +87,8 @@ type Opts = {
   thumbnail?: (avatar: string) => Buffer | null // a JPEG of the picture under 1 KB for search (index.ts, Electron's nativeImage)
   strict?: boolean // testing: direct connections fail for real, as behind a strict router, so only a relay links
   relayLimits?: RelayLimits // testing: smaller caps on what we relay for contacts
+  noRelay?: boolean // testing: never relay for others (as a strict copy) while our own links still work
+  hostedRelays?: Key[] // the project's relays (shared/relays.ts parseRelays, from index.ts); none unless given
   inbox?: Key // the developers' inbox, where problem and crash reports go
   // Tester builds: answer a developer's log pull (index.ts files the diagnostics with report); id: the answer's report
   // id, the same for one pull and copy, so a resent answer is stored once
@@ -110,7 +115,7 @@ const CATCHUP_BACKLOG = 1 << 20 // no new round while this much is still unsent 
 const FLOOD = { burst: 400, perSecond: 20 }
 
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
-export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, pullLogs, diag = () => {}, version = '0.0.0', newerApp, links, strict, relayLimits, maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8, keepMsgs = 50000, startupMs = 20000, appMemory = () => process.memoryUsage().rss / 2 ** 20 }: Opts) {
+export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, pullLogs, diag = () => {}, version = '0.0.0', newerApp, links, strict, relayLimits, noRelay = false, hostedRelays = [], maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8, keepMsgs = 50000, startupMs = 20000, appMemory = () => process.memoryUsage().rss / 2 ** 20 }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
   const file = join(dir, 'state.json')
   mkdirSync(join(dir, 'msgs'), { recursive: true })
@@ -243,7 +248,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     settings: s.settings,
     reports: outgoing().length,
     versions: Object.fromEntries([...versions].filter(([k]) => known(k))),
-    relayed: net.keys().filter((k) => known(k) && relayedVia.has(k)),
+    relayed: net.keys().filter((k) => known(k) && relayedVia.get(k)?.kind === 'friend'),
+    hostedRelayed: net.keys().filter((k) => known(k) && relayedVia.get(k)?.kind === 'hosted'),
     activity: { ...Object.fromEntries([...theirs].filter(([k]) => known(k) && net.linked(k))), [me]: ourActivity() },
     chats: Object.fromEntries(Object.entries(s.lastAt ?? {}).filter(([c]) => members(c).length).map(([c, at]) => [c, { unread: s.unread?.[c] ?? 0, at }])),
     blocked: Object.keys(s.blocked ?? {}),
@@ -363,6 +369,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       app: version,
       call: CALL_VERSION,
       via: true,
+      nat: ourNat(),
       ...(relayKey && { relay: relayKey }),
     })
   const sendHave = (key: Key, conv: string, re?: boolean) =>
@@ -407,7 +414,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     sendActivity(key)
   }
   function reach(key: Key) {
-    if (!net.linked(key)) return need(key), net.dial(key)
+    if (!net.linked(key)) return need(key), direct(key)
     greet(key)
   }
   const spread = (g: Group) => g.members.forEach((m) => m !== me && reach(m))
@@ -464,6 +471,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       } else relayKeys.delete(key)
       if (w.via === true) reachable.add(key)
       else reachable.delete(key)
+      if (w.nat === 'strict' || w.nat === 'ok') natOf.set(key, w.nat)
       // Every link opening greets: only a changed profile is written and sent to the window
       const profile = cleanProfile(w)
       if (s.profileV?.[key] !== profileVersion(profile)) s.profileV = { ...s.profileV, [key]: profileVersion(profile) }
@@ -655,8 +663,10 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (typeof w.ok === 'boolean') return reaching.get(w.key)?.(key, w.ok)
       relayFor(key, w.key)
     } else if (w.t === 'relayed') {
-      if (!isKey(w.by) || !known(w.by)) return
-      relayedVia.set(key, { by: w.by, path: net.path(key), at: Date.now() })
+      // by: a friend's identity key (what older copies send and expect), or one of the hosted relays' keys
+      const kind = !isKey(w.by) ? null : hostedRelays.includes(w.by) ? 'hosted' : known(w.by) ? 'friend' : null
+      if (!kind) return
+      relayedVia.set(key, { by: w.by, kind, path: net.path(key), at: Date.now() })
       push()
     }
   }
@@ -668,18 +678,24 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const probes = new Map<number, () => void>()
   let probeId = 0
   const asked = new Map<Key, number>() // reach questions per contact this minute
+  let stopped = false // destroy ran: timers still pending must not dial on a closed DHT
   const dialingFor = new Set<Key>() // targets we are linking with because someone asked us to relay to them
   const dialedBack = new Map<Key, number>() // contacts whose dial reached us unlinked, when we last dialed back (incoming)
   const REACH_DIAL_MS = 10000 // a hole punch to a strict router can take 8 to 9 s
   const MAX_DIALS_FOR_OTHERS = 4
   // Someone asks us to relay to target. Yes only for two of our contacts, with the target on a version that accepts
-  // relayed links. Not linked with the target yet: we link first (0.1.3 reports: most refusals were only that), within
-  // 10 s and at most 4 such links at a time, since one asker must not make us dial a whole server.
+  // relayed links. Not linked with the target yet: a fresh presence note of theirs says they are online, and the target
+  // dials our relay itself, so we say yes at once; otherwise we link first (0.1.3 reports: most refusals were only
+  // that), within 10 s and at most 4 such links at a time, since one asker must not make us dial a whole server.
   async function relayFor(asker: Key, target: Key) {
     const n = (asked.get(asker) ?? 0) + 1
     asked.set(asker, n)
-    const why = !relayKey ? 'relaying off' : n > 10 ? 'too many asks' : target === asker || !known(target) ? 'not a contact' : ''
+    const why = !relayKey ? 'not relaying' : n > 10 ? 'too many asks' : target === asker || !known(target) ? 'not a contact' : ''
     const ready = () => net.linked(target) && (reachable.has(target) || relayKeys.has(target))
+    if (!why && !s.blocked?.[target] && !net.linked(target) && presence.online().includes(target)) {
+      tell(`now:${asker}:${target}`, `relaying for …${asker.slice(-6)} to …${target.slice(-6)}: online by their note, yes at once`)
+      return answer(asker, target, '')
+    }
     if (!why && !ready() && !s.blocked?.[target]) {
       if (!net.linked(target)) {
         if (!dialingFor.has(target) && dialingFor.size >= MAX_DIALS_FOR_OTHERS) return answer(asker, target, 'busy linking for others')
@@ -689,6 +705,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const t0 = Date.now()
       while (!ready() && Date.now() - t0 < REACH_DIAL_MS) await new Promise((r) => setTimeout(r, 200))
       dialingFor.delete(target)
+      if (stopped) return
     }
     answer(asker, target, why || (!net.linked(target) ? 'could not link with them' : !ready() ? 'their version cannot be reached through a friend' : ''))
   }
@@ -698,30 +715,41 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   }
   const probeReset = setInterval(() => (probed.clear(), asked.clear()), 60000)
 
-  // Relaying through a mutual contact, for peers no direct dial reaches (both behind strict routers). The relay
-  // pairs our encrypted stream with theirs and sees only ciphertext, plus who talks to whom, when and how much.
-  // Only tried on demand, after a direct dial failed, and closed again when idle.
+  // Relaying through a mutual contact or a hosted relay, for peers no direct dial reaches (both behind strict routers).
+  // The relay pairs our encrypted stream with theirs and sees only ciphertext, plus who talks to whom, when and how
+  // much. Tried after a direct dial failed (or instead of one, both strict) for peers we have something for and online
+  // friends (fallbackSweep); links through a friend that are not with a friend close again when idle.
   const IDLE = 10 * 60000
   // Relay attempts repeat every tick for as long as someone is unreachable; each line goes to the diagnostics once
   // until it changes, so the repeats do not push everything else out of a problem report.
   const told = new Map<string, string>()
   const tell = (id: string, text: string) => told.get(id) !== text && (told.set(id, text), diag('network', text))
   const RETRY = redialMs * 2 // first backoff after a failed attempt: 30 s in use, doubling up to 20 times that
-  let relayKey: Key | null = null // ours, while relaying is on
+  let relayKey: Key | null = null // ours, while relaying (always, unless we are strict)
   const relayKeys = new Map<Key, Key>() // contacts that relay, by the relay key their hello gave
   const reachable = new Set<Key>() // contacts whose version accepts links through a friend (hello.via), relaying or not
-  const relayedVia = new Map<Key, { by: Key; path: string; at: number }>() // relayed links and whose relay
+  // Relayed links: whose relay (a friend's identity key or a hosted relay's key) and which kind
+  const relayedVia = new Map<Key, { by: Key; kind: Hop['kind']; path: string; at: number }>()
   const demand = new Map<Key, number>() // peers we have something for, since when
   const used = new Map<Key, number>() // last message or call signal per peer, for the idle close
   const directFailed = new Set<Key>()
   const attempting = new Set<Key>()
-  const pendingVia = new Map<Key, Key>()
+  const viaWaits = new Map<string, (ok: boolean, why: string) => void>()
   const reaching = new Map<Key, (from: Key, ok: boolean) => void>()
   const fails = new Map<Key, number>()
   const retryAt = new Map<Key, number>()
   const avoid = new Map<string, number>() // relay+peer pairs that just failed, for 10 minutes
-  const lastGood = new Map<Key, Key>()
-  // Anyone can be reached through a relaying friend; only relaying for others is the setting. Only friends are sought
+  const natOf = new Map<Key, Nat>() // what each contact said of its router (hello, a signed note's nat, its card)
+  const ourNat = (): Nat => (net.strict() ? 'strict' : 'ok')
+  // Both behind strict routers: a direct dial cannot work and only costs the 8 to 9 s of a hole punch, so it is skipped
+  function skipDirect(k: Key) {
+    const skip = net.strict() && natOf.get(k) === 'strict'
+    if (skip) tell(`skip:${k}`, `…${k.slice(-6)} and we are both behind strict routers: no direct dial`)
+    return skip
+  }
+  const direct = (k: Key) => void (skipDirect(k) || net.dial(k))
+  let ranked: Key[] = [] // hosted relays that answered, nearest first (measureHosted)
+  // Anyone can be reached through a relay. Only friends are sought
   // out this way: in a big group, every unlinked member would cost relay asks each tick. Group members link through them.
   const need = (k: Key) => void (k !== me && s.friends[k] === 'friend' && !net.linked(k) && !demand.has(k) && demand.set(k, Date.now()))
 
@@ -738,31 +766,36 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   }
   // Doubling waits after each failure, capped at 20 times the first.
   const later = (n: number, base: number) => Date.now() + base * Math.min(2 ** (n - 1), 20)
-  function relayFailed(k: Key, by?: Key) {
+  function relayFailed(k: Key) {
     attempting.delete(k)
-    pendingVia.delete(k)
     const n = (fails.get(k) ?? 0) + 1
     fails.set(k, n)
     retryAt.set(k, later(n, RETRY))
-    if (by) avoid.set(by + k, Date.now() + 600000)
     push() // State.unreachable: the window stops saying "connecting"
   }
-  // Ask up to 6 relaying contacts, those most likely to reach them first (shared/relaypick.ts); dial through the first
-  // that says yes. A yes can take a few seconds, as the relay may link with them first (relayFor).
-  async function tryRelay(k: Key) {
-    attempting.add(k)
-    const now = Date.now()
-    const callOf = new Map(presence.calls())
-    const shares = (c: Key) => ours().some((g) => g.members.includes(c) && g.members.includes(k)) || servers.lists().some((l) => l.includes(c) && l.includes(k))
-    const cands = pickRelays(
-      net.keys().filter((c) => c !== k && relayKeys.has(c) && known(c) && (avoid.get(c + k) ?? 0) <= now),
-      k,
-      { last: lastGood.get(k), callOf: (c) => callOf.get(c), shares },
-    )
+  // A dial to k through a relay: resolves with whether it linked. A relay that failed is avoided for a while, unless the
+  // failure was the target not being found (offline), which is not the relay's fault.
+  function dialThrough(k: Key, hop: Hop, via: Key) {
+    const id = k + '@' + via
+    return new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => done(false, 'no answer'), 30000) // a dial the network already had in flight tells us nothing
+      const done = (ok: boolean, why: string) => {
+        clearTimeout(timer)
+        if (viaWaits.get(id) === done) viaWaits.delete(id)
+        if (!ok && why !== 'PEER_NOT_FOUND') avoid.set(hop.key + k, Date.now() + 600000)
+        resolve(ok)
+      }
+      viaWaits.set(id, done)
+      net.dial(k, via)
+    })
+  }
+  // Ask relaying contacts, those most likely to reach them first (shared/relaypick.ts); dial through the first that says
+  // yes. A yes can take a few seconds, as the relay may link with them first (relayFor).
+  async function viaFriend(k: Key, cands: Key[]) {
+    if (!cands.length) return false
     tell(`ask:${k}`, `asking ${cands.length} contact${cands.length === 1 ? '' : 's'} to relay for …${k.slice(-6)}`)
     const by = await new Promise<Key | null>((resolve) => {
       let left = cands.length
-      if (!left) return resolve(null)
       const timer = setTimeout(() => resolve(null), REACH_DIAL_MS + 2000) // room for the relay to link with them first
       reaching.set(k, (from, ok) => {
         if (!cands.includes(from)) return
@@ -770,31 +803,104 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       })
       for (const c of cands) net.send(c, { t: 'reach', key: k })
     })
-    reaching.delete(k)
-    if (net.linked(k)) return void attempting.delete(k)
-    // Nobody to ask, or nobody able yet (often a mutual friend still linking with them): backs off like a failed relayed
-    // dial, as asking every tick adds up over many unreachable people. A contact who starts relaying resets the waits.
-    if (!by || !relayKeys.has(by)) return tell(`none:${k}`, `no contact could relay for …${k.slice(-6)} yet`), relayFailed(k)
-    told.delete(`none:${k}`)
+    if (!by || !relayKeys.has(by) || net.linked(k) || stopped) return net.linked(k)
     diag('network', `linking with …${k.slice(-6)} through …${by.slice(-6)}`)
-    pendingVia.set(k, by)
-    net.dial(k, relayKeys.get(by))
+    return dialThrough(k, { key: by, kind: 'friend' }, relayKeys.get(by)!)
+  }
+  // Whose relay a relay key is: a hosted relay, or a relaying contact (the friend's identity key goes in `relayed`)
+  function hopOf(via: Key): Hop | null {
+    if (hostedRelays.includes(via)) return { key: via, kind: 'hosted' }
+    const friend = [...relayKeys].find(([, r]) => r === via)?.[0]
+    return friend ? { key: friend, kind: 'friend' } : null
+  }
+  function viaHosted(k: Key, h: Key) {
+    diag('network', `linking with …${k.slice(-6)} through hosted relay …${h.slice(-6)}`)
+    return dialThrough(k, { key: h, kind: 'hosted' }, h)
+  }
+  const firstOk = (ps: Promise<boolean>[]) =>
+    new Promise<boolean>((resolve) => {
+      let left = ps.length
+      if (!left) return resolve(false)
+      for (const p of ps) p.then((ok) => (ok ? resolve(true) : --left || resolve(false)))
+    })
+  // The order of routes (shared/relays.ts routeFor): the relay that worked last, alone; then friend relays and the
+  // nearest hosted relay at the same moment, the first link winning (network.ts adopt drops a later one of ours); then
+  // the other hosted relays one at a time.
+  async function tryRelay(k: Key) {
+    attempting.add(k)
+    const now = Date.now()
+    const ok = (by: Key) => (avoid.get(by + k) ?? 0) <= now
+    const callOf = new Map(presence.calls())
+    const shares = (c: Key) => ours().some((g) => g.members.includes(c) && g.members.includes(k)) || servers.lists().some((l) => l.includes(c) && l.includes(k))
+    const last = s.lastGood?.[k]
+    const friends = pickRelays(
+      net.keys().filter((c) => c !== k && relayKeys.has(c) && known(c) && ok(c)),
+      k,
+      { last: last?.kind === 'friend' ? last.key : undefined, callOf: (c) => callOf.get(c), shares },
+    )
+    const them = natOf.get(k)
+    const { first, race, next } = routeFor({ meStrict: net.strict(), themStrict: them ? them === 'strict' : null, lastGood: last, hosted: ranked.filter(ok), friends })
+    const steps = [
+      ...(first ? [() => (first.kind === 'friend' ? viaFriend(k, [first.key]) : viaHosted(k, first.key))] : []),
+      () => firstOk([viaFriend(k, race.friends), ...(race.hosted ? [viaHosted(k, race.hosted)] : [])]),
+      ...next.map((h) => () => viaHosted(k, h)),
+    ]
+    for (const step of steps) if (stopped || net.linked(k) || (await step())) break
+    if (net.linked(k) || stopped) return void attempting.delete(k)
+    // Nobody to ask, or nobody able yet (often a mutual friend still linking with them): backs off, as trying every
+    // tick adds up over many unreachable people. A contact who starts relaying, or a hosted relay answering, resets it.
+    tell(`none:${k}`, `no contact could relay for …${k.slice(-6)} yet`)
+    relayFailed(k)
   }
   function relayTick() {
     const now = Date.now()
     for (const [k, r] of relayedVia) {
       if (!net.linked(k)) relayedVia.delete(k)
       else if (net.path(k) !== r.path) relayedVia.delete(k), push() // hyperdht found a direct path after all
-      else if (now - Math.max(used.get(k) ?? 0, r.at) > IDLE) net.drop(k)
+      // A friend stays linked, as over a direct link: fallbackSweep would only link them again
+      else if (s.friends[k] !== 'friend' && now - Math.max(used.get(k) ?? 0, r.at) > IDLE) net.drop(k)
     }
+    if (!ranked.length && hostedRelays.length) measureHosted() // none answered yet: look again, at most every RETRY
     for (const [k, at] of demand) {
       if (net.linked(k) || now - at > IDLE) demand.delete(k)
-      else if (directFailed.has(k) && !attempting.has(k) && (retryAt.get(k) ?? 0) <= now) tryRelay(k)
+      else if ((directFailed.has(k) || skipDirect(k)) && !attempting.has(k) && (retryAt.get(k) ?? 0) <= now) tryRelay(k)
     }
   }
+  // Relaying is always on, except behind a strict router (nobody could reach our relay) or a test's noRelay; a stored
+  // Settings.relay is ignored
   async function applyRelay() {
-    relayKey = await net.setRelay(s.settings.relay !== false, known, relayLimits ?? RELAY_LIMITS)
+    relayKey = await net.setRelay(!noRelay && !net.strict(), known, relayLimits ?? RELAY_LIMITS)
     for (const k of net.keys()) if (wants(k)) hi(k)
+  }
+  // Hosted relays nearest first, by one timed handshake each (shared/relays.ts nearest): on joining the DHT, every 30
+  // minutes, when the network changes, and while none answers; at most once per RETRY.
+  let measuring = false
+  let measuredAt = 0
+  async function measureHosted() {
+    if (measuring || stopped || !joined || !hostedRelays.length || Date.now() - measuredAt < RETRY) return
+    measuring = true
+    measuredAt = Date.now()
+    const rtts = Object.fromEntries(await Promise.all(hostedRelays.map(async (h) => [h, await net.rtt(h)] as const)))
+    measuring = false
+    const before = ranked.length
+    ranked = nearest(rtts)
+    tell('hosted', `hosted relays answering: ${ranked.length} of ${hostedRelays.length}`)
+    if (!before && ranked.length) retryAt.clear() // a way through for everyone waiting: try again now
+  }
+  // Contacts seen online and still not linked (design/plan-public-relay.md, Addition): friends and call mates are sought
+  // through relays now, not only once something is pending (need), as is whoever we have something for (demand). Other
+  // group and server members only on demand, as with direct links. Backoff and attempting still apply (relayTick).
+  // Seen online: a presence note, a dial of ours that found them but failed, or theirs reaching our firewall.
+  const alive = new Map<Key, number>()
+  const seenAlive = (k: Key) => (alive.size > 1000 && alive.clear(), alive.set(k, Date.now()), fallbackSweep())
+  function fallbackSweep() {
+    if (starting || stopped) return
+    const now = Date.now()
+    const mates = new Set(callMates())
+    const fresh = [...alive].filter(([, at]) => now - at < PRESENCE_TTL).map(([k]) => k)
+    for (const k of new Set([...presence.online(), ...fresh]))
+      if (!net.linked(k) && known(k) && !s.blocked?.[k] && (s.friends[k] === 'friend' || mates.has(k))) demand.set(k, demand.get(k) ?? now)
+    relayTick()
   }
 
   // Joining a server by invite link (shared/invite.ts). The joiner is a stranger to every member, so they announce
@@ -927,20 +1033,21 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         dialedBack.set(key, Date.now())
         if (dialedBack.size > 1000) dialedBack.clear()
         diag('network', `…${key.slice(-6)} dialed us while unlinked: dialing back in ${REACH_DIAL_MS / 1000} s`)
-        setTimeout(() => !net.linked(key) && net.dial(key), REACH_DIAL_MS)
+        seenAlive(key)
+        setTimeout(() => !stopped && !net.linked(key) && direct(key), REACH_DIAL_MS)
       },
-      open(key, replaced) {
-        const by = pendingVia.get(key)
-        if (by) {
-          pendingVia.delete(key)
-          attempting.delete(key)
+      open(key, replaced, via) {
+        const hop = via ? hopOf(via) : null
+        if (hop) {
           fails.delete(key)
-          lastGood.set(key, by)
-          relayedVia.set(key, { by, path: net.path(key), at: Date.now() })
-          net.send(key, { t: 'relayed', by })
-        } else directFailed.delete(key)
+          s.lastGood = { ...s.lastGood, [key]: hop }
+          saveSoon()
+          relayedVia.set(key, { by: hop.key, kind: hop.kind, path: net.path(key), at: Date.now() })
+          net.send(key, { t: 'relayed', by: hop.key })
+        } else if (!via) directFailed.delete(key)
         retries.delete(key)
-        diag('network', `linked with …${key.slice(-6)}${replaced ? ' again, replacing its old link' : ''}${by ? ' through a friend' : ''}${known(key) ? '' : key === inbox ? ' (developers inbox)' : ' (not a friend)'}`)
+        if (via) viaWaits.get(key + '@' + via)?.(true, '')
+        diag('network', `linked with …${key.slice(-6)}${replaced ? ' again, replacing its old link' : ''}${hop ? (hop.kind === 'hosted' ? ' through a hosted relay' : ' through a friend') : ''}${known(key) ? '' : key === inbox ? ' (developers inbox)' : ' (not a friend)'}`)
         if (key === inbox) deliver()
         if (wants(key)) greet(key)
         for (const j of pending.values()) if (j.to.includes(key)) askJoin(j, key)
@@ -973,17 +1080,36 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       },
       failed(key, via, why) {
         // Why a link never formed was missing from reports; once per peer and reason, so a redial loop does not flood them
-        if (joined && why) tell(`fail:${key}:${via ?? ''}:${why}`, `${via ? `relayed link with …${key.slice(-6)} through …${pendingVia.get(key)?.slice(-6) ?? '?'}` : `direct link with …${key.slice(-6)}`} failed: ${why}`)
-        if (!via) directFailed.add(key), joined && backOff(key) // dials before we are on the DHT say nothing about them
-        else if (pendingVia.has(key)) relayFailed(key, pendingVia.get(key))
+        if (joined && why) tell(`fail:${key}:${via ?? ''}:${why}`, `${via ? `relayed link with …${key.slice(-6)} through …${(hopOf(via)?.key ?? via).slice(-6)}` : `direct link with …${key.slice(-6)}`} failed: ${why}`)
+        if (via) return viaWaits.get(key + '@' + via)?.(false, why ?? '')
+        directFailed.add(key)
+        if (!joined) return // dials before we are on the DHT say nothing about them
+        backOff(key)
+        if (why && why !== 'PEER_NOT_FOUND' && known(key)) seenAlive(key) // found, so online, but not reached
       },
       msg: onMsg,
       packet: (key, b) => known(key) && relay.deliver(key, b),
+      // Our router turned strict or stopped being so: relay or stop, and tell everyone. Any change: measure the
+      // hosted relays again and look for whoever we lost.
+      network() {
+        if (stopped) return
+        if (net.strict() !== wasStrict) {
+          wasStrict = net.strict()
+          diag('network', wasStrict ? 'behind a strict router: not relaying for others' : 'not behind a strict router: relaying for contacts')
+          applyRelay().catch(() => {})
+          presence.announce()
+          publishCard()
+        }
+        measuredAt = 0
+        measureHosted()
+        fallbackSweep()
+      },
     },
     dht,
     links,
     strict,
   )
+  let wasStrict = net.strict()
   // Group members we are not linked with, online by their presence notes (presence.ts)
   const presence = createPresence({
     keyPair,
@@ -1006,6 +1132,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       return 'stored'
     },
     changed: () => (pushSoon(), preDialSoon()),
+    nat: ourNat,
+    natHeard: (k, nat) => void natOf.set(k, nat),
   })
   // Servers' op logs and their sync (servers.ts). A channel we can newly read is asked for from members we are linked with.
   const servers = createServers({
@@ -1029,7 +1157,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     me,
     send: net.send,
     linked: net.linked,
-    relayed: (k) => relayedVia.has(k),
+    relayed: (k) => relayedVia.get(k)?.kind === 'friend', // a hosted relay carries files too
     backlog: net.backlog,
     members,
     emit: (file) => emit({ type: 'file', file }),
@@ -1044,7 +1172,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   let joined = false
   // Dials that failed before we were on the DHT said nothing (failed), so dial again at once, not at the next tick,
   // and name unlinked members now rather than in 30 s
-  net.listening.then(() => ((joined = true), redial(), nameUnlinked(Infinity), checkPull()), () => {})
+  net.listening.then(() => ((joined = true), redial(), nameUnlinked(Infinity), checkPull(), measureHosted()), () => {})
+  const measurer = setInterval(() => ((measuredAt = 0), measureHosted()), 30 * 60000)
   // While relaying, the first few retries skip the wait (a relay needs its contacts linked as soon as they can be, or
   // pairs wait minutes); after that it backs off too, or with relaying on by default nobody offline ever would.
   const due = (k: Key) => (retries.get(k)?.next ?? 0) <= Date.now() || (!!relayKey && (retries.get(k)?.n ?? 0) < 3)
@@ -1103,6 +1232,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     // Memory only, one entry per peer ever linked: kept while they are linked or still a contact
     for (const m of [used, signalled]) for (const k of m.keys()) if (!net.linked(k)) m.delete(k)
     for (const k of versions.keys()) if (!net.linked(k) && !known(k)) versions.delete(k)
+    for (const k of natOf.keys()) if (!known(k)) natOf.delete(k)
+    for (const k of Object.keys(s.lastGood ?? {})) if (!known(k)) delete s.lastGood![k]
     for (const [id, b] of flood) if (Date.now() - b.at > 60000) flood.delete(id) // long since refilled
   }
   // Members in a call we could join (by their presence notes), up to 10 per call: dialled ahead so that joining needs
@@ -1117,7 +1248,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     return [...per.values()].flat()
   }
   function preDial() {
-    for (const k of callMates()) if (!net.linked(k) && !s.blocked?.[k]) demand.set(k, demand.get(k) ?? Date.now()), due(k) && net.dial(k)
+    for (const k of callMates()) if (!net.linked(k) && !s.blocked?.[k]) demand.set(k, demand.get(k) ?? Date.now()), due(k) && direct(k)
+    fallbackSweep() // after presence notes: someone new online and not linked
   }
   let preDialing: ReturnType<typeof setTimeout> | null = null // after notes arrive, at most once a second
   const preDialSoon = () => void (preDialing ??= setTimeout(() => ((preDialing = null), preDial()), 1000))
@@ -1132,7 +1264,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     const keys = new Set([...picked, ...demand.keys()])
     for (const [k, st] of Object.entries(s.friends)) if (st !== 'incoming') keys.add(k)
     keys.delete(me)
-    for (const k of keys) if (due(k)) net.dial(k)
+    for (const k of keys) if (due(k)) direct(k)
   }
   redial()
   const timer = setInterval(redial, redialMs)
@@ -1141,12 +1273,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   // Tester builds: a developer's log pull, read from the inbox's own signed record, answered once each
   async function checkPull() {
     if (!inbox || !pullLogs || !joined || s.settings.shareLogs === false) return
-    const p = cleanPull(await net.fetch(inbox, true))
-    if (!pullFor(p, { tail: me.slice(-6), handle: s.profile.handle }, s.pulled ?? [])) return
-    s.pulled = [...(s.pulled ?? []).slice(-19), p.id]
-    changed()
-    diag('app', `the developers asked for logs (pull ${p.id.slice(0, 6)}); sending them`)
-    pullLogs(p, createHash('sha256').update(p.id + me).digest('hex').slice(0, 16))
+    // Every pull of the day in the record, oldest first, so one made right after another does not hide it
+    for (const p of pullsIn(await net.fetch(inbox, true)).reverse()) {
+      if (!pullFor(p, { tail: me.slice(-6), handle: s.profile.handle }, s.pulled ?? [])) continue
+      s.pulled = [...(s.pulled ?? []).slice(-19), p.id]
+      changed()
+      diag('app', `the developers asked for logs (pull ${p.id.slice(0, 6)}); sending them`)
+      pullLogs(p, createHash('sha256').update(p.id + me).digest('hex').slice(0, 16))
+    }
   }
   const pulls = setInterval(checkPull, PULL_EVERY)
 
@@ -1198,7 +1332,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     const { name, handle } = s.profile
     const thumb = s.profile.avatar ? thumbnail?.(s.profile.avatar) : null
     if (thumb) net.putShared(thumbSeed, thumb, published)
-    const card = (about: string) => Buffer.from(JSON.stringify({ name, handle, about, ...(thumb && { thumb: DHT.keyPair(thumbSeed).publicKey.toString('hex') }) }))
+    const card = (about: string) => Buffer.from(JSON.stringify({ name, handle, about, nat: ourNat(), ...(thumb && { thumb: DHT.keyPair(thumbSeed).publicKey.toString('hex') }) }))
     let about = s.profile.about
     while (card(about).length > 1000) about = about.slice(0, -10) // records hold 1000 bytes; friends get it whole
     net.publish(card(about), published)
@@ -1207,6 +1341,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     const value = await withTimeout(net.fetch(key), null)
     try {
       const card = JSON.parse(String(value))
+      // Up to 6 hours old: a hello or a signed note says it fresher
+      if ((card.nat === 'strict' || card.nat === 'ok') && !natOf.has(key)) natOf.set(key, card.nat)
       const thumb = isKey(card.thumb) ? await withTimeout(net.fetch(card.thumb), null) : null
       const avatar = thumb && thumb[0] === 0xff && thumb[1] === 0xd8 ? 'data:image/jpeg;base64,' + thumb.toString('base64') : ''
       const p = cleanProfile({ ...card, avatar })
@@ -1390,6 +1526,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     starting = false
     catching.clear()
     clearInterval(startupTimer)
+    fallbackSweep()
   }
   const startupTimer = setInterval(startupTick, 200)
   return {
@@ -1780,12 +1917,10 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     },
     async setSettings(p: Partial<Settings>) {
       for (const k of KEY_SETTINGS) if (p[k] !== undefined && !isKeyList(p[k])) throw new Error('Those settings are not valid')
-      const was = s.settings.relay !== false
       Object.assign(s.settings, p)
       changed()
       if (p.activity) shareActivity()
       if (p.cacheMB !== undefined) files.trim()
-      if (was !== (s.settings.relay !== false)) await applyRelay(), push()
       if (p.suggest) announce().catch(() => {}) // turned off, the announcements lapse within about 20 minutes
     },
     // Queues a problem or crash report for the developers. It is checked and scrubbed here (shared/reports.ts) as
@@ -1804,6 +1939,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     // Writes pending changes now, for when the app is ended without destroy (Windows shutting down).
     flush: () => saving && (clearTimeout(saving), (saving = null), save()),
     async destroy() {
+      stopped = true
       if (saving) clearTimeout(saving), save()
       if (sharing) clearTimeout(sharing)
       if (pushing) clearTimeout(pushing)
@@ -1812,6 +1948,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       clearInterval(pulls)
       clearInterval(announcer)
       clearInterval(presenceTimer)
+      clearInterval(measurer)
       if (preDialing) clearTimeout(preDialing)
       for (const t of floodRetry.values()) clearTimeout(t)
       presence.destroy()

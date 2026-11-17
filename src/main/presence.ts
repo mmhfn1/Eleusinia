@@ -3,8 +3,8 @@
 // (shared/sync.ts Presence) every minute and whenever they join or leave a group call, and members pass each note on.
 // A note is kept 3 minutes. It also carries the author's call, which the page hears as their join or leave, and
 // their profile version, so a new name or picture is fetched from their card.
-import { type Event, type Key, type Profile, type Wire } from '../shared/protocol'
-import { type Presence, profileVersion, signPresence, verifyPresence } from '../shared/sync'
+import { type Event, type Key, type Nat, type Profile, type Wire } from '../shared/protocol'
+import { type Presence, noteNat, profileVersion, signPresence, verifyPresence, withNat } from '../shared/sync'
 
 export const PRESENCE_TTL = 3 * 60000
 
@@ -23,9 +23,11 @@ type Opts = {
   // DHT), 'skip' when it no longer matters (no card, linked, not a contact)
   card: (k: Key, v: string) => Promise<'stored' | 'same' | 'skip'>
   changed: () => void
+  nat: () => Nat // ours, told in our notes
+  natHeard: (k: Key, nat: Nat) => void // theirs, from a note whose nsig checks out
 }
 
-export function createPresence({ keyPair, net, emit, few, tell, ownProfile, around, inCall, accepts, version, card, changed }: Opts) {
+export function createPresence({ keyPair, net, emit, few, tell, ownProfile, around, inCall, accepts, version, card, changed, nat, natHeard }: Opts) {
   const me = keyPair.publicKey.toString('hex')
   const present = new Map<Key, Presence>()
   // When our own link with someone closes, they count as gone at once: their last note stays only so that copies of
@@ -39,8 +41,17 @@ export function createPresence({ keyPair, net, emit, few, tell, ownProfile, arou
     const to = net.keys().filter((k) => k !== from && k !== p.key && near.has(k))
     for (const k of from ? few(to, 3) : to) net.send(k, { t: 'presence', p })
   }
-  const note = () => signPresence(Date.now(), ourCall, profileVersion(ownProfile()), keyPair)
-  const announce = () => pass(note(), null)
+  const note = () => withNat(signPresence(Date.now(), ourCall, profileVersion(ownProfile()), keyPair), nat(), keyPair.secretKey)
+  // Our notes go out at least 300 ms apart: receivers drop a call change under 250 ms after the previous note, so a
+  // join right after another note (a network change, a group reaching us) would otherwise be lost everywhere
+  let sentAt = 0
+  let held: ReturnType<typeof setTimeout> | null = null
+  const announce = () => {
+    const wait = sentAt + 300 - Date.now()
+    if (wait > 0) return void (held ??= setTimeout(() => ((held = null), announce()), wait))
+    sentAt = Date.now()
+    pass(note(), null)
+  }
   // A group reached us or gained someone: a note now, so its new members see us online without waiting up to a minute.
   // At most one in 2 s, as a burst of changes would otherwise send a burst of notes.
   let soon: ReturnType<typeof setTimeout> | null = null
@@ -95,6 +106,8 @@ export function createPresence({ keyPair, net, emit, few, tell, ownProfile, arou
       const before = was && !gone.has(p.key) && was.at > Date.now() - PRESENCE_TTL ? was.call : null
       present.set(p.key, p)
       gone.delete(p.key)
+      const n = noteNat(p)
+      if (n) natHeard(p.key, n)
       pass(p, from)
       // A newer note's call always counts, linked or not: a linked person's join signal may never come (their link to
       // a restarted copy is replaced, not closed, so they never see it go offline), and a copy passed on by someone
@@ -131,6 +144,7 @@ export function createPresence({ keyPair, net, emit, few, tell, ownProfile, arou
     destroy() {
       refreshed.forEach((r) => clearTimeout(r.later))
       if (soon) clearTimeout(soon)
+      if (held) clearTimeout(held)
     },
   }
 }

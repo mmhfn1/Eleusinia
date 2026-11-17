@@ -5,7 +5,7 @@ import DHT from 'hyperdht'
 import createTestnet from 'hyperdht/testnet'
 import { afterAll, beforeAll, expect, test, vi } from 'vitest'
 import { createInbox, issueOf, pullIssueOf, reportLimit } from '../src/main/inbox'
-import { PULL_TTL, cleanPull, pullFor, pullTargets } from '../src/shared/reports'
+import { PULL_TTL, cleanPull, pullFor, pullRecord, pullTargets, pullsIn } from '../src/shared/reports'
 import { createNode } from '../src/main/node'
 
 let testnet: any
@@ -177,4 +177,32 @@ test('a pull issue from many testers with long logs stays within GitHub size lim
   expect(issue.body).toContain('### Tester …T19000')
   expect(issue.body).toContain('event 399') // each tester's newest events are kept
   expect(issue.labels).toEqual(['logs'])
+})
+
+test('the pull record carries the day earlier pulls behind the newest, which is all an older copy reads', () => {
+  const now = 10 * PULL_TTL
+  const old = { id: 'a'.repeat(16), at: now - 60000, to: 'all' as const, reports: ['x'], issue: 3 } // the inbox's own bookkeeping
+  const newer = { id: 'b'.repeat(16), at: now - 1000, to: ['whalesharkh#9807'] }
+  const stale = { id: 'c'.repeat(16), at: now - PULL_TTL - 1, to: 'all' as const }
+  const b = pullRecord([old, stale, newer], now)
+  expect(cleanPull(b)).toEqual(newer) // 0.1.4 and 0.1.5 read the top only
+  expect(pullsIn(b)).toEqual([newer, { id: old.id, at: old.at, to: 'all' }]) // the earlier one is still there; the stale one is not
+  expect(String(b)).not.toContain('reports') // nothing of the inbox's bookkeeping goes out
+  const many = Array.from({ length: 40 }, (_, i) => ({ id: i.toString(16).padStart(16, '0'), at: now - i * 1000, to: ['someone_long_name#1234', 'abcdef'] }))
+  const full = pullRecord(many, now)
+  expect(full.length).toBeLessThanOrEqual(1000) // a DHT record holds 1000 bytes: the oldest are left out
+  expect(pullsIn(full)[0].id).toBe(many[0].id)
+})
+
+test('two pulls made one after the other are both answered', async () => {
+  const inbox = createInbox({ dir: tmp(), keyPair: DHT.keyPair(), dht: { bootstrap: testnet.bootstrap } })
+  const first = await inbox.pull('all')
+  const second = await inbox.pull('all') // the same second: the record's number still rises
+  expect(first && second).toBeTruthy()
+  const answered: string[] = []
+  const tester = createNode({ dir: tmp(), keyPair: DHT.keyPair(), emit: () => {}, dht: { bootstrap: testnet.bootstrap }, redialMs: 300, inbox: inbox.key, pullLogs: (p) => void answered.push(p.id) })
+  await until(() => answered.length === 2)
+  expect(answered).toEqual([first!.id, second!.id]) // oldest first
+  await tester.destroy()
+  await inbox.destroy()
 })

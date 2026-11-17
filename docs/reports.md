@@ -66,6 +66,9 @@ characters of a key, as Settings shows). Run it on the inbox machine after `npm 
 inbox runs, the command is handed to it, otherwise it starts the inbox itself.
 
 The inbox publishes the request as a record signed by its own key, which the DHT checks, so nobody else can make one.
+The record holds the day's pulls, newest first (as many as fit in 1000 bytes), so a pull made right after another
+does not hide it; copies from 0.1.4 and 0.1.5 read only the newest. The window running `npm run logs` says what it
+asked for, and the inbox window says `pull asked for …`, then `published` or why not.
 Tester copies read it every 2 minutes and once on start, and each answers a request once, within a day, with what a
 crash report carries: the app and system details and the last 15 minutes of scrubbed diagnostics. The answers arrive
 as `[logs]` reports in the reports folder. With GitHub filing set up, each pull becomes **one** issue, labelled

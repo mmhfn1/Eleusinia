@@ -11,7 +11,7 @@ import { ActivityLine, ProfileActivity } from './Activity'
 import { MemberRow, Server, Speaking, channelOf, newId } from './Server'
 import { ProfileBanner, ProfilePop } from './Profile'
 import { type Modal, NOBODY, type People, type Run, api, card, groupName, labelOf } from './common'
-import { REACH_WORDS, callWords, reachOf } from '../shared/reach'
+import { REACH_WORDS, callWords, reachOf, routeWords } from '../shared/reach'
 import { ContextMenu, type Item, Rail, useMenus } from './Rail'
 import { Splash, StillConnecting } from './Splash'
 
@@ -823,7 +823,7 @@ function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
         <h1>{p.name}</h1>
         {k !== st.me && (
           <p className="row-sub">
-            {st.relayed.includes(k) ? 'Online through a friend: voice and text only' : REACH_WORDS[reachOf(st, k)]}
+            {st.hostedRelayed.includes(k) ? 'Online through an Eleusinia relay' : st.relayed.includes(k) ? 'Online through a friend: voice and text only' : REACH_WORDS[reachOf(st, k)]}
             {st.versions[k] && ` · Eleusinia ${st.versions[k].app}`}
           </p>
         )}
@@ -1249,7 +1249,7 @@ function Conversation({ st, conv, people, run, go, show: showModal }: ConvProps)
                           </span>
                           <span className="row-sub">
                             {callWords(st, k, p.pc.connectionState)}
-                            {p.relayed && p.pc.connectionState === 'connected' && ' · relayed through the chat link'}
+                            {p.relayed && p.pc.connectionState === 'connected' && ` · relayed ${routeWords(st, k) ?? 'through the chat link'}`}
                           </span>
                           <PersonVolume st={st} k={k} name={name(k)} />
                         </span>
