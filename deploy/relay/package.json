@@ -1,0 +1,12 @@
+{
+  "name": "eleusinia-relay",
+  "private": true,
+  "description": "Eleusinia's hosted relay: relay.cjs is built by npm run relay:build in the app repository",
+  "scripts": {
+    "start": "node relay.cjs"
+  },
+  "dependencies": {
+    "blind-relay": "1.6.1",
+    "hyperdht": "6.34.1"
+  }
+}

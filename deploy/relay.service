@@ -1,0 +1,22 @@
+# The hosted relay (docs/oracle-setup.md, part C): copy to /etc/systemd/system/eleusinia-relay.service
+[Unit]
+Description=Eleusinia hosted relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=eleusinia
+Group=eleusinia
+WorkingDirectory=/var/lib/eleusinia/relay-app
+ExecStart=/usr/bin/node relay.cjs --data /var/lib/eleusinia/relay
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/eleusinia/relay
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
