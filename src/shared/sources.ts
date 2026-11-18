@@ -18,11 +18,11 @@ export const HIDDEN_WINDOWS = [
 ]
 const hidden = new Set(HIDDEN_WINDOWS.map((n) => n.toLowerCase()))
 
-// Whether to offer a source. A source with no thumbnail at all cannot be captured; black thumbnails are kept, since
-// minimised windows show black too (and the NVIDIA overlay, black but not empty, is caught by name instead).
+// Whether to offer a source. A screen with no thumbnail cannot be captured. A window without one is still offered:
+// games drawn with DirectX, minimised ones included, often give no thumbnail yet capture fine, and hiding them was why
+// testers could not find their game (the NVIDIA overlay, black but not empty, is caught by name instead).
 export function shareable(s: { id: string; name: string; emptyThumb: boolean }) {
-  if (s.emptyThumb) return false
-  if (kindOf(s.id) === 'screen') return true
+  if (kindOf(s.id) === 'screen') return !s.emptyThumb
   const name = s.name.trim()
   return name !== '' && !hidden.has(name.toLowerCase())
 }

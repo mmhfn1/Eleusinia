@@ -804,11 +804,16 @@ try {
   // As on Discord: a stream is offered, not pushed. Until B joins, A sends B none of it
   await until('B is offered the stream where it will play, with Join stream', () => b.ev(`document.querySelector('.stage .screen.invite.big button')?.textContent === 'Join stream'`), 20)
   await until('the Join stream tile shows a still of the shared window', () => b.ev(`document.querySelector('.stage .screen.invite.big img.invite-preview')?.src.startsWith('data:image/jpeg;base64,')`), 15)
-  const unjoined = await b.ev(received('screen'))
+  // Chromium's bandwidth probes are resends with no payload, landing on whichever video slot it picks: only packets
+  // carrying media count
+  const media = async () => (await b.ev(received('screen'))) - (await b.ev(received('screen', 'retransmittedPacketsReceived')))
+  const unjoined = await media()
   await sleep(3000)
-  const unjoinedAfter = await b.ev(received('screen'))
+  const unjoinedAfter = await media()
   const unjoinedBytes = await b.ev(received('screen', 'bytesReceived'))
-  if (unjoinedAfter > unjoined + 20) throw new Error(`A sent its screen to B before B joined: ${unjoined} -> ${unjoinedAfter} packets, ${unjoinedBytes} bytes in all`)
+  if (unjoinedAfter > unjoined + 20) throw new Error(`A sent its screen to B before B joined: ${unjoined} -> ${unjoinedAfter} media packets, ${unjoinedBytes} bytes in all`)
+  // Computer sound is on by default (Windows): it too waits for B to join
+  if ((await b.ev(received('sound'))) > 0) throw new Error('A sent its computer sound to B before B joined')
   console.log('ok   nothing of the stream reaches B before B joins')
   await b.ev(joinStream)
   await until("B shows the shared window large, at 720p", () => b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight === 720`), 30)
@@ -927,7 +932,8 @@ try {
     await a.ev(press('Share screen'))
     await a.ev(`document.querySelector('dialog[open] #share-tab-window').click()`)
     await pickOwn(a, ownTitles[1])
-    await a.ev(`document.querySelector('dialog[open] .sound-row input').click()`)
+    // On by default; checked here so the run fails if that ever changes
+    if (!(await a.ev(`document.querySelector('dialog[open] .sound-row input').checked`))) throw new Error('computer sound is not on by default')
     await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Share').click()`)
     const how = await until('A shares with computer sound, or says why it cannot', () =>
       a.ev(`(() => { const badge = document.querySelector('.stage .sharing-badge')?.textContent ?? ''; const note = [...document.querySelectorAll('.call-notice')].some((n) => n.textContent.includes('sound is not being shared')); return badge.includes('with sound') ? 'sound' : note ? 'refused' : false })()`), 20)

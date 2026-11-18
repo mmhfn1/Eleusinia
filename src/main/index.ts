@@ -599,12 +599,16 @@ function startApp() {
   // Screen sharing: the page lists screens and windows (never this app's own), the user picks one in our own
   // picker, and the next getDisplayMedia call captures exactly that source. Anything else is refused.
   let chosen: string | null = null
+  let pickerSeen = ''
   ipcMain.handle('screens', async () => {
     const own = win.getMediaSourceId()
     const displays = screen.getAllDisplays()
-    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 180 } })
-    return sources
-      .filter((s) => s.id !== own && shareable({ id: s.id, name: s.name, emptyThumb: s.thumbnail.isEmpty() }))
+    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 180 }, fetchWindowIcons: true })
+    const offered = sources.filter((s) => s.id !== own && shareable({ id: s.id, name: s.name, emptyThumb: s.thumbnail.isEmpty() }))
+    // Counts only (window titles can be private), and only when they change, as the picker asks again every few seconds
+    const seen = `share picker: ${offered.filter((s) => kindOf(s.id) === 'screen').length} screens, ${offered.filter((s) => kindOf(s.id) === 'window').length} windows (${offered.filter((s) => s.thumbnail.isEmpty()).length} without a preview), ${sources.length - offered.length} left out`
+    if (seen !== pickerSeen) diagnostics.add('call', (pickerSeen = seen))
+    return offered
       .map((s) => {
         // A window can be moved to any display, so it may go as high as the display it is listed on or the primary one.
         const d = displays.find((x) => String(x.id) === s.display_id) ?? screen.getPrimaryDisplay()
@@ -612,7 +616,9 @@ function startApp() {
           id: s.id,
           kind: kindOf(s.id),
           name: s.name,
-          thumb: s.thumbnail.toDataURL(),
+          // Games drawn with DirectX often give no preview yet capture fine: their icon stands in
+          thumb: s.thumbnail.isEmpty() ? '' : s.thumbnail.toDataURL(),
+          icon: s.appIcon && !s.appIcon.isEmpty() ? s.appIcon.toDataURL() : '',
           width: Math.round(d.size.width * d.scaleFactor),
           height: Math.round(d.size.height * d.scaleFactor),
           fps: Math.round(d.displayFrequency) || 60,

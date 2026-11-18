@@ -143,12 +143,19 @@ export function ShareDialog({ close }: { close: () => void }) {
   const [picked, setPicked] = useState<call.ScreenSource | null>(current?.src ?? null)
   const src = picked?.kind === tab ? picked : null // a selection counts only while its tab is showing
   const [q, setQ] = useState<Quality | null>(current?.q ?? null)
-  const [sound, setSound] = useState(current?.sound ?? false)
+  // Computer sound is on unless turned off: Eleusinia's own audio is always left out of it (call.ts capture)
+  const [sound, setSound] = useState(current?.sound ?? CAN_SHARE_SOUND)
+  const [admin, setAdmin] = useState(true)
   const [verdict, setVerdict] = useState<Verdict | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  // Asked again every 3 s while open, so a game started or brought back meanwhile shows up
   useEffect(() => {
-    window.api.screens().then(setSources, () => !current && setSources([]))
+    const look = () => window.api.screens().then(setSources, () => !current && setSources((s) => s ?? []))
+    look()
+    const timer = setInterval(look, 3000)
+    if (CAN_SHARE_SOUND) window.api.isAdmin().then(setAdmin, () => {})
+    return () => clearInterval(timer)
   }, [])
   const viewers = [...call.peers.values()].filter((p) => p.pc.connectionState === 'connected').length
   const kbps = src && q ? streamKbps(src, q) + (sound ? SOUND_KBPS : 0) : 0
@@ -222,9 +229,15 @@ export function ShareDialog({ close }: { close: () => void }) {
       <div className="sources" id="share-sources" role="tabpanel" aria-labelledby={`share-tab-${tab}`}>
         {sources === null && <p className="quiet">Looking for screens and windows…</p>}
         {listed?.length === 0 && <p className="quiet">{SOURCE_TABS.find((t) => t.kind === tab)!.empty}</p>}
+        {tab === 'window' && !admin && (
+          <p className="hint sources-hint">
+            Game missing? A game run as administrator shows here only when Eleusinia runs as administrator too (Settings, Hotkeys). One in exclusive full
+            screen may only share as part of your screen; borderless windowed works best.
+          </p>
+        )}
         {listed?.map((s) => (
           <button key={s.id} type="button" className={`source ${src?.id === s.id ? 'chosen' : ''}`} aria-pressed={src?.id === s.id} onClick={() => pick(s)}>
-            <img src={s.thumb} alt="" />
+            {s.thumb || s.icon ? <img src={s.thumb || s.icon} alt="" className={s.thumb ? undefined : 'no-preview'} /> : <i className="no-preview" />}
             <span>
               {current?.src.id === s.id && <b>Now sharing: </b>}
               {s.name}

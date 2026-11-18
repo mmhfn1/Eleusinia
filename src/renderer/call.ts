@@ -28,7 +28,7 @@ import {
 } from '../shared/video'
 
 // A screen or window offered by the system for sharing, with what it can deliver.
-export type ScreenSource = { id: string; kind: SourceKind; name: string; thumb: string; width: number; height: number; fps: number }
+export type ScreenSource = { id: string; kind: SourceKind; name: string; thumb: string; icon?: string; width: number; height: number; fps: number } // thumb '' when the system gave no preview
 // A camera, with what it can deliver.
 export type CameraSource = Source & { id: string; name: string }
 export type Slot = 'screen' | 'camera'
