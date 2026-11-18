@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import DHT from 'hyperdht'
 import createTestnet from 'hyperdht/testnet'
 import { afterAll, beforeAll, expect, test, vi } from 'vitest'
-import { createInbox, issueOf, pullIssueOf, reportLimit } from '../src/main/inbox'
+import { askPull, createInbox, issueOf, pullIssueOf, reportLimit, runInbox, takeAsks } from '../src/main/inbox'
 import { PULL_TTL, cleanPull, pullFor, pullRecord, pullTargets, pullsIn } from '../src/shared/reports'
 import { createNode } from '../src/main/node'
 
@@ -204,5 +204,26 @@ test('two pulls made one after the other are both answered', async () => {
   await until(() => answered.length === 2)
   expect(answered).toEqual([first!.id, second!.id]) // oldest first
   await tester.destroy()
+  await inbox.destroy()
+})
+
+test('a server inbox takes pulls asked from the command line, oldest first, each once', async () => {
+  const dir = tmp()
+  const lines: string[] = []
+  const { inbox, pull } = runInbox(dir, { bootstrap: testnet.bootstrap }, (l) => lines.push(l))
+  expect(existsSync(join(dir, 'inbox-identity.json'))).toBe(true)
+  expect(lines).toContain(`Eleusinia inbox ${inbox.key}`)
+  writeFileSync(join(dir, 'asks-are-only-in-the-folder'), 'all') // not an ask
+  askPull(dir, 'ab12cd')
+  askPull(dir, 'nope nope')
+  mkdirSync(join(dir, 'asks'), { recursive: true })
+  writeFileSync(join(dir, 'asks', '9999999999999-half.tmp'), 'all') // still being written: left alone
+  const asked = takeAsks(dir)
+  expect(asked).toEqual(['ab12cd', 'nope nope'])
+  expect(takeAsks(dir)).toEqual([])
+  asked.forEach(pull)
+  await until(() => lines.some((l) => /^pull [0-9a-f]{6} published for ab12cd/.test(l)))
+  expect(lines.some((l) => l.startsWith('pull: "nope nope" is not a friend ID'))).toBe(true)
+  expect(JSON.parse(readFileSync(join(dir, 'pulls.json'), 'utf8'))).toHaveLength(1)
   await inbox.destroy()
 })

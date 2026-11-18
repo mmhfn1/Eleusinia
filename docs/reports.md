@@ -34,6 +34,8 @@ npm run inbox
 
 It prints its key and where it saves reports (`%APPDATA%\Eleusinia Inbox\reports`: a `.json` and a readable
 `.txt` per report). Its identity is `inbox-identity.json` in that folder: **back it up and keep it private.**
+On a server, the same inbox runs without Electron as a service, pulls included: see `docs/oracle-setup.md`, part E.
+Only one inbox may run at a time.
 Whoever holds it receives every report, and losing it means the next build needs a new `INBOX_KEY`.
 
 Only one machine can run the inbox at a time.
@@ -63,7 +65,8 @@ npm run logs
 
 asks every tester; `npm run logs -- kestrel#2741 a1b2c3` asks only those friend IDs or Unique Keys (the last 6
 characters of a key, as Settings shows). Run it on the inbox machine after `npm run inbox` has built the app; while the
-inbox runs, the command is handed to it, otherwise it starts the inbox itself.
+inbox runs, the command is handed to it, otherwise it starts the inbox itself. With the inbox on the server, run
+`node inbox.cjs --data /var/lib/eleusinia/inbox --pull all` there instead (part E of `docs/oracle-setup.md`).
 
 The inbox publishes the request as a record signed by its own key, which the DHT checks, so nobody else can make one.
 The record holds the day's pulls, newest first (as many as fit in 1000 bytes), so a pull made right after another

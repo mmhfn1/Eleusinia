@@ -13,7 +13,7 @@ import { type FileRef, inlineKind, mimeOf, safeName } from '../shared/media'
 import { parseRelays } from '../shared/relays'
 import { isWebUrl } from '../shared/links'
 import { isKey } from '../shared/protocol'
-import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics, pullTargets } from '../shared/reports'
+import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared/reports'
 import { kindOf, shareable } from '../shared/sources'
 import { limiter } from '../shared/invite'
 import { isNewer, verifyUpdate } from '../shared/updatesig'
@@ -24,7 +24,7 @@ import type { Dota } from '../shared/dota'
 import { programs, watchActivity } from './activity'
 import { type BungieConfig, createBungie } from './bungie'
 import { GSI_GAMES, type GsiGame, createGsi } from './gsi'
-import { createInbox } from './inbox'
+import { runInbox } from './inbox'
 import { previewLink } from './links'
 import { type Staged, canInstall, fetchUpdate, install, tidy } from './selfupdate'
 import { createNode } from './node'
@@ -70,32 +70,12 @@ function privateDir(dir: string) {
   return dir
 }
 
-// The inbox's identity is kept in plain text on purpose: it only exists on the developers' machine, and whoever
-// holds it can receive every report. The GitHub token comes from the environment or github.json beside it.
+// The developers' inbox (inbox.ts runInbox; on a server, src/inbox/main.ts runs the same without Electron)
 function startInbox() {
-  const dir = privateDir(app.getPath('userData'))
-  const idFile = join(dir, 'inbox-identity.json')
-  if (!existsSync(idFile)) writeFileSync(idFile, JSON.stringify({ sk: DHT.keyPair().secretKey.toString('hex') }))
-  const secretKey = Buffer.from(JSON.parse(readFileSync(idFile, 'utf8')).sk, 'hex')
-  const config = join(dir, 'github.json')
-  const saved = existsSync(config) ? JSON.parse(readFileSync(config, 'utf8')) : {}
-  const token = process.env.GITHUB_TOKEN || saved.token
-  const repo = process.env.ELEUSINIA_REPORTS_REPO || saved.repo
   const log = (line: string) => console.log(`${new Date().toISOString().slice(0, 19).replace('T', ' ')}  ${line}`)
-  const inbox = createInbox({ dir, keyPair: { publicKey: secretKey.subarray(32), secretKey }, dht: testDht(), github: token && repo ? { token, repo } : undefined, log })
-  log(`Eleusinia inbox ${inbox.key}`)
-  log(`saving reports in ${join(dir, 'reports')}`)
-  log(token && repo ? `filing issues in ${repo}` : `not filing issues: put {"token": "...", "repo": "owner/name"} in ${config}`)
-  if (inbox.key !== INBOX_KEY && !process.env.ELEUSINIA_BOOTSTRAP) log('warning: the app sends reports to a different inbox (INBOX_KEY in src/shared/reports.ts)')
+  const { inbox, pull } = runInbox(app.getPath('userData'), testDht(), log)
   process.on('SIGINT', () => inbox.destroy().then(() => app.exit(0)))
   // A log pull (pullArg): here at start, or handed over by a second copy while this one runs
-  const pull = (arg: unknown) => {
-    if (typeof arg !== 'string') return
-    log(`pull asked for ${arg}`)
-    const to = pullTargets(arg)
-    if (!to) return log(`pull: "${arg}" is not a friend ID (name#1234) or Unique Key (6 characters); say all for everyone`)
-    inbox.pull(to).then((p) => log(p ? `pull ${p.id.slice(0, 6)} published for ${to === 'all' ? 'every tester' : to.join(', ')}; logs arrive as [logs] reports in the folder above` : 'pull: the DHT did not take it; try again in a minute'))
-  }
   pull(pullArg)
   app.on('second-instance', (_e, _argv, _cwd, data) => pull((data as { pull?: unknown } | undefined)?.pull))
 }

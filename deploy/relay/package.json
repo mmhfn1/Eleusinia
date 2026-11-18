@@ -1,7 +1,7 @@
 {
   "name": "eleusinia-relay",
   "private": true,
-  "description": "Eleusinia's hosted relay: relay.cjs is built by npm run relay:build in the app repository",
+  "description": "Eleusinia on a server: the hosted relay (relay.cjs, npm run relay:build) and the developers' inbox (inbox.cjs, npm run inbox:build), built in the app repository",
   "scripts": {
     "start": "node relay.cjs"
   },

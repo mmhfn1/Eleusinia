@@ -99,7 +99,7 @@ The relay is one bundled file, `relay.cjs`, plus its two dependencies (`hyperdht
 
    ```bash
    sudo install -m 600 -o ubuntu /var/lib/eleusinia/relay/relay-key ~/relay-key   # on the server
-   scp ubuntu@<ip>:relay-key %USERPROFILE%\.eleusinia\relay-key                    # on your PC
+   scp ubuntu@<ip>:relay-key $env:USERPROFILE\.eleusinia\relay-key                 # on your PC (PowerShell)
    rm ~/relay-key                                                                   # on the server
    ```
 
@@ -132,17 +132,61 @@ Trying it on your PC first: `npm run relay -- --print-key` (the key goes in `./r
    on a local test DHT.)
 3. Then merge to `main` as usual; testers get it as an update.
 
-## E. Moving the inbox (optional, but it is why strict testers' reports never arrive)
+## E. Moving the inbox (it is why strict testers' reports and log pulls never arrived)
 
-The inbox is an Electron app today (`npm run inbox` starts the app with `--inbox`). On a server with no screen it needs
-either `xvfb-run` or a plain Node entry like the relay's; the second is cleaner and is a small change, not done yet.
+`src/inbox/main.ts` is the same inbox as `npm run inbox` (`runInbox` in `src/main/inbox.ts`) without Electron. It
+receives reports, publishes log pulls and files the GitHub issues from the server. It runs from the relay's app folder
+and uses its two dependencies.
 
-1. On your PC, stop the inbox. Copy `%APPDATA%\Eleusinia Inbox\inbox-identity.json` and `github.json` to
-   `/var/lib/eleusinia/inbox/` on the server, owner `eleusinia`, mode 600. The identity is what testers send to
-   (`INBOX_KEY`), so the app needs no change.
-2. Start it there as its own systemd service. **Never run two inboxes at once**: both would file every report.
-3. Log pulls (`npm run logs`) are then run on the server over SSH, or from your PC with the same identity copied back,
-   only while the server's inbox is stopped.
+1. On your PC, build it and copy it over with its service file:
+
+   ```bash
+   npm run inbox:build
+   scp deploy/relay/inbox.cjs deploy/inbox.service ubuntu@<ip>:
+   ```
+
+2. On your PC, **stop the inbox** (Ctrl+C in its window). Then copy its identity and GitHub settings to the server.
+   The identity is what testers send to (`INBOX_KEY`), so the app needs no change:
+
+   ```bash
+   scp "$env:APPDATA\Eleusinia Inbox\inbox-identity.json" "$env:APPDATA\Eleusinia Inbox\github.json" ubuntu@<ip>:   # PowerShell
+   ```
+
+   The GitHub token in `github.json` needs only Issues read and write on the reports repository.
+3. On the server, put everything in place, owner `eleusinia`, mode 600, and start it:
+
+   ```bash
+   sudo mv ~/inbox.cjs /var/lib/eleusinia/relay-app/ && sudo chown eleusinia:eleusinia /var/lib/eleusinia/relay-app/inbox.cjs
+   sudo install -d -m 700 -o eleusinia -g eleusinia /var/lib/eleusinia/inbox
+   sudo install -m 600 -o eleusinia -g eleusinia ~/inbox-identity.json ~/github.json /var/lib/eleusinia/inbox/
+   rm ~/inbox-identity.json ~/github.json
+   sudo mv ~/inbox.service /etc/systemd/system/eleusinia-inbox.service
+   sudo systemctl daemon-reload && sudo systemctl enable --now eleusinia-inbox
+   journalctl -u eleusinia-inbox -n 5
+   ```
+
+   It must print `Eleusinia inbox <key>` with the same key as `INBOX_KEY` in `src/shared/reports.ts`, with no warning
+   after it, and `filing issues in <owner/name>`.
+4. **Never run two inboxes at once**: both would file every report. From now on, do not start `npm run inbox` on your
+   PC. To move it back, stop the service (`sudo systemctl disable --now eleusinia-inbox`) first.
+5. Log pulls, from the server (they come out within 2 seconds, then the logs arrive over the next minutes; the issue
+   is filed 10 minutes after the pull):
+
+   ```bash
+   cd /var/lib/eleusinia/relay-app
+   sudo -u eleusinia node inbox.cjs --data /var/lib/eleusinia/inbox --pull all
+   sudo -u eleusinia node inbox.cjs --data /var/lib/eleusinia/inbox --pull kestrel#2741 a1b2c3
+   journalctl -u eleusinia-inbox -f
+   ```
+
+   Or in one line from your PC: `ssh ubuntu@<ip> "cd /var/lib/eleusinia/relay-app && sudo -u eleusinia node inbox.cjs --data /var/lib/eleusinia/inbox --pull all"`.
+   The reports are kept in `/var/lib/eleusinia/inbox/reports/`.
+6. Updating it later: `npm run inbox:build` and the `scp` of `inbox.cjs` (step 1), then on the server
+   `sudo mv ~/inbox.cjs /var/lib/eleusinia/relay-app/ && sudo systemctl restart eleusinia-inbox`. Reports sent while
+   it restarts wait on the testers' computers and come in a minute later.
+
+Trying it on your PC first: `npm run inbox:build`, then `node deploy/relay/inbox.cjs --data ./inbox-data` (a new
+identity there, ignored by git, so it never takes the real inbox's reports).
 
 ## Costs and limits to keep in mind
 

@@ -16,6 +16,7 @@
     "logs": "electron . --inbox --pull",
     "relay:build": "esbuild src/relay/main.ts --bundle --platform=node --target=node22 --format=cjs --external:hyperdht --external:blind-relay --outfile=deploy/relay/relay.cjs",
     "relay": "npm run relay:build && node deploy/relay/relay.cjs",
+    "inbox:build": "esbuild src/inbox/main.ts --bundle --platform=node --target=node22 --format=cjs --external:hyperdht --external:blind-relay --outfile=deploy/relay/inbox.cjs",
     "installer-art": "electron build/installer-art.cjs",
     "dist": "electron-vite build && electron-builder --win --publish never"
   },

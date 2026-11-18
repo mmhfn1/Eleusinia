@@ -1,0 +1,23 @@
+# The developers' inbox (docs/oracle-setup.md, part E): copy to /etc/systemd/system/eleusinia-inbox.service.
+# Never run a second inbox with the same identity anywhere else: both would file every report.
+[Unit]
+Description=Eleusinia developers' inbox
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=eleusinia
+Group=eleusinia
+WorkingDirectory=/var/lib/eleusinia/relay-app
+ExecStart=/usr/bin/node inbox.cjs --data /var/lib/eleusinia/inbox
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/eleusinia/inbox
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
