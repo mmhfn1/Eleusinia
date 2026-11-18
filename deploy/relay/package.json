@@ -1,12 +1,13 @@
 {
   "name": "eleusinia-relay",
   "private": true,
-  "description": "Eleusinia on a server: the hosted relay (relay.cjs, npm run relay:build) and the developers' inbox (inbox.cjs, npm run inbox:build), built in the app repository",
+  "description": "Eleusinia on a server: the hosted relay (relay.cjs, npm run relay:build) and the developers' inbox (inbox.cjs, npm run inbox:build) and the server forwarder (forwarder.cjs, npm run forwarder:build), built in the app repository",
   "scripts": {
     "start": "node relay.cjs"
   },
   "dependencies": {
     "blind-relay": "1.6.1",
-    "hyperdht": "6.34.1"
+    "hyperdht": "6.34.1",
+    "werift": "0.27.0"
   }
 }
