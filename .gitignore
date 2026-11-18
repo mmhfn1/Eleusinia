@@ -19,3 +19,4 @@ deploy/relay/*.cjs
 deploy/relay/node_modules/
 relay-data/
 inbox-data/
+forwarder-data/
