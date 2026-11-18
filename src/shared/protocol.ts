@@ -94,6 +94,12 @@ export type State = {
   chats: Record<string, { unread: number; at: number }> // conversations with at least one message, server channels included: unread messages and missed calls, last activity
   blocked: Key[]
   servers: Record<string, ServerView> // servers we are in, for the window (main/servers.ts)
+  // Peer forwarding (shared/fwdproto.ts): online people whose copy can forward (hello.fwd), those behind strict
+  // routers (hello.nat), and the streams we forward now, by streamer, with how many people each goes to
+  canForward: Key[]
+  strict: Key[]
+  forwarding: Record<Key, number>
+  fwdServers: Record<Key, number | null> // the project's server forwarders by handshake time in ms, null: no answer
 }
 export type ServerPerm = string // a name from PERMS in src/shared/server.ts
 // What the window gets of a server we are in. roles: index = rank, @everyone (id = server id) at 0. channels: those
@@ -133,7 +139,8 @@ export type Wire =
   // relay: the sender's relay key, only while it relays for its contacts (never while strict); older versions never send it.
   // nat: whether the sender is behind a strict router (dht.randomized); older versions never send it.
   // via: the sender accepts links through a friend's relay (from 0.0.45; older versions only while relaying themselves).
-  | ({ t: 'hello'; friend?: boolean; app?: string; call?: number; relay?: Key; via?: boolean; nat?: Nat } & Profile)
+  // fwd: 1 when the sender can forward a call mate's stream (main/forwarder.ts); older versions never send it.
+  | ({ t: 'hello'; friend?: boolean; app?: string; call?: number; relay?: Key; via?: boolean; nat?: Nat; fwd?: 1 } & Profile)
   | { t: 'reach'; key: Key; ok?: boolean } // asking a contact whether it can relay us to `key`, and its answer
   | { t: 'relayed'; by: Key } // sent by whoever dialed: this link goes through `by`'s relay (a friend's identity key, or a hosted relay's key)
   | { t: 'group'; g: Group }
@@ -162,12 +169,14 @@ export type Wire =
   // An invite card for a link: asked of a linked contact named in it, with the join proof, so only link holders learn it
   | { t: 'inviteInfo'; server: string; invite: string; key: Key; proof: string }
   | { t: 'inviteCard'; server: string; card: unknown }
+  | ({ t: 'fwd' } & Record<string, unknown>) // peer forwarding signalling, checked by cleanFwd (shared/fwdproto.ts)
 
 export type Event =
   | { type: 'state'; state: State }
   | { type: 'msg'; m: Msg }
   | { type: 'acked'; conv: string; seq: number }
   | { type: 'call'; from: Key; conv: string; data: any }
+  | { type: 'fwd'; from: Key; data: import('./fwdproto').Fwd } // forwarding signals for the window: streamer or viewer
   | { type: 'hotkey'; action: Action; down: boolean } // from the main process's system-wide key hook
   | { type: 'update'; version: string } // a newer version has downloaded and installs on restart
   | { type: 'window'; maximized: boolean } // the window was maximized or restored, for the title bar's button
