@@ -8,7 +8,7 @@ import * as call from './call'
 import { Avatar, Dialog, Icon } from './ui'
 import type { SourceKind } from '../shared/sources'
 import { api } from './common'
-import { callWords } from '../shared/reach'
+import { callWords, throughWords } from '../shared/reach'
 import './pip.css'
 
 const GRADE_WORDS = { good: 'good and stable', fair: 'degraded', poor: 'poor' }
@@ -635,10 +635,11 @@ export function Stage({ st, name, settings }: { st: State; name: (k: Key) => str
   if (!items.length && !mine && !cam) return null
 
   const info = (i: Item) => (i.slot === 'screen' ? call.shares : call.cameras).get(i.k)!
-  const media = (i: Item) => call.peers.get(i.k)?.[i.slot]
+  const media = (i: Item) => (i.slot === 'screen' ? call.screenOf(i.k) : call.peers.get(i.k)?.camera)
+  const through = (k: Key) => ((f) => (f && f !== st.me ? ` · ${throughWords(call.isServer(f) ? undefined : name(f))}` : ''))(call.throughOf(k)) // a forwarder's own window says nothing
   const label = (i: Item) =>
     i.slot === 'screen'
-      ? `${name(i.k)}: ${info(i).name}${info(i).sound ? ' · with sound' : ''} · ${heightLabel(info(i).height)}, ${info(i).fps} fps`
+      ? `${name(i.k)}: ${info(i).name}${info(i).sound ? ' · with sound' : ''} · ${heightLabel(info(i).height)}, ${info(i).fps} fps${through(i.k)}`
       : name(i.k)
   const tile = (i: Item) =>
     live(i) ? (
@@ -841,7 +842,7 @@ export function Pip({ st, name, back }: { st: State; name: (k: Key) => string; b
       role="region"
       aria-label={`${name(k)}'s stream, picture in picture`}
     >
-      <Screen stream={call.peers.get(k)?.screen} label={`${name(k)}${where ? ` · ${where}` : ''}`}>
+      <Screen stream={call.screenOf(k)} label={`${name(k)}${where ? ` · ${where}` : ''}${call.throughOf(k) && call.throughOf(k) !== st.me ? ` · ${throughWords(call.isServer(call.throughOf(k)!) ? undefined : name(call.throughOf(k)!))}` : ''}`}>
         <span className="pip-grip" aria-hidden="true">
           <Icon name="grip" size={14} />
         </span>

@@ -38,6 +38,9 @@ import { openRequest, requestSeed, sealRequest } from '../shared/sealed'
 import { createImpairment, parseNetSim } from '../shared/netsim'
 import { PRESENCE_TTL, createPresence } from './presence'
 import { createServers } from './servers'
+import type { Forwarder } from './forwarder'
+import { type Fwd, cleanFwd, forForwarder } from '../shared/fwdproto'
+import type { Layer } from '../shared/vp8layers'
 import { type InviteCard, type InviteLink, type JoinReason, askOrder, checkJoinAsk, cleanInviteCard, inviteCard, isJoinAnswer, isJoinAsk, joinTopic, limiter, makeInvite, newInvite, parseInvite, serverTopic } from '../shared/invite'
 import { type ServerState, joinProof, verifyJoin } from '../shared/server'
 import { createFiles } from './files'
@@ -89,6 +92,7 @@ type Opts = {
   relayLimits?: RelayLimits // testing: smaller caps on what we relay for contacts
   noRelay?: boolean // testing: never relay for others (as a strict copy) while our own links still work
   hostedRelays?: Key[] // the project's relays (shared/relays.ts parseRelays, from index.ts); none unless given
+  hostedForwarders?: Key[] // the project's server forwarders (parseForwarders), used last when sharing; none unless given
   inbox?: Key // the developers' inbox, where problem and crash reports go
   // Tester builds: answer a developer's log pull (index.ts files the diagnostics with report); id: the answer's report
   // id, the same for one pull and copy, so a resent answer is stored once
@@ -103,6 +107,8 @@ type Opts = {
   keepMsgs?: number
   startupMs?: number // how long the startup checks wait before giving up (testing: shorter)
   appMemory?: () => number // the app's memory in MB, logged once startup has tidied up (index.ts: every process)
+  forwarder?: Forwarder // passes call mates' streams on (main/forwarder.ts, from index.ts); without one we never forward
+  testUploadKbps?: number // testing, local test DHT only (index.ts): what probe reports, so a smoke run forces forwarding
 }
 
 // Conversations whose messages stay in memory; the open one and a couple being synced.
@@ -115,7 +121,7 @@ const CATCHUP_BACKLOG = 1 << 20 // no new round while this much is still unsent 
 const FLOOD = { burst: 400, perSecond: 20 }
 
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
-export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, pullLogs, diag = () => {}, version = '0.0.0', newerApp, links, strict, relayLimits, noRelay = false, hostedRelays = [], maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8, keepMsgs = 50000, startupMs = 20000, appMemory = () => process.memoryUsage().rss / 2 ** 20 }: Opts) {
+export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, pullLogs, diag = () => {}, version = '0.0.0', newerApp, links, strict, relayLimits, noRelay = false, hostedRelays = [], hostedForwarders = [], maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8, keepMsgs = 50000, startupMs = 20000, appMemory = () => process.memoryUsage().rss / 2 ** 20, forwarder, testUploadKbps }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
   const file = join(dir, 'state.json')
   mkdirSync(join(dir, 'msgs'), { recursive: true })
@@ -257,6 +263,10 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     // Both a direct dial and a round of relay asks failed, and nothing is being tried right now; tried again later
     unreachable: [...fails.keys()].filter((k) => directFailed.has(k) && !attempting.has(k) && !net.linked(k) && known(k)),
     servers: servers.summary(),
+    canForward: net.keys().filter((k) => known(k) && canFwd.has(k)),
+    strict: [...natOf].filter(([k, n]) => n === 'strict' && known(k)).map(([k]) => k),
+    fwdServers: fwdRtts,
+    forwarding: Object.fromEntries([...carried].map(([k, c]) => [k, [...c.viewers.keys()].filter((v) => v !== me).length])),
   })
   const push = () => emit({ type: 'state', state: state() })
   // For frequent small changes (receipts in a busy group): written within 2 s rather than once per message.
@@ -371,6 +381,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       via: true,
       nat: ourNat(),
       ...(relayKey && { relay: relayKey }),
+      ...(forwarder && { fwd: 1 as const }),
     })
   const sendHave = (key: Key, conv: string, re?: boolean) =>
     net.send(key, { t: 'have', conv, have: haveOf(conv), re, ...(shallow(conv) && { tail: true }) })
@@ -472,6 +483,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (w.via === true) reachable.add(key)
       else reachable.delete(key)
       if (w.nat === 'strict' || w.nat === 'ok') natOf.set(key, w.nat)
+      if (w.fwd === 1) canFwd.add(key)
+      else canFwd.delete(key)
       // Every link opening greets: only a changed profile is written and sent to the window
       const profile = cleanProfile(w)
       if (s.profileV?.[key] !== profileVersion(profile)) s.profileV = { ...s.profileV, [key]: profileVersion(profile) }
@@ -502,6 +515,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     // Join asks come from strangers (let in by lookJoiner) and answers from members we asked, so before the gate
     if (w.t === 'joinAsk') return answerJoin(key, w)
     if (w.t === 'joinOk' || w.t === 'joinNo') return joinAnswered(key, w)
+    if (w.t === 'fwd') return onFwd(key, w) // also from a server forwarder, a stranger: onFwd checks who
     if (!known(key)) return
     if (w.t === 'poke') return takePoke(key, w)
     if (w.t === 'inviteInfo') return answerCard(key, w)
@@ -625,7 +639,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       for (const k of few(on)) net.send(k, { t: 'msg', m })
     } else if (w.t === 'call') {
       used.set(key, Date.now())
-      if (callers(w.conv).includes(key)) emit({ type: 'call', from: key, conv: w.conv, data: w.data })
+      if (!callers(w.conv).includes(key)) return
+      callIn(key, w.conv, (w.data as { k?: unknown })?.k === 'leave')
+      emit({ type: 'call', from: key, conv: w.conv, data: w.data })
     } else if (w.t === 'gone') {
       delete s.friends[key]
       s.declined = { ...s.declined, [key]: Date.now() } // their old request, still announced for a while, must not come back
@@ -740,6 +756,140 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const retryAt = new Map<Key, number>()
   const avoid = new Map<string, number>() // relay+peer pairs that just failed, for 10 minutes
   const natOf = new Map<Key, Nat>() // what each contact said of its router (hello, a signed note's nat, its card)
+
+  // Peer forwarding (design/plan-stream-forwarding.md, phase 4). The link itself proves who sends (the handshake), so
+  // a forwarder takes a stream only from someone in our call and serves only the viewers that streamer listed who are
+  // in it too. callOf: the call each contact is in, from their call signals; ours under our own key.
+  const callOf = new Map<Key, string>()
+  const canFwd = new Set<Key>() // contacts whose copy forwards (hello.fwd)
+  type Viewing = { layer: Layer; accept?: (sdp: string) => Promise<unknown>; addIce?: (c: unknown) => Promise<unknown> }
+  // Streams we forward, by streamer. feed: a second level's upstream forwarder, which offers us the stream as to a
+  // viewer (take); otherwise the streamer itself offers it (open)
+  type Carried = { addIce: (c: unknown) => Promise<unknown>; viewers: Map<Key, Viewing>; feed?: Key; take?: (sdp: string) => Promise<void> }
+  const carried = new Map<Key, Carried>()
+  const early = new Map<Key, { from: Key; sdp: string; at: number }>() // an upstream offer that beat the streamer's feed
+  const mate = (k: Key) => !!callOf.get(me) && callOf.get(k) === callOf.get(me)
+  function callIn(k: Key, conv: string, leaving: boolean) {
+    if (leaving && callOf.get(k) !== conv) return // a leave of some other call
+    if (leaving) callOf.delete(k)
+    else callOf.set(k, conv)
+    if (leaving && k === me) for (const s of [...carried.keys()]) unserve(s)
+    else if (leaving) unserve(k)
+  }
+  // A server forwarder (phase 5) is no call mate: it serves anyone, but only the viewers the streamer lists. We dial it
+  // when our tree uses it or we are seated on it; what we send before the link opens waits for it.
+  const fwdServer = (k: Key) => hostedForwarders.includes(k)
+  const toServer = new Map<Key, Wire[]>()
+  let fwdRtts: Record<Key, number | null> = {} // server forwarders' handshake times (measureHosted)
+  // Our own forwarder and window talk without the network: the forwarder's own window watches through it
+  function sendFwd(to: Key, m: Fwd) {
+    if (fwdServer(to) && !net.linked(to)) {
+      const q = toServer.get(to) ?? []
+      if (q.length < 200) toServer.set(to, [...q, { t: 'fwd', ...m }])
+      return net.dial(to)
+    }
+    if (to !== me) return void net.send(to, { t: 'fwd', ...m })
+    if (forForwarder(m)) serve(me, m).catch((e) => diag('call', `forwarding failed: ${e?.message ?? e}`))
+    else emit({ type: 'fwd', from: me, data: m })
+  }
+  function onFwd(from: Key, w: unknown) {
+    const m = cleanFwd(w)
+    if (m && fwdServer(from)) return void (!forForwarder(m) && emit({ type: 'fwd', from, data: m })) // it only answers and offers
+    if (!m || !mate(from)) return
+    if (fedBy(from, m)) return
+    if (!forForwarder(m)) return emit({ type: 'fwd', from, data: m })
+    serve(from, m).catch((e) => diag('call', `forwarding for …${from.slice(-6)} failed: ${e?.message ?? e}`))
+  }
+  async function serve(from: Key, m: Fwd) {
+    if (!forwarder) return
+    if (m.k === 'open') {
+      unserve(from)
+      const st = forwarder.addStream(from, { onIce: (c) => sendFwd(from, { k: 'ice', to: 'src', c }) })
+      const answered = st.answer(m.sdp)
+      carried.set(from, { addIce: (c) => answered.then(() => st.addIce(c)), viewers: new Map() })
+      sendFwd(from, { k: 'answer', sdp: await answered })
+      return serveViewers(from, m.viewers)
+    }
+    if (m.k === 'feed') return feedFrom(from, m.via, m.viewers)
+    if (m.k === 'viewers') return serveViewers(from, m.viewers)
+    if (m.k === 'close') return unserve(from)
+    if (m.k === 'ice' && !m.s) return void (await carried.get(from)?.addIce(m.c))
+    const v = m.k === 'ice' || m.k === 'accept' ? carried.get(m.s!)?.viewers.get(from) : undefined
+    if (m.k === 'ice') await v?.addIce?.(m.c)
+    else if (m.k === 'accept') await v?.accept?.(m.sdp)
+  }
+  // A second level: the streamer names the forwarder that feeds us, and only that forwarder's offer of this stream is
+  // taken as our feed (ciphertext as ever: we never hold the stream's key unless we also watch)
+  async function feedFrom(s: Key, via: Key, viewers: Record<Key, Layer>) {
+    if (!forwarder || via === s || via === me || !mate(via)) return
+    unserve(s)
+    const st = forwarder.addStream(s, { onIce: (c) => sendFwd(via, { k: 'ice', to: 'fwd', s, c }) })
+    let answered: Promise<string> | undefined
+    const c: Carried = {
+      feed: via,
+      viewers: new Map(),
+      addIce: (ice) => (answered ?? Promise.reject(new Error('no offer yet'))).then(() => st.addIce(ice)),
+      take: async (sdp) => {
+        // A new offer means the upstream forwarder started over: so do we, keeping our viewers
+        if (answered) return void (await feedFrom(s, via, Object.fromEntries([...c.viewers].map(([v, x]) => [v, x.layer]))), await carried.get(s)?.take?.(sdp))
+        answered = st.answer(sdp)
+        sendFwd(via, { k: 'accept', s, sdp: await answered })
+      },
+    }
+    carried.set(s, c)
+    const e = early.get(s)
+    early.delete(s)
+    if (e?.from === via && Date.now() - e.at < 10000) c.take!(e.sdp).catch((err) => diag('call', `forwarding feed failed: ${err?.message ?? err}`))
+    return serveViewers(s, viewers)
+  }
+  // Whether a message from a mate is our feed's offer or candidate (handled here, never the window's)
+  function fedBy(from: Key, m: Fwd) {
+    if (!forwarder || (m.k !== 'offer' && !(m.k === 'ice' && m.to === 'view'))) return false
+    const c = carried.get(m.s!)
+    if (c?.feed !== from) {
+      if (m.k === 'offer' && !c) early.set(m.s, { from, sdp: m.sdp, at: Date.now() }) // the window gets it too, and ignores it
+      return false
+    }
+    const done = m.k === 'offer' ? c.take!(m.sdp) : c.addIce(m.c)
+    done.catch((e) => diag('call', `forwarding feed from …${from.slice(-6)} failed: ${(e as Error)?.message ?? e}`))
+    return true
+  }
+  async function serveViewers(s: Key, list: Record<Key, Layer>) {
+    const c = carried.get(s)
+    if (!c || !forwarder) return
+    for (const v of [...c.viewers.keys()]) if (!(v in list) || !mate(v)) c.viewers.delete(v), forwarder.removeViewer(s, v)
+    const was = c.viewers.size
+    for (const [v, layer] of Object.entries(list)) {
+      const had = c.viewers.get(v)
+      if (v === s || !mate(v) || had?.layer === layer) continue
+      if (had) {
+        had.layer = layer
+        if (had.accept) forwarder.setLayer(s, v, layer) // else set once its peer exists
+        continue
+      }
+      const entry: Viewing = { layer }
+      c.viewers.set(v, entry)
+      try {
+        const h = await forwarder.addViewer(s, v, { onIce: (ice) => sendFwd(v, { k: 'ice', to: 'view', s, c: ice }) })
+        if (carried.get(s) !== c || c.viewers.get(v) !== entry) continue // closed or replaced meanwhile
+        Object.assign(entry, { accept: h.accept, addIce: h.addIce })
+        forwarder.setLayer(s, v, entry.layer)
+        sendFwd(v, { k: 'offer', s, sdp: h.offer })
+      } catch (e) {
+        c.viewers.delete(v)
+        diag('call', `could not forward …${s.slice(-6)}'s stream to …${v.slice(-6)}: ${(e as Error)?.message ?? e}`)
+      }
+    }
+    if (c.viewers.size !== was) diag('call', `forwarding …${s.slice(-6)}'s stream to ${c.viewers.size}`)
+    pushSoon()
+  }
+  // Stops what involves k: a stream from them, or them as a viewer of any stream we forward
+  function unserve(k: Key) {
+    if (!forwarder) return
+    if (carried.delete(k)) forwarder.removeStream(k), diag('call', `stopped forwarding …${k.slice(-6)}'s stream`), pushSoon()
+    early.delete(k)
+    for (const [s, c] of carried) if (c.viewers.delete(k)) forwarder.removeViewer(s, k), pushSoon()
+  }
   const ourNat = (): Nat => (net.strict() ? 'strict' : 'ok')
   // Both behind strict routers: a direct dial cannot work and only costs the 8 to 9 s of a hole punch, so it is skipped
   function skipDirect(k: Key) {
@@ -877,11 +1027,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   let measuring = false
   let measuredAt = 0
   async function measureHosted() {
-    if (measuring || stopped || !joined || !hostedRelays.length || Date.now() - measuredAt < RETRY) return
+    if (measuring || stopped || !joined || !(hostedRelays.length || hostedForwarders.length) || Date.now() - measuredAt < RETRY) return
     measuring = true
     measuredAt = Date.now()
-    const rtts = Object.fromEntries(await Promise.all(hostedRelays.map(async (h) => [h, await net.rtt(h)] as const)))
+    const timed = async (ks: Key[]) => Object.fromEntries(await Promise.all(ks.map(async (h) => [h, await net.rtt(h)] as const)))
+    const [rtts, frtts] = await Promise.all([timed(hostedRelays), timed(hostedForwarders)])
     measuring = false
+    if (JSON.stringify(frtts) !== JSON.stringify(fwdRtts)) (fwdRtts = frtts), push()
+    if (!hostedRelays.length) return
     const before = ranked.length
     ranked = nearest(rtts)
     tell('hosted', `hosted relays answering: ${ranked.length} of ${hostedRelays.length}`)
@@ -1049,6 +1202,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         if (via) viaWaits.get(key + '@' + via)?.(true, '')
         diag('network', `linked with …${key.slice(-6)}${replaced ? ' again, replacing its old link' : ''}${hop ? (hop.kind === 'hosted' ? ' through a hosted relay' : ' through a friend') : ''}${known(key) ? '' : key === inbox ? ' (developers inbox)' : ' (not a friend)'}`)
         if (key === inbox) deliver()
+        for (const w of toServer.get(key) ?? []) net.send(key, w)
+        toServer.delete(key)
         if (wants(key)) greet(key)
         for (const j of pending.values()) if (j.to.includes(key)) askJoin(j, key)
         for (const p of toPoke.get(key) ?? []) net.send(key, p.w), p.sent()
@@ -1060,6 +1215,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         diag('network', `link closed with …${key.slice(-6)}`)
         presence.closed(key)
         servers.closed(key)
+        unserve(key)
         for (const m of [sentUpTo, catching]) for (const k of m.keys()) if (k.startsWith(key)) m.delete(k)
         theirs.delete(key)
         sentActivity.delete(key)
@@ -1079,6 +1235,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
         push()
       },
       failed(key, via, why) {
+        if (!via) toServer.delete(key)
         // Why a link never formed was missing from reports; once per peer and reason, so a redial loop does not flood them
         if (joined && why) tell(`fail:${key}:${via ?? ''}:${why}`, `${via ? `relayed link with …${key.slice(-6)} through …${(hopOf(via)?.key ?? via).slice(-6)}` : `direct link with …${key.slice(-6)}`} failed: ${why}`)
         if (via) return viaWaits.get(key + '@' + via)?.(false, why ?? '')
@@ -1207,7 +1364,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   function closeIdle(picked: Set<Key>) {
     for (const k of net.keys()) {
       const at = net.ours(k)
-      if (at === null || s.friends[k] || picked.has(k) || demand.has(k) || k === inbox || relay.has(k) || files.busy(k) || net.backlog(k) > 0) continue
+      if (at === null || s.friends[k] || picked.has(k) || demand.has(k) || k === inbox || (fwdServer(k) && !!callOf.get(me)) || relay.has(k) || files.busy(k) || net.backlog(k) > 0) continue
       if (Date.now() - Math.max(at, signalled.get(k) ?? 0) > IDLE) net.drop(k), signalled.delete(k)
     }
   }
@@ -1872,6 +2029,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       }
       // Our own group or voice channel call, told in our presence note so members not linked with us see it too. Never a direct call.
       const k = (data as { k?: string })?.k
+      if (!to && (k === 'join' || k === 'leave')) callIn(me, conv, k === 'leave')
       if (!to && (k === 'join' || k === 'leave')) presence.inGroupCall(k === 'join' && (Object.hasOwn(s.groups, conv) || servers.isChannel(conv)) ? conv : null)
     },
     // A UDP port on this machine that carries a call with `key` over the peer link (see relay.ts).
@@ -1884,6 +2042,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     // it all arrived. Bounded by their download too, which is what a stream to them would face. Null if they do not answer.
     async probe(key: Key) {
       if (!known(key) || !net.linked(key) || relayedVia.has(key)) return null // a relay would refuse the burst
+      if (testUploadKbps) return testUploadKbps
       const id = ++probeId
       const chunk = randomBytes(48 * 1024).toString('base64')
       const start = performance.now()
@@ -1938,8 +2097,18 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     },
     // Writes pending changes now, for when the app is ended without destroy (Windows shutting down).
     flush: () => saving && (clearTimeout(saving), (saving = null), save()),
+    // Forwarding signals from the window (call.ts, as streamer or viewer), to a call mate or to our own forwarder
+    fwd(to: Key, d: unknown) {
+      const m = cleanFwd(d)
+      if (m && isKey(to) && (mate(to) || fwdServer(to))) sendFwd(to, m)
+    },
+    // A viewer seated on a server forwarder links to it, so its offer can reach us (call.ts, from the share signal)
+    fwdLink: (to: Key) => void (isKey(to) && fwdServer(to) && net.dial(to)),
+    // Whether our main process lags too long to forward well (forwarder.ts): the window then asks to drop out
+    fwdLagging: () => !!forwarder?.lagging(),
     async destroy() {
       stopped = true
+      forwarder?.close()
       if (saving) clearTimeout(saving), save()
       if (sharing) clearTimeout(sharing)
       if (pushing) clearTimeout(pushing)

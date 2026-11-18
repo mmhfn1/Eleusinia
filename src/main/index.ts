@@ -10,7 +10,7 @@ import { autoUpdater } from 'electron-updater'
 import { UiohookKey, uIOhook } from 'uiohook-napi'
 import { type Bindings, type Hotkey, createMatcher, createRecorder } from '../shared/hotkeys'
 import { type FileRef, inlineKind, mimeOf, safeName } from '../shared/media'
-import { parseRelays } from '../shared/relays'
+import { parseForwarders, parseRelays } from '../shared/relays'
 import { isWebUrl } from '../shared/links'
 import { isKey } from '../shared/protocol'
 import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared/reports'
@@ -28,6 +28,7 @@ import { runInbox } from './inbox'
 import { previewLink } from './links'
 import { type Staged, canInstall, fetchUpdate, install, tidy } from './selfupdate'
 import { createNode } from './node'
+import { createForwarder } from './forwarder'
 
 // `npm run inbox` runs the developers' inbox (inbox.ts) instead of the app, in a data folder of its own.
 const inboxMode = process.argv.includes('--inbox')
@@ -395,7 +396,10 @@ function startApp() {
       } catch {}
     } else writeFileSync(stayPut, '')
   }
+  // Testing only (a local test DHT): shown without taking focus, so smoke runs stay behind whatever the user is doing
+  const background = !!testDht() && process.env.ELEUSINIA_TEST_BACKGROUND === '1'
   const win = new BrowserWindow({
+    show: !background,
     width: 1280,
     height: 800,
     minWidth: 900,
@@ -409,6 +413,7 @@ function startApp() {
     trafficLightPosition: { x: 14, y: 9 }, // macOS: its own buttons, centred in our 32 px bar
     webPreferences: { preload: join(__dirname, '../preload/index.js') },
   })
+  if (background) win.showInactive()
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   // Events wait while the page loads, until it asks for its first state (App.tsx subscribes in the same effect), so
   // nothing sent meanwhile is lost, such as the join of someone already in a call. State events from before that ask
@@ -502,8 +507,14 @@ function startApp() {
     ...(process.env.ELEUSINIA_BOOTSTRAP && process.env.ELEUSINIA_TEST_GROUP_LINKS && { groupLinks: Number(process.env.ELEUSINIA_TEST_GROUP_LINKS) }),
     noRelay: !!process.env.ELEUSINIA_BOOTSTRAP && process.env.ELEUSINIA_TEST_NO_RELAY === '1', // testing, local test DHT only: relay for nobody (smoke's hosted mode)
     netsim: process.env.ELEUSINIA_TEST_NET, // testing: a simulated bad line for calls (shared/netsim.ts)
+    // Passes call mates' screens on (design/plan-stream-forwarding.md); the STUN server is the one call.ts uses
+    // ELEUSINIA_TEST_NO_FORWARD=1 (local test DHT only): a copy that cannot forward, as in the smoke's server mode
+    forwarder: process.env.ELEUSINIA_BOOTSTRAP && process.env.ELEUSINIA_TEST_NO_FORWARD === '1' ? undefined : createForwarder({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], log: (...a) => diagnostics.add('call', a.map((x) => String(x).replace(/[0-9a-f]{64}/g, (k) => '…' + k.slice(-6))).join(' ')) }),
+    // testing, local test DHT only: the upload probe reports this (smoke's forwarding mode)
+    ...(process.env.ELEUSINIA_BOOTSTRAP && Number(process.env.ELEUSINIA_TEST_UPLOAD_KBPS) > 0 && { testUploadKbps: Number(process.env.ELEUSINIA_TEST_UPLOAD_KBPS) }),
     // The project's hosted relays; ELEUSINIA_RELAYS replaces them only on a local test DHT
     hostedRelays: parseRelays(process.env.ELEUSINIA_BOOTSTRAP ? process.env.ELEUSINIA_RELAYS : undefined),
+    hostedForwarders: parseForwarders(process.env.ELEUSINIA_BOOTSTRAP ? process.env.ELEUSINIA_FORWARDERS : undefined),
     thumbnail: (avatar) => {
       const img = nativeImage.createFromDataURL(avatar)
       if (img.isEmpty()) return null

@@ -11,7 +11,7 @@ import { ActivityLine, ProfileActivity } from './Activity'
 import { MemberRow, Server, Speaking, channelOf, newId } from './Server'
 import { ProfileBanner, ProfilePop } from './Profile'
 import { type Modal, NOBODY, type People, type Run, api, card, groupName, labelOf } from './common'
-import { REACH_WORDS, callWords, reachOf, routeWords } from '../shared/reach'
+import { REACH_WORDS, callWords, forwardingWords, reachOf, routeWords } from '../shared/reach'
 import { ContextMenu, type Item, Rail, useMenus } from './Rail'
 import { Splash, StillConnecting } from './Splash'
 
@@ -108,6 +108,7 @@ function App({ loaded }: { loaded: () => void }) {
     return api.on((e) => {
       if (e.type === 'state') got(e.state)
       if (e.type === 'call') call.onSignal(e.from, e.conv, e.data)
+      if (e.type === 'fwd') call.onFwd(e.from, e.data)
       if (e.type === 'hotkey') call.onHotkey(e.action, e.down)
       if (e.type === 'update') setUpdate(e.version)
       if (e.type === 'poke') poked({ from: e.from, server: e.server, channel: e.channel })
@@ -1233,6 +1234,11 @@ function Conversation({ st, conv, people, run, go, show: showModal }: ConvProps)
                             {call.talking ? 'Talking' : `Push to talk: hold ${call.pushToTalk()!.label}`}
                           </span>
                         )}
+                        {Object.entries(st.forwarding ?? {}).filter(([, n]) => n > 0).map(([k, n]) => (
+                          <span className="row-sub forwarding" key={k}>
+                            {forwardingWords(name(k), n)}
+                          </span>
+                        ))}
                       </span>
                     </div>
                     {[...call.peers].map(([k, p]) => (
