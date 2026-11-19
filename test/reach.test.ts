@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { REACH_WORDS, callWords, pendingWords, reachOf, routeWords } from '../src/shared/reach'
+import { REACH_WORDS, callWords, forwardingWords, pendingWords, reachOf, routeWords, throughWords } from '../src/shared/reach'
 
 const st = { online: ['linked'], present: ['noted', 'stuck'], unreachable: ['stuck', 'gone'] }
 
@@ -31,4 +31,11 @@ test('a relayed link names its relay: a friend or an Eleusinia relay', () => {
   expect(routeWords(r, 'viaFriend')).toBe('through a friend')
   expect(routeWords(r, 'viaHosted')).toBe('through an Eleusinia relay')
   expect(routeWords(r, 'direct')).toBeUndefined()
+})
+
+test('forwarding in words: through whom a screen comes, and what a forwarder passes on', () => {
+  expect(throughWords('Bob')).toBe('through Bob')
+  expect(throughWords()).toBe('through an Eleusinia server')
+  expect(forwardingWords('Ann', 1)).toBe("Forwarding Ann's stream to 1 person")
+  expect(forwardingWords('Ann', 3)).toBe("Forwarding Ann's stream to 3 people")
 })

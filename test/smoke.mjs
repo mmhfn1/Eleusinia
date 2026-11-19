@@ -32,7 +32,7 @@ const { ELEUSINIA_BOOTSTRAP: _, ...baseEnv } = process.env
 // Updates are off, so a run against the packaged app never downloads a real release.
 // No picks in groups: Bob and Cy, not friends, meet only in Ann's groups and never link, as most members of a big
 // group do not; their group chat, presence and call go through notes and addressed signals (see '--- Groups')
-const appEnv = { ...(bootstrap ? { ...baseEnv, ELEUSINIA_BOOTSTRAP: bootstrap } : baseEnv), ELEUSINIA_NO_UPDATES: '1', ELEUSINIA_TEST_GROUP_LINKS: '0' }
+const appEnv = { ...(bootstrap ? { ...baseEnv, ELEUSINIA_BOOTSTRAP: bootstrap } : baseEnv), ELEUSINIA_NO_UPDATES: '1', ELEUSINIA_TEST_GROUP_LINKS: '0', ELEUSINIA_TEST_BACKGROUND: '1' }
 console.log(publicDht ? 'DHT: public (ELEUSINIA_SMOKE_PUBLIC=1)' : `DHT: local test network at ${bootstrap}`)
 
 // A developers' inbox of the test's own, never the real one, which every app below sends its reports to. No GitHub
@@ -61,25 +61,38 @@ const strictEnv = relayedMode ? { ELEUSINIA_STRICT: '1', ELEUSINIA_NO_DIRECT: '1
 // ELEUSINIA_SMOKE_HOSTED=1 (with RELAYED): Cy relays for nobody, so Ann and Bob link through a hosted relay this run
 // starts on the test DHT (src/relay/main.ts, built into deploy/relay/relay.cjs), which carries screen video too.
 const hostedMode = relayedMode && process.env.ELEUSINIA_SMOKE_HOSTED === '1'
-if (hostedMode && publicDht) throw new Error('ELEUSINIA_SMOKE_HOSTED needs the local test DHT')
-async function hostedRelay() {
+// ELEUSINIA_SMOKE_FORWARD=1: a short run where all three are friends (so Bob and Cy link) in a group call; Ann's pretend
+// upload (ELEUSINIA_TEST_UPLOAD_KBPS, local test DHT only) carries one copy of her screen, so Bob forwards it to Cy
+// ELEUSINIA_SMOKE_FORWARD=server: the same, but Bob cannot forward (ELEUSINIA_TEST_NO_FORWARD), so Ann's one copy feeds a
+// server forwarder this run starts on the test DHT (src/forwarder/main.ts, built into deploy/relay/forwarder.cjs)
+// ELEUSINIA_SMOKE_FORWARD=large: five windows (Dee and Eve too); Bob forwards to Cy and Dee, and Dee, fed by Bob, to
+// Eve: a second level
+const forwardMode = !relayedMode && ['1', 'server', 'large'].includes(process.env.ELEUSINIA_SMOKE_FORWARD)
+const serverMode = forwardMode && process.env.ELEUSINIA_SMOKE_FORWARD === 'server'
+const largeMode = forwardMode && process.env.ELEUSINIA_SMOKE_FORWARD === 'large'
+const uploadEnv = (kbps) => (forwardMode ? { ELEUSINIA_TEST_UPLOAD_KBPS: String(kbps) } : {})
+if ((hostedMode || serverMode) && publicDht) throw new Error('ELEUSINIA_SMOKE_HOSTED and ELEUSINIA_SMOKE_FORWARD=server need the local test DHT')
+// name: relay or forwarder, built by `npm run <name>:build` into deploy/relay/<name>.cjs, started with a temporary
+// --data folder and a random port
+async function hosted(name) {
   const root = fileURLToPath(new URL('..', import.meta.url))
-  execSync('npm run relay:build', { cwd: root, stdio: 'ignore' })
-  const js = join(root, 'deploy', 'relay', 'relay.cjs')
-  const dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-relay-'))
+  execSync(`npm run ${name}:build`, { cwd: root, stdio: 'ignore' })
+  const js = join(root, 'deploy', 'relay', `${name}.cjs`)
+  const dir = mkdtempSync(join(tmpdir(), `eleusinia-smoke-${name}-`))
   const key = execFileSync(process.execPath, [js, '--data', dir, '--print-key'], { encoding: 'utf8' }).trim() // the public key only
-  const relay = spawn(process.execPath, [js, '--data', dir], { env: { ...appEnv, ELEUSINIA_RELAY_PORT: '0' }, stdio: ['ignore', 'pipe', 'ignore'] })
-  children.push(relay)
+  const child = spawn(process.execPath, [js, '--data', dir], { env: { ...appEnv, [`ELEUSINIA_${name.toUpperCase()}_PORT`]: '0' }, stdio: ['ignore', 'pipe', 'ignore'] })
+  children.push(child)
   await new Promise((resolve, reject) => {
     let out = ''
-    relay.stdout.on('data', (d) => (out += d).includes('Eleusinia relay listening') && resolve())
-    setTimeout(() => reject(new Error('the hosted relay did not start')), 30000)
+    child.stdout.on('data', (d) => (out += d).includes(`Eleusinia ${name} listening`) && resolve())
+    setTimeout(() => reject(new Error(`the hosted ${name} did not start`)), 30000)
   })
-  console.log(`hosted relay on the test DHT: ${key.slice(0, 8)}…`)
+  console.log(`hosted ${name} on the test DHT: ${key.slice(0, 8)}…`)
   return key
 }
-// Every window knows this run's hosted relay or none (set but empty), never the project's real ones
-appEnv.ELEUSINIA_RELAYS = hostedMode ? await hostedRelay() : ''
+// Every window knows this run's hosted relay and server forwarder or none (set but empty), never the project's real ones
+appEnv.ELEUSINIA_RELAYS = hostedMode ? await hosted('relay') : ''
+appEnv.ELEUSINIA_FORWARDERS = serverMode ? await hosted('forwarder') : ''
 
 async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')), extraEnv = {}) {
   // The windows overlap, and Windows reports a covered window as hidden; the app then (rightly) asks not to be sent
@@ -125,7 +138,7 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
   // elsewhere the window simply stays in the background.
   const windowState = async (state) => {
     if (process.platform !== 'win32') return false
-    const show = state === 'minimized' ? 6 : 9 // SW_MINIMIZE, SW_RESTORE
+    const show = state === 'minimized' ? 7 : 4 // SW_SHOWMINNOACTIVE, SW_SHOWNOACTIVATE: never takes focus from the user
     const ps = `Add-Type -Name W -Namespace U -MemberDefinition '[DllImport(\"user32.dll\")] public static extern bool ShowWindow(IntPtr h, int c);'; [U.W]::ShowWindow((Get-Process -Id ${child.pid}).MainWindowHandle, ${show}) | Out-Null`
     await new Promise((r) => spawn('powershell', ['-NoProfile', '-Command', ps], { stdio: 'ignore' }).on('exit', r))
     return true
@@ -255,6 +268,22 @@ async function bobQuiet(p, fn) {
 // A tiny real PNG, run through the same shrink path a picked file takes.
 const PNG = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
 
+// Everyone becomes friends with everyone, by key; returns their keys
+async function befriendAll() {
+  const key = (p) => p.ev(`api.call('state').then((s) => s.me)`)
+  const keys = []
+  for (const [p] of everyone) keys.push(await key(p))
+  for (let i = 0; i < everyone.length; i++)
+    for (let j = i + 1; j < everyone.length; j++) {
+      const [x, kx, y, ky, names] = [everyone[i][0], keys[i], everyone[j][0], keys[j], `${everyone[i][1]} and ${everyone[j][1]}`]
+      await x.ev(`api.call('addFriend', '${ky}')`)
+      await until(`${names}: the request arrives`, () => y.ev(`api.call('state').then((s) => s.friends['${kx}'] === 'incoming')`))
+      await y.ev(`api.call('addFriend', '${kx}')`)
+      await until(`${names} are friends`, () => x.ev(`api.call('state').then((s) => s.friends['${ky}'] === 'friend')`))
+    }
+  return keys
+}
+
 // Ann and Bob can never link directly; Cy is friends with both and relays, as everyone not strict does. In hosted mode
 // Cy relays for nobody and the hosted relay links them instead.
 async function relayedRun(ownTitles) {
@@ -262,14 +291,7 @@ async function relayedRun(ownTitles) {
   const route = hostedMode ? 'through an Eleusinia relay' : 'through a friend'
   const list = hostedMode ? 'hostedRelayed' : 'relayed'
   console.log(`--- Relayed: Ann and Bob link only through ${via}`)
-  const key = (p) => p.ev(`api.call('state').then((s) => s.me)`)
-  const [ka, kb, kc] = [await key(a), await key(b), await key(c)]
-  for (const [x, kx, y, ky, names] of [[a, ka, b, kb, 'Ann and Bob'], [a, ka, c, kc, 'Ann and Cy'], [b, kb, c, kc, 'Bob and Cy']]) {
-    await x.ev(`api.call('addFriend', '${ky}')`)
-    await until(`${names}: the request arrives`, () => y.ev(`api.call('state').then((s) => s.friends['${kx}'] === 'incoming')`))
-    await y.ev(`api.call('addFriend', '${kx}')`)
-    await until(`${names} are friends`, () => x.ev(`api.call('state').then((s) => s.friends['${ky}'] === 'friend')`))
-  }
+  const [ka, kb] = await befriendAll()
   // They met only through the DHT, so their names arrive with the first hello over the relayed link.
   await until(`A and B link through ${via} and learn each other's names`, async () =>
     (await a.ev(`api.call('state').then((s) => s.profiles['${kb}']?.name === 'Bob')`)) && b.ev(`api.call('state').then((s) => s.profiles['${ka}']?.name === 'Ann')`), 120)
@@ -321,6 +343,118 @@ async function relayedRun(ownTitles) {
   console.log(`ok   no screen video crossed the relay (${screenIn} packets)`)
 }
 
+// What Cy's window receives of Ann's screen: media packets on the call's own connections (four slots), and frames decoded
+// on the forwarded one (e2ee.ts: a video and a sound slot only)
+const directScreen = `(async () => { let n = 0; for (const pc of window.__pcs.filter((p) => p.connectionState === 'connected' && p.getTransceivers().length >= 4)) { const t = pc.getTransceivers().filter((x) => x.receiver.track.kind === 'video')[0]; if (t) (await t.receiver.getStats()).forEach((r) => r.type === 'inbound-rtp' && (n += (r.packetsReceived ?? 0) - (r.retransmittedPacketsReceived ?? 0))) } return n })()`
+const forwardedFrames = `(async () => { let n = 0; for (const pc of window.__pcs.filter((p) => p.connectionState === 'connected' && p.getTransceivers().length === 2)) (await pc.getStats()).forEach((r) => r.type === 'inbound-rtp' && r.kind === 'video' && (n += r.framesDecoded ?? 0)); return n })()`
+const stageSays = (text) => `!!document.querySelector('.stage .screen.big figcaption')?.textContent.includes(${JSON.stringify(text)})`
+
+// Ann's upload fits one copy of her screen (3 Mbit/s, 70 % used), Bob has plenty to spare and Cy little, so forward.ts
+// picks Bob to carry Ann's screen to Cy; then Bob leaves and Cy gets it direct again. Server mode: Bob cannot forward,
+// so Ann's one copy feeds the server forwarder, which carries it to both.
+// Everyone in a group call with Ann, who shares a window of the test's own
+async function callAndShare(ownTitles) {
+  const [, ...keys] = await befriendAll()
+  const gid = await a.ev(`api.call('createGroup', 'Relay race', ${JSON.stringify(keys)})`)
+  const others = everyone.slice(1).map(([p]) => p)
+  for (const p of others) await until('the group reaches the others', () => p.ev(`api.call('state').then((s) => !!s.groups['${gid}'])`), 30)
+  for (const [p] of everyone) await p.ev(open('Relay race'))
+  await a.ev(press('Start call'))
+  for (const p of others) {
+    await until('the call shows', () => p.ev(`[...document.querySelectorAll('aside.voice button')].some(x => x.textContent.includes('Join call'))`), 30)
+    await p.ev(press('Join call'))
+  }
+  const n = others.length
+  await until(`all ${n + 1} are connected`, async () => {
+    for (const [p] of everyone) if (!(await p.ev(`document.querySelectorAll('.caller.state-connected').length === ${n}`))) return false
+    return true
+  }, 45)
+  await a.ev(press('Share screen'))
+  await until('A sees the share picker', () => a.ev(`document.querySelectorAll('dialog[open] .source').length > 0`), 20)
+  await a.ev(`document.querySelector('dialog[open] #share-tab-window').click()`)
+  await pickOwn(a, ownTitles[1])
+  await sleep(1500) // the upload check, which may turn Share into Share anyway
+  await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent.startsWith('Share')).click()`)
+}
+const joinOffered = async (p) => {
+  await until('the stream is offered', () => p.ev(`document.querySelector('.stage .screen.invite.big button')?.textContent === 'Join stream'`), 20)
+  await p.ev(joinStream)
+}
+const plays = `document.querySelector('.stage .screen.big video')?.videoHeight > 0`
+const framesShown = `document.querySelector('.stage .screen.big video')?.getVideoPlaybackQuality().totalVideoFrames ?? 0`
+const forwardLines = () => a.ev(`api.diagnostics().then((d) => d.events.filter((e) => e.text.startsWith('forwarding our screen')).map((e) => e.text))`)
+
+async function forwardRun(ownTitles) {
+  const via = serverMode ? 'through an Eleusinia server' : 'through Bob'
+  console.log(`--- Forwarding: Ann, Bob and Cy in a group call; ${serverMode ? 'a server forwards' : 'Bob forwards'} Ann's screen to Cy`)
+  await callAndShare(ownTitles)
+  for (const p of [b, c]) await joinOffered(p)
+  let t = Date.now()
+  await until(`Cy shows Ann's screen ${via}, decoding frames on the forwarded connection`, async () => (await c.ev(stageSays(via))) && (await c.ev(`document.querySelector('.stage .screen.big video')?.videoHeight > 0`)) && (await c.ev(forwardedFrames)) > 0, 60)
+  console.log(`      forwarded ${Date.now() - t} ms after joining; Cy decoded ${await c.ev(forwardedFrames)} forwarded frames`)
+  if (!serverMode) await until("Bob's call panel says he forwards Ann's stream to 1 person", () => b.ev(`!!document.querySelector('.callers')?.textContent.includes("Forwarding Ann's stream to 1 person")`), 10)
+  if (!serverMode) await until('Bob still watches, without a route line in his own window', () => b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight > 0 && !${stageSays('through')}`), 10)
+  await sleep(2000) // the direct copy stops within a sample once Cy says the forwarded one plays
+  const before = await c.ev(directScreen)
+  await sleep(3000)
+  const after = await c.ev(directScreen)
+  if (after > before + 20) throw new Error(`Ann still sends Cy her screen directly: ${before} -> ${after} media packets in 3 s`)
+  console.log(`ok   no screen media on Cy's direct connections while forwarded (${after - before} packets in 3 s)`)
+  const lines = await forwardLines()
+  console.log('      Ann:', lines.join(' | '))
+  if (!lines.some((l) => l.startsWith('forwarding our screen through 1'))) throw new Error('Ann did not log forwarding')
+  if (serverMode) return
+
+  console.log('--- Forwarding: Bob leaves; Cy gets Ann\'s screen direct again')
+  await b.ev(press('Disconnect'))
+  t = Date.now()
+  const base = await c.ev(directScreen)
+  await until("Cy plays Ann's screen direct again", async () => !(await c.ev(stageSays('through Bob'))) && (await c.ev(`document.querySelector('.stage .screen.big video')?.videoHeight > 0`)) && (await c.ev(directScreen)) > base + 20, 15)
+  const back = Date.now() - t
+  console.log(`      direct again ${back} ms after Bob left`)
+  if (back > 10000) throw new Error(`Cy took ${back} ms to get Ann's screen direct again`)
+}
+
+// Five in a call: Ann's upload carries one copy (3 Mbit/s, 70 % used, at about 1.4 Mbit/s a copy), Bob's two (5),
+// Dee's one more (4), Cy's and Eve's none. Viewers join one by one, the order forward.ts seats them in: Bob takes
+// Ann's copy, Cy and Dee go through Bob, and Eve through Dee, whom Bob feeds (a second level). Frames stay encrypted
+// end to end: Bob and Dee pass ciphertext. ELEUSINIA_TEST_NET is not used here: netsim acts on packets relay.ts ferries
+// over the chat link, and forwarded media goes over werift's own UDP, which it cannot reach.
+async function largeRun(ownTitles) {
+  console.log('--- Large call: five in a group call; Bob forwards to Cy and Dee, Dee (fed by Bob) to Eve')
+  await callAndShare(ownTitles)
+  const t = Date.now()
+  await joinOffered(b)
+  await until("Bob plays Ann's screen", () => b.ev(plays), 30)
+  for (const p of [c, dee]) await joinOffered(p)
+  await until("Cy and Dee show Ann's screen through Bob, decoding forwarded frames", async () => {
+    for (const p of [c, dee]) if (!((await p.ev(stageSays('through Bob'))) && (await p.ev(plays)) && (await p.ev(forwardedFrames)) > 0)) return false
+    return true
+  }, 60)
+  await joinOffered(eve)
+  await until("Eve shows Ann's screen through Dee (second level), decoding forwarded frames", async () => (await eve.ev(stageSays('through Dee'))) && (await eve.ev(plays)) && (await eve.ev(forwardedFrames)) > 0, 60)
+  console.log(`      all four watching ${Date.now() - t} ms after Bob joined; Eve decoded ${await eve.ev(forwardedFrames)} frames through two forwarders`)
+  await until("Bob's call panel says he forwards Ann's stream to 2 people", () => b.ev(`!!document.querySelector('.callers')?.textContent.includes("Forwarding Ann's stream to 2 people")`), 10)
+  await until("Dee's call panel says she forwards Ann's stream to 1 person", () => dee.ev(`!!document.querySelector('.callers')?.textContent.includes("Forwarding Ann's stream to 1 person")`), 10)
+  await sleep(2000) // direct copies stop within a sample once each viewer says the forwarded one plays
+  const viewers = [b, c, dee, eve]
+  const before = [await c.ev(directScreen), await eve.ev(directScreen)]
+  const shownBefore = []
+  for (const p of viewers) shownBefore.push(await p.ev(framesShown))
+  await sleep(3000)
+  const after = [await c.ev(directScreen), await eve.ev(directScreen)]
+  if (after[0] > before[0] + 20 || after[1] > before[1] + 20) throw new Error(`Ann still sends Cy or Eve her screen directly: ${before} -> ${after} packets in 3 s`)
+  console.log(`ok   no screen media on Cy's or Eve's direct connections while forwarded (${after[0] - before[0]}, ${after[1] - before[1]} packets in 3 s)`)
+  const shown = []
+  for (const p of viewers) shown.push(await p.ev(framesShown))
+  const stalled = ['Bob', 'Cy', 'Dee', 'Eve'].filter((_, i) => shown[i] <= shownBefore[i])
+  if (stalled.length) throw new Error(`${stalled.join(', ')} stopped playing: ${shownBefore} -> ${shown} frames`)
+  console.log(`ok   all four keep playing (${shown.map((f, i) => f - shownBefore[i]).join(', ')} frames in 3 s)`)
+  const lines = await forwardLines()
+  console.log('      Ann:', lines.join(' | '))
+  if (!lines.some((l) => / via /.test(l))) throw new Error('Ann did not log a second-level forwarder')
+}
+
 // Ann's game stands in for what main/activity.ts would find (ELEUSINIA_TEST_ACTIVITY), shared once she turns it on.
 const annGame = {
   name: 'Counter-Strike 2',
@@ -333,13 +467,17 @@ const annGame = {
 }
 // And a folder standing in for CS2's cfg folder, where Settings → Set up writes the game's file.
 const annGsiCfg = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-gsi-')) // one subfolder per game
-const annEnv = { ...strictEnv, ELEUSINIA_TEST_ACTIVITY: JSON.stringify(annGame), ELEUSINIA_TEST_GSI_CFG: annGsiCfg }
+const annEnv = { ...strictEnv, ...uploadEnv(3000), ELEUSINIA_TEST_ACTIVITY: JSON.stringify(annGame), ELEUSINIA_TEST_GSI_CFG: annGsiCfg }
 let a = await launch(9231, undefined, annEnv)
 // Bob plays Destiny 2 and links a stand-in for bungie.net (test/fake-bungie.mjs) that approves at once.
 const bobGame = { name: 'Destiny 2', source: 'steam', app: 1085660, played: 211683 }
 const bungieFake = await fakeBungie()
-let b = await launch(9232, undefined, { ...strictEnv, ELEUSINIA_TEST_ACTIVITY: JSON.stringify(bobGame), ELEUSINIA_TEST_BUNGIE: bungieFake.base })
-const c = await launch(9233, undefined, hostedMode ? { ELEUSINIA_TEST_NO_RELAY: '1' } : {})
+// In forwarding mode Bob plays nothing: someone in a game is never asked to forward
+let b = await launch(9232, undefined, { ...strictEnv, ...uploadEnv(largeMode ? 5000 : 20000), ...(serverMode && { ELEUSINIA_TEST_NO_FORWARD: '1' }), ...(!forwardMode && { ELEUSINIA_TEST_ACTIVITY: JSON.stringify(bobGame) }), ELEUSINIA_TEST_BUNGIE: bungieFake.base })
+const c = await launch(9233, undefined, { ...(hostedMode && { ELEUSINIA_TEST_NO_RELAY: '1' }), ...uploadEnv(500) })
+const dee = largeMode ? await launch(9245, undefined, uploadEnv(4000)) : null
+const eve = largeMode ? await launch(9246, undefined, uploadEnv(500)) : null
+const everyone = [[a, 'Ann'], [b, 'Bob'], [c, 'Cy'], ...(largeMode ? [[dee, 'Dee'], [eve, 'Eve']] : [])]
 let failed = false
 try {
   console.log('--- Profile setup')
@@ -351,7 +489,7 @@ try {
   const ownTitles = [`Eleusinia smoke ${run} B`, `Eleusinia smoke ${run} C`]
   await b.ev(`document.title = ${JSON.stringify(ownTitles[0])}`)
   await c.ev(`document.title = ${JSON.stringify(ownTitles[1])}`)
-  for (const [p, n] of [[a, 'Ann'], [b, 'Bob'], [c, 'Cy']]) {
+  for (const [p, n] of everyone) {
     await until(`${n} sees setup first, with a generated picture`, () => p.ev(`${body('Create your account')} && !document.querySelector('aside') && !!document.querySelector('.portrait-pick .avatar svg rect')`))
     // Cy keeps the generated picture; Ann and Bob upload one.
     await p.ev(`(async () => {
@@ -373,6 +511,8 @@ try {
     await until(`${n} lands on Home`, () => p.ev(`!!document.querySelector('main.home')`))
   }
   if (relayedMode) await relayedRun(ownTitles)
+  else if (largeMode) await largeRun(ownTitles)
+  else if (forwardMode) await forwardRun(ownTitles)
   else {
   const ids = {}
   for (const [p, n] of [[b, 'Bob'], [c, 'Cy']]) {
@@ -804,11 +944,16 @@ try {
   // As on Discord: a stream is offered, not pushed. Until B joins, A sends B none of it
   await until('B is offered the stream where it will play, with Join stream', () => b.ev(`document.querySelector('.stage .screen.invite.big button')?.textContent === 'Join stream'`), 20)
   await until('the Join stream tile shows a still of the shared window', () => b.ev(`document.querySelector('.stage .screen.invite.big img.invite-preview')?.src.startsWith('data:image/jpeg;base64,')`), 15)
-  const unjoined = await b.ev(received('screen'))
+  // Chromium's bandwidth probes are resends with no payload, landing on whichever video slot it picks: only packets
+  // carrying media count
+  const media = async () => (await b.ev(received('screen'))) - (await b.ev(received('screen', 'retransmittedPacketsReceived')))
+  const unjoined = await media()
   await sleep(3000)
-  const unjoinedAfter = await b.ev(received('screen'))
+  const unjoinedAfter = await media()
   const unjoinedBytes = await b.ev(received('screen', 'bytesReceived'))
-  if (unjoinedAfter > unjoined + 20) throw new Error(`A sent its screen to B before B joined: ${unjoined} -> ${unjoinedAfter} packets, ${unjoinedBytes} bytes in all`)
+  if (unjoinedAfter > unjoined + 20) throw new Error(`A sent its screen to B before B joined: ${unjoined} -> ${unjoinedAfter} media packets, ${unjoinedBytes} bytes in all`)
+  // Computer sound is on by default (Windows): it too waits for B to join
+  if ((await b.ev(received('sound'))) > 0) throw new Error('A sent its computer sound to B before B joined')
   console.log('ok   nothing of the stream reaches B before B joins')
   await b.ev(joinStream)
   await until("B shows the shared window large, at 720p", () => b.ev(`document.querySelector('.stage .screen.big video')?.videoHeight === 720`), 30)
@@ -927,7 +1072,8 @@ try {
     await a.ev(press('Share screen'))
     await a.ev(`document.querySelector('dialog[open] #share-tab-window').click()`)
     await pickOwn(a, ownTitles[1])
-    await a.ev(`document.querySelector('dialog[open] .sound-row input').click()`)
+    // On by default; checked here so the run fails if that ever changes
+    if (!(await a.ev(`document.querySelector('dialog[open] .sound-row input').checked`))) throw new Error('computer sound is not on by default')
     await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Share').click()`)
     const how = await until('A shares with computer sound, or says why it cannot', () =>
       a.ev(`(() => { const badge = document.querySelector('.stage .sharing-badge')?.textContent ?? ''; const note = [...document.querySelectorAll('.call-notice')].some((n) => n.textContent.includes('sound is not being shared')); return badge.includes('with sound') ? 'sound' : note ? 'refused' : false })()`), 20)
@@ -1460,8 +1606,9 @@ try {
 } catch (e) {
   failed = true
   console.error('FAIL', e.message)
-  for (const [n, p] of [['A', a], ['B', b], ['C', c]]) console.error(n, (await p.ev(`document.body.innerText`).catch(String)).replace(/\n+/g, ' | '))
-  for (const [n, p] of [['A', a], ['B', b], ['C', c]]) console.error(n, 'DIAG', JSON.stringify(await p.ev(`api.diagnostics().then((d) => d.events.filter((e) => e.area === 'network' || e.area === 'call').map((e) => e.area[0] + ' ' + e.text).slice(-40))`).catch(String)))
+  const all = [['A', a], ['B', b], ['C', c], ...(largeMode ? [['D', dee], ['E', eve]] : [])]
+  for (const [n, p] of all) console.error(n, (await p.ev(`document.body.innerText`).catch(String)).replace(/\n+/g, ' | '))
+  for (const [n, p] of all) console.error(n, 'DIAG', JSON.stringify(await p.ev(`api.diagnostics().then((d) => d.events.filter((e) => e.area === 'network' || e.area === 'call').map((e) => e.area[0] + ' ' + e.text).slice(-40))`).catch(String)))
 } finally {
   children.forEach((ch) => ch.kill())
   await testnet?.destroy().catch(() => {})

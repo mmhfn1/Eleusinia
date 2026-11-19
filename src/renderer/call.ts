@@ -4,10 +4,15 @@ import rnnoiseWorklet from '@sapphi-red/web-noise-suppressor/rnnoiseWorklet.js?r
 import { createCandidates, createWatchdog, lightOpus, offers, quickVideo, rejoinFrom, relayCandidate, restartAfterFor, restarted, sessionOf, viewerCue } from '../shared/callstate'
 import { fellBack, nextDevice, usable } from '../shared/devices'
 import { type Jingle, LOOP_EVERY, RING_MS, loopNow } from '../shared/jingles'
-import { CALL_VERSION, type Event, type Key, type State, mutedNow } from '../shared/protocol'
+import { type Mate, type Reason, type Tree, forward, reforward } from '../shared/forward'
+import type { Fwd } from '../shared/fwdproto'
+import { CALL_VERSION, type Event, type Key, type State, isKey, mutedNow } from '../shared/protocol'
 import { type PingReading, SAMPLE_EVERY, type Sample, grade, handsFree, jitterTarget, patched, pingSummary, remember, rememberPing, trouble, videoHold, worst } from '../shared/quality'
 import type { SourceKind } from '../shared/sources'
 import { gate, hear, rms } from '../shared/speaking'
+import { type Opener, type Sealer, createOpener, createSealer } from '../shared/streamkeys'
+import { decrypt, e2eeConnection, encrypt } from './e2ee'
+import type { Layer } from '../shared/vp8layers'
 import { play } from './jingles'
 import {
   type Level,
@@ -17,6 +22,7 @@ import {
   RAMP_MS,
   SOUND_KBPS,
   STARVED_AFTER,
+  type Sent,
   type Source,
   type Verdict,
   canStream,
@@ -24,11 +30,12 @@ import {
   cameraSource,
   encodingFor,
   streamKbps,
+  streamSummary,
   widthFor,
 } from '../shared/video'
 
 // A screen or window offered by the system for sharing, with what it can deliver.
-export type ScreenSource = { id: string; kind: SourceKind; name: string; thumb: string; width: number; height: number; fps: number }
+export type ScreenSource = { id: string; kind: SourceKind; name: string; thumb: string; icon?: string; width: number; height: number; fps: number } // thumb '' when the system gave no preview
 // A camera, with what it can deliver.
 export type CameraSource = Source & { id: string; name: string }
 export type Slot = 'screen' | 'camera'
@@ -125,12 +132,14 @@ let measuring = false
 
 // Screen sharing. Ours: the captured track, its source and the quality the user chose (always final).
 // Theirs: what each sharer in the call told us. Wants: what each side is showing of the other's share.
-export type ShareInfo = { name: string; width: number; height: number; fps: number; starved: boolean; sound?: boolean; preview?: string }
+// via: the call mate the sharer says our copy comes through (peer forwarding)
+export type ShareInfo = { name: string; width: number; height: number; fps: number; starved: boolean; sound?: boolean; preview?: string; via?: Key }
 export const shares = new Map<Key, ShareInfo>()
 export const cameras = new Map<Key, ShareInfo>()
 // Whether each person in the call has muted or deafened themselves, as they told us.
 export const voices = new Map<Key, { muted: boolean; deafened: boolean }>()
-type Out<S> = { track: MediaStreamTrack; stream: MediaStream; src: S; q: Quality; at: number }
+// summary: the latest diagnostics line about it (streamSummary), logged once at 20 s and again when it ends
+type Out<S> = { track: MediaStreamTrack; stream: MediaStream; src: S; q: Quality; at: number; summary?: string; logged?: boolean }
 let screen: (Out<ScreenSource> & { sound?: MediaStreamTrack }) | null = null
 let camera: Out<CameraSource> | null = null
 let previews: ReturnType<typeof setInterval> | null = null
@@ -142,6 +151,254 @@ const shown = new Map<string, Level>()
 // A screen goes to no one until they join it; a camera starts at thumbnail size until a viewer shows it bigger, so
 // someone in the call but reading another conversation is not sent full quality.
 const want = (slot: Slot, k: Key): Level => (state?.relayed?.includes(k) ? 'off' : (wants.get(`${slot}:${k}`) ?? (slot === 'screen' ? 'off' : 'thumb')))
+// Frame encryption for forwarded streams (design/plan-stream-forwarding.md, phase 3). Idle until the forwarding phase
+// calls encryptOut/decryptIn on connections from e2ee.ts's e2eeConnection; the mesh's direct copies stay as they are.
+// A stream's key goes over the chat link to the people watching it, and a new one replaces it when one stops.
+const sealers = new Map<Slot, { sealer: Sealer; keyed: Set<Key> }>()
+const openers = new Map<string, Opener>() // `${slot}:${streamer}`
+const openerFor = (k: Key, slot: Slot) => openers.get(`${slot}:${k}`) ?? openers.set(`${slot}:${k}`, createOpener(k, slot)).get(`${slot}:${k}`)!
+export function encryptOut(sender: RTCRtpSender, slot: Slot) {
+  if (!sealers.has(slot)) sealers.set(slot, { sealer: createSealer(slot), keyed: new Set() })
+  encrypt(sender, sealers.get(slot)!.sealer)
+  shareKeys(slot)
+}
+export const decryptIn = (receiver: RTCRtpReceiver, from: Key, slot: Slot) => decrypt(receiver, openerFor(from, slot))
+// Keys to viewers who lack them; one new key to the rest when someone stopped watching or left (rotation).
+function shareKeys(slot: Slot) {
+  const s = sealers.get(slot)
+  if (!s || !conv) return
+  const viewers = new Set([...(active.get(conv) ?? [])].filter((k) => want(slot, k) !== 'off'))
+  const gone = [...s.keyed].filter((k) => !viewers.has(k))
+  for (const k of gone) s.keyed.delete(k)
+  const next = gone.length ? s.sealer.rotate() : null
+  if (next) for (const k of s.keyed) sendInCall(k, next)
+  for (const k of viewers) if (!s.keyed.has(k)) s.keyed.add(k), s.sealer.messages().forEach((m) => sendInCall(k, m))
+}
+
+// Peer forwarding (design/plan-stream-forwarding.md, phase 4). As the streamer, from 2 full viewers on: forward.ts
+// picks who carries whom, each forwarder gets one encrypted copy (VP8 L1T3) on a connection of its own, and a viewer
+// seated at a forwarder stops getting its direct copy once it says the forwarded one plays. As a viewer: the copy
+// from the forwarder our sharer named (share's `via`), shown where the direct one would be. Screens only.
+const ICE = [{ urls: 'stun:stun.l.google.com:19302' }]
+const SPARE_CAP = 100000 // kbps; a reported spare upload is believed up to this
+type Up = { pc: RTCPeerConnection; candidates: ReturnType<typeof createCandidates>; at: number; sent: string }
+type In = { via: Key; pc: RTCPeerConnection; candidates: ReturnType<typeof createCandidates>; at: number; stream?: MediaStream; sound?: MediaStreamTrack; ok: boolean; bytes: number; still: number; snd?: { source: MediaStreamAudioSourceNode; gain: GainNode; el: HTMLAudioElement } }
+let tree: Tree | null = null
+let via: Record<Key, Key> = {} // viewer -> forwarder, as last told in our share signal
+let cut = new Set<Key>() // viewers whose direct copy is off because the forwarded one plays
+const ups = new Map<Key, Up>() // our screen to each forwarder
+const downs = new Map<Key, { via: Key; sent: string }>() // second-level forwarders, fed by the forwarder `via`
+const viaOk = new Map<Key, Key>() // viewer -> forwarder they say our screen plays through
+const spares = new Map<Key, number>() // spare upload each call mate reported (kbps)
+const benched = new Map<Key, number>() // forwarders that never connected, left out until then
+const inbound = new Map<Key, In>() // sharer -> their screen reaching us through a forwarder
+// The project's server forwarders (phase 5), with their handshake times; one is used last, when call mates cannot carry
+export const isServer = (k: Key) => Object.hasOwn(state?.fwdServers ?? {}, k)
+const fwdSend = (to: Key, m: Fwd) => window.api.call('fwd', to, m).catch(() => {})
+const iceOf = (c: RTCIceCandidate) => ({ candidate: c.candidate, sdpMid: c.sdpMid ?? undefined, sdpMLineIndex: c.sdpMLineIndex ?? undefined })
+const layerOf = (l: Level): Layer => (l === 'full' ? 'full' : l === 'thumb' ? 'quarter' : 'off')
+// Our copy to forwarder f, or to the first-level forwarder that feeds it, is up
+const live = (f: Key) => ups.get(downs.get(f)?.via ?? f)?.pc.connectionState === 'connected'
+const forwarded = (k: Key) => !!via[k] && viaOk.get(k) === via[k] && live(via[k])
+// The stage's picture of someone's screen, and who it comes through, if anyone
+export const screenOf = (k: Key) => (inbound.get(k)?.ok ? inbound.get(k)!.stream : peers.get(k)?.screen)
+export const throughOf = (k: Key) => (inbound.get(k)?.ok ? inbound.get(k)!.via : undefined)
+// What we can give: measured upload minus what we send, null while unmeasured (then nobody counts on us).
+// shortcut: counts one copy of each stream we send, not one per viewer; fine while forwarders are picked among viewers
+const ourSpare = () => (upload?.kbps == null ? null : Math.max(0, Math.min(SPARE_CAP, upload.kbps - sendingKbps('screen') - (screen ? streamKbps(screen.src, screen.q) : 0))))
+const noteSpare = (k: Key, v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? spares.set(k, Math.max(0, Math.min(SPARE_CAP, v))) : spares.delete(k))
+
+// Runs every sample while sharing, and on joins, leaves and wants: reforward keeps everyone it can where they are
+function replan(reasons: Reason[] = []) {
+  if (!screen || !conv) return unplan()
+  for (const [k, u] of ups) if (u.pc.connectionState !== 'connected' && Date.now() - u.at > 10000) benched.set(k, Date.now() + 60000), reasons.push({ key: k, why: 'starved' })
+  for (const [k, until] of benched) if (until < Date.now()) benched.delete(k)
+  const live = [...peers].filter(([, p]) => p.pc.connectionState === 'connected').map(([k]) => k)
+  const mates: Mate[] = live.map((k) => ({
+    key: k,
+    want: want('screen', k),
+    spareKbps: spares.get(k) ?? 0,
+    grade: grade(samples.get(k) ?? []),
+    strict: !!state.strict?.includes(k),
+    busy: shares.has(k) || cameras.has(k) || !!state.activity[k]?.game,
+    canForward: !!state.canForward?.includes(k) && !benched.has(k),
+  }))
+  if (!tree && mates.filter((m) => m.want === 'full').length < 2) return
+  const sound = screen.sound ? SOUND_KBPS : 0
+  const input = { layers: { full: streamKbps(screen.src, screen.q) + sound, low: 150 + sound }, uploadKbps: upload?.kbps ?? null, mates, servers: Object.fromEntries(Object.entries(state.fwdServers ?? {}).filter(([k]) => !benched.has(k))) }
+  tree = tree ? reforward(tree, input, reasons) : forward(input)
+  applyTree()
+}
+
+function applyTree() {
+  const next: Record<Key, Record<Key, Layer>> = {}
+  const feeds: Record<Key, Key> = {} // a second-level forwarder -> the first-level one feeding it (always full)
+  const seats = tree?.seats ?? {}
+  for (const f of tree?.forwarders ?? []) if (seats[f]?.from === 'streamer' && (peers.has(f) || isServer(f))) next[f] = {}
+  // shortcut: a server fed by a call mate is left out and its viewers go direct; hub.ts takes no feed yet, upgrade when
+  // servers carry second levels
+  for (const f of tree?.forwarders ?? []) {
+    const up = seats[f]?.from
+    if (up && up !== 'streamer' && next[up] && !isServer(up) && peers.has(f)) (next[f] = {}), (feeds[f] = up), (next[up][f] = 'full')
+  }
+  for (const [v, seat] of Object.entries(seats)) if (next[seat.from] && !feeds[v] && want('screen', v) !== 'off') next[seat.from][v] = layerOf(want('screen', v))
+  for (const f of Object.keys(next)) if (peers.has(f) && want('screen', f) !== 'off') next[f][f] = layerOf(want('screen', f)) // its own window watches through it
+  for (const f of [...ups.keys()]) if (!next[f] || feeds[f]) closeUp(f)
+  for (const f of [...downs.keys()]) if (!feeds[f]) closeDown(f)
+  for (const f of Object.keys(feeds)) if (downs.get(f)?.via !== feeds[f]) reoffer(f)
+  for (const [f, vs] of Object.entries(next)) {
+    const body = JSON.stringify(vs)
+    const d = downs.get(f)
+    const u = ups.get(f)
+    if (feeds[f] && d?.via !== feeds[f]) downs.set(f, { via: feeds[f], sent: body }), fwdSend(f, { k: 'feed', via: feeds[f], viewers: vs })
+    else if (d) d.sent !== body && ((d.sent = body), fwdSend(f, { k: 'viewers', viewers: vs }))
+    else if (!u) openUp(f, vs).catch((e) => (log(`could not open forwarding to ${who(f)}: ${e?.message ?? e}`), closeUp(f)))
+    else if (u.sent !== body) (u.sent = body), fwdSend(f, { k: 'viewers', viewers: vs })
+  }
+  const was = JSON.stringify(via)
+  // Who each viewer's copy comes through; a second-level forwarder's own feed is not watching
+  via = Object.fromEntries(Object.entries(next).flatMap(([f, vs]) => Object.keys(vs).filter((v) => feeds[v] !== f).map((v) => [v, f])))
+  if (JSON.stringify(via) !== was) {
+    const fs = Object.keys(next)
+    const levels = fs.map((f) => (feeds[f] ? `${who(f)} via ${who(feeds[f])}` : who(f))).join(', ')
+    log(fs.length ? `forwarding our screen through ${fs.length} (${levels}) to ${Object.keys(via).length} at ${streamKbps(screen!.src, screen!.q) + (screen!.sound ? SOUND_KBPS : 0)} kbps` : 'forwarding our screen stopped')
+    sendShare(null)
+  }
+  const now = new Set([...peers.keys()].filter(forwarded))
+  for (const k of new Set([...cut, ...now])) if (cut.has(k) !== now.has(k)) applyLevel(k)
+  cut = now
+}
+
+async function openUp(f: Key, viewers: Record<Key, Layer>) {
+  if (!screen) return
+  const pc = e2eeConnection({ iceServers: ICE })
+  const up: Up = { pc, candidates: createCandidates(pc), at: Date.now(), sent: JSON.stringify(viewers) }
+  ups.set(f, up)
+  const kbps = streamKbps(screen.src, screen.q)
+  const video = pc.addTransceiver(screen.track, { direction: 'sendonly', sendEncodings: [{ maxBitrate: kbps * 1000, scalabilityMode: 'L1T3' } as RTCRtpEncodingParameters] })
+  // VP8: the forwarder reads its temporal layers to give each viewer a frame rate
+  const vp8 = (RTCRtpReceiver.getCapabilities('video')?.codecs ?? []).filter((c) => /^video\/(vp8|rtx)$/i.test(c.mimeType))
+  try {
+    video.setCodecPreferences(vp8)
+  } catch {}
+  encryptOut(video.sender, 'screen')
+  if (screen.sound) encryptOut(pc.addTransceiver(screen.sound, { direction: 'sendonly' }).sender, 'screen')
+  pc.onicecandidate = (e) => e.candidate && fwdSend(f, { k: 'ice', to: 'fwd', c: iceOf(e.candidate) })
+  pc.onconnectionstatechange = () => {
+    if (ups.get(f) !== up) return
+    log(`forwarding connection to ${who(f)}: ${pc.connectionState}`)
+    if (pc.connectionState === 'failed') benched.set(f, Date.now() + 60000), replan([{ key: f, why: 'starved' }])
+    else applyTree()
+    notify()
+  }
+  await pc.setLocalDescription(await pc.createOffer())
+  if (ups.get(f) === up) fwdSend(f, { k: 'open', sdp: pc.localDescription!.sdp, viewers })
+}
+
+function closeUp(f: Key) {
+  const u = ups.get(f)
+  if (!u) return
+  ups.delete(f)
+  u.pc.close()
+  fwdSend(f, { k: 'close' })
+}
+
+function closeDown(f: Key) {
+  if (downs.delete(f)) fwdSend(f, { k: 'close' }), reoffer(f)
+}
+
+// A forwarder becoming a second level, or no longer one, needs a fresh offer from upstream (to its forwarder instead
+// of its window, or back): dropped from the upstream's list once, it is offered again with the next list
+function reoffer(f: Key) {
+  for (const [up, u] of ups) {
+    const vs = JSON.parse(u.sent)
+    if (!(f in vs)) continue
+    delete vs[f]
+    u.sent = JSON.stringify(vs)
+    fwdSend(up, { k: 'viewers', viewers: vs })
+  }
+}
+
+function unplan() {
+  for (const f of [...ups.keys()]) closeUp(f)
+  for (const f of [...downs.keys()]) closeDown(f)
+  if (tree && Object.keys(via).length) log('forwarding our screen stopped')
+  tree = null
+  via = {}
+  viaOk.clear()
+  for (const k of cut) applyLevel(k)
+  cut = new Set()
+}
+
+// A forwarder's offer of someone's screen: taken only when that sharer told us it comes through this forwarder
+const early = new Map<Key, { f: Key; sdp: string; at: number }>() // an offer that beat the share signal naming its forwarder
+async function takeOffer(f: Key, s: Key, sdp: string) {
+  if (conv && peers.has(s) && shares.get(s)?.via !== f) early.set(s, { f, sdp, at: Date.now() })
+  if (!conv || shares.get(s)?.via !== f || !peers.has(s)) return
+  early.delete(s)
+  closeIn(s, false)
+  const pc = e2eeConnection({ iceServers: ICE })
+  const i: In = { via: f, pc, candidates: createCandidates(pc), at: Date.now(), ok: false, bytes: 0, still: 0 }
+  inbound.set(s, i)
+  pc.ontrack = (e) => {
+    decryptIn(e.receiver, s, 'screen')
+    if (e.track.kind === 'video') i.stream = new MediaStream([e.track])
+    else i.sound = e.track
+  }
+  pc.onicecandidate = (e) => e.candidate && fwdSend(f, { k: 'ice', to: 'fwd', s, c: iceOf(e.candidate) })
+  pc.onconnectionstatechange = () => inbound.get(s) === i && pc.connectionState === 'failed' && closeIn(s)
+  await pc.setRemoteDescription({ type: 'offer', sdp })
+  await i.candidates.flush()
+  await pc.setLocalDescription(await pc.createAnswer())
+  fwdSend(f, { k: 'accept', s, sdp: pc.localDescription!.sdp })
+}
+
+// Back to the direct copy (resend: tell the sharer at once, so it sends it again)
+function closeIn(s: Key, resend = true) {
+  const i = inbound.get(s)
+  if (!i) return
+  inbound.delete(s)
+  i.pc.close()
+  i.snd?.source.disconnect()
+  i.snd?.gain.disconnect()
+  if (i.snd) i.snd.el.srcObject = null
+  if (i.ok) log(`${who(s)}'s screen through ${who(i.via)} stopped; direct again`)
+  if (resend && conv && peers.has(s)) send(conv, s, wantOf(s))
+  notify()
+}
+
+// Once frames decode, the forwarded copy plays (and its sound); one that stops for 15 s gives way to the direct one
+async function checkIn() {
+  for (const [s, i] of inbound) {
+    let frames = 0
+    let bytes = 0
+    for (const r of i.pc.getReceivers())
+      (await r.getStats()).forEach((x: any) => x.type === 'inbound-rtp' && ((bytes += x.bytesReceived ?? 0), x.kind === 'video' && (frames = x.framesDecoded ?? 0)))
+    i.still = bytes > i.bytes ? 0 : i.still + 1
+    i.bytes = bytes
+    if (inbound.get(s) !== i) continue
+    if (!i.ok && frames > 0) {
+      i.ok = true
+      log(`${who(s)}'s screen arrives through ${who(i.via)}`)
+      if (i.sound) i.snd = playStream(s, new MediaStream([i.sound]))
+      if (conv) send(conv, s, wantOf(s))
+      notify()
+    } else if ((i.ok && i.still * SAMPLE_EVERY >= 15000) || (!i.ok && Date.now() - i.at > 20000)) closeIn(s)
+  }
+}
+
+// Forwarding signals for the window: answers to us as streamer, offers to us as viewer, and their candidates
+export const onFwd = (from: Key, m: Fwd) =>
+  serial(async () => {
+    if (m.k === 'answer') {
+      const u = ups.get(from)
+      if (!u || u.pc.signalingState !== 'have-local-offer') return
+      await u.pc.setRemoteDescription({ type: 'answer', sdp: m.sdp })
+      await u.candidates.flush()
+    } else if (m.k === 'ice' && m.to === 'src') await ups.get(from)?.candidates.add(m.c)
+    else if (m.k === 'offer') await takeOffer(from, m.s, m.sdp)
+    else if (m.k === 'ice' && m.to === 'view' && inbound.get(m.s!)?.via === from) await inbound.get(m.s!)!.candidates.add(m.c)
+  })
 // The stream we joined (one at a time), kept here rather than in the Stage so it plays on in the floating player (Pip
 // in Media.tsx) while another conversation is open.
 export let watched: Key | null = null
@@ -230,8 +487,7 @@ const streamVolumes = new Map<Key, number>()
 export const streamVolumeOf = (k: Key) => streamVolumes.get(k) ?? 1
 export function setStreamVolume(k: Key, v: number) {
   streamVolumes.set(k, clampVolume(v))
-  const g = peers.get(k)?.sound?.gain
-  if (g) g.gain.value = streamVolumeOf(k)
+  for (const g of [peers.get(k)?.sound?.gain, inbound.get(k)?.snd?.gain]) if (g) g.gain.value = streamVolumeOf(k)
   notify()
 }
 // Chromium's own, milder noise filter only when RNNoise (below) is off, so the voice is never cleaned twice.
@@ -368,6 +624,9 @@ function release(k: Key, p: Peer) {
 // A shared screen's sound: played at the sharer's volume, but never counted as them speaking.
 function playSound(k: Key, p: Peer, s: MediaStream) {
   stopSound(p)
+  p.sound = playStream(k, s)
+}
+function playStream(k: Key, s: MediaStream) {
   const el = new Audio()
   el.autoplay = el.muted = true // as for voices, the element only keeps the stream flowing into Web Audio
   el.srcObject = s
@@ -375,7 +634,7 @@ function playSound(k: Key, p: Peer, s: MediaStream) {
   const gain = context().createGain()
   gain.gain.value = streamVolumeOf(k)
   source.connect(gain).connect(master!)
-  p.sound = { source, gain, el }
+  return { source, gain, el }
 }
 function stopSound(p: Peer) {
   p.sound?.source.disconnect()
@@ -428,10 +687,16 @@ function drop(k: Key) {
   watchdogs.delete(k)
   shares.delete(k)
   cameras.delete(k)
-  for (const slot of ['screen', 'camera']) wants.delete(`${slot}:${k}`), shown.delete(`${slot}:${k}`)
+  for (const slot of ['screen', 'camera'] as const) wants.delete(`${slot}:${k}`), shown.delete(`${slot}:${k}`), openers.delete(`${slot}:${k}`), shareKeys(slot)
   voices.delete(k)
   if (watched === k) watched = null
   close(k)
+  // Forwarding: their forwarded screen, viewers they carried (direct again at once), and our plan without them
+  closeIn(k, false)
+  for (const [s, i] of inbound) if (i.via === k) closeIn(s)
+  spares.delete(k)
+  viaOk.delete(k)
+  if (screen) replan(ups.has(k) || downs.has(k) ? [{ key: k, why: 'gone' }] : [])
 }
 
 // A call that does not connect may mean someone is on a newer version: main checks for an update, at most every 5 min
@@ -446,7 +711,7 @@ function askUpdate(why: string) {
 function connect(k: Key) {
   close(k)
   const c = conv!
-  const pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
+  const pc = new RTCPeerConnection({ iceServers: ICE })
   const audio = new Audio()
   audio.autoplay = true
   audio.muted = true
@@ -579,9 +844,10 @@ async function applyLevel(k: Key) {
   const p = peers.get(k)
   if (!p) return
   const s = slotsOf(p.pc)
-  if (screen && s.screen) await setEncoding(s.screen.sender, encodingFor(want('screen', k), screen.q, streamKbps(screen.src, screen.q)))
+  const direct = forwarded(k) ? 'off' : want('screen', k) // served through a forwarder: no direct copy
+  if (screen && s.screen) await setEncoding(s.screen.sender, encodingFor(direct, screen.q, streamKbps(screen.src, screen.q)))
   // The sound goes to everyone who joined, even with their window minimised or the video hidden ('audio')
-  if (screen?.sound && s.sound) await setEncoding(s.sound.sender, { active: want('screen', k) !== 'off', maxBitrate: SOUND_KBPS * 1000 })
+  if (screen?.sound && s.sound) await setEncoding(s.sound.sender, { active: direct !== 'off', maxBitrate: SOUND_KBPS * 1000 })
   if (camera && s.camera) await setEncoding(s.camera.sender, encodingFor(want('camera', k), camera.q, streamKbps(camera.src, camera.q)))
   for (const t of [s.screen, s.camera]) if (t) await setEncoding(t.sender, LOW)
 }
@@ -595,7 +861,7 @@ const describeOut = (o: Out<Source & { name: string }>) => ({
   starved: starved >= STARVED_AFTER,
 })
 function sendShare(k: Key | null) {
-  sendInCall(k, { k: 'share', ...(screen ? { ...describeOut(screen), sound: !!screen.sound } : { on: false }) })
+  sendInCall(k, { k: 'share', ...(screen ? { ...describeOut(screen), sound: !!screen.sound, via, spare: ourSpare() } : { on: false }) })
 }
 function sendCamera(k: Key | null) {
   sendInCall(k, { k: 'camera', ...(camera ? describeOut(camera) : { on: false }) })
@@ -613,12 +879,16 @@ const sendingKbps = (besides: Slot) =>
 
 // Whether a new stream fits the call (see canStream), on top of what we already send. Upload is measured against
 // the best-connected person in the call and remembered for a minute.
-export async function checkStream(slot: Slot, src: Source, q: Quality, sound = false): Promise<Verdict> {
+async function measureUpload() {
   const live = [...peers].filter(([, p]) => p.pc.connectionState === 'connected')
   if (!upload || Date.now() - upload.at > 60000) {
     const best = live.map(([k]) => k).sort((a, b) => (samples.get(a)?.at(-1)?.rtt ?? 1e9) - (samples.get(b)?.at(-1)?.rtt ?? 1e9))[0]
     upload = best ? { kbps: await window.api.call('probe', best).catch(() => null), at: Date.now() } : null
   }
+  return live
+}
+export async function checkStream(slot: Slot, src: Source, q: Quality, sound = false): Promise<Verdict> {
+  const live = await measureUpload()
   return canStream({
     kbps: streamKbps(src, q) + (sound ? SOUND_KBPS : 0) + sendingKbps(slot),
     viewers: live.length,
@@ -646,6 +916,7 @@ async function capture(src: ScreenSource, q: Quality, sound: boolean) {
 
 // Puts a captured screen (and its sound) on every connection, replacing whatever was shared before.
 async function use(cap: { track: MediaStreamTrack; sound?: MediaStreamTrack }, src: ScreenSource, q: Quality) {
+  unplan() // forwarders carry the old track; the next sample plans again
   const old = screen
   cap.track.onended = () => stopShare('the shared window or screen went away')
   screen = { track: cap.track, stream: new MediaStream([cap.track]), src, q, at: Date.now(), sound: cap.sound }
@@ -721,10 +992,13 @@ export async function setQuality(q: Quality) {
 export function stopShare(why = 'by choice') {
   if (!screen) return
   log(`stopped sharing (${why})`)
+  if (screen.summary) log(`screen stream ended: ${screen.summary}`)
   screen.track.onended = null
   screen.track.stop()
   screen.sound?.stop()
   screen = null
+  unplan()
+  sealers.delete('screen') // a new share gets a new key
   if (previews) clearInterval(previews)
   previews = null
   soundRefused = false
@@ -772,9 +1046,11 @@ export async function useCamera(track: MediaStreamTrack, src: CameraSource, q: Q
 export function stopCamera() {
   if (!camera) return
   log('camera off')
+  if (camera.summary) log(`camera stream ended: ${camera.summary}`)
   camera.track.onended = null
   camera.track.stop()
   camera = null
+  sealers.delete('camera')
   for (const p of peers.values()) slotsOf(p.pc).camera?.sender.replaceTrack(null)
   sendCamera(null)
   notify()
@@ -786,7 +1062,21 @@ export function show(k: Key, slot: Slot, level: Level) {
   const id = `${slot}:${k}`
   if (!conv || shown.get(id) === level) return
   shown.set(id, level)
-  send(conv, k, { k: 'want', level, slot })
+  send(conv, k, slot === 'screen' ? wantOf(k) : { k: 'want', level, slot })
+  // Our spare upload, measured once we watch, goes with the next want, so the sharer may pick us to forward
+  if (slot === 'screen' && level === 'full' && !upload) measureUpload().then(() => conv && upload?.kbps != null && send(conv, k, wantOf(k)))
+}
+// What we show of k's screen, our spare upload, and the forwarder it plays through
+// strained: our machine cannot keep up, so we give no spare upload and the sharer stops using us as a forwarder
+const wantOf = (k: Key) => ({ k: 'want', slot: 'screen', level: shown.get(`screen:${k}`) ?? 'off', spare: strained ? 0 : ourSpare(), ...(throughOf(k) && { via: throughOf(k) }), ...(strained && { strained: 1 }) })
+// CPU budget: our encoders CPU-bound, or our main process lagging (forwarder.ts), tells each sharer we forward for
+let strained = false
+async function checkStrain() {
+  const now = cpuBound >= STARVED_AFTER || !!(await window.api.call('fwdLagging').catch(() => false))
+  if (now === strained) return
+  strained = now
+  log(strained ? 'this computer cannot keep up: no longer forwarding' : 'this computer keeps up again')
+  if (conv) for (const s of Object.keys(state.forwarding ?? {})) send(conv, s, wantOf(s))
 }
 
 // Whether our stream is held back, by bandwidth (towards someone showing it full size) or by our own computer.
@@ -796,6 +1086,7 @@ async function checkLimits() {
   if (!outs.length) return
   let bandwidth = false
   let cpu = false
+  const sent: Record<Slot, Sent[]> = { screen: [], camera: [] }
   for (const [k, p] of peers) {
     if (p.pc.connectionState !== 'connected') continue
     for (const [slot] of outs) {
@@ -805,8 +1096,13 @@ async function checkLimits() {
         if (r.type !== 'outbound-rtp') return
         bandwidth ||= r.qualityLimitationReason === 'bandwidth'
         cpu ||= r.qualityLimitationReason === 'cpu'
+        sent[slot].push({ reason: r.qualityLimitationReason ?? 'none', fps: r.framesPerSecond ?? 0, height: r.frameHeight ?? 0 })
       })
     }
+  }
+  for (const [slot, o] of outs) {
+    o!.summary = streamSummary(o!.q, [...peers.keys()].map((k) => want(slot, k)), upload?.kbps ?? null, sent[slot])
+    if (!o!.logged && Date.now() - o!.at >= 20000) (o!.logged = true), log(`${slot} stream at 20 s: ${o!.summary}`)
   }
   const was = starved >= STARVED_AFTER
   starved = bandwidth ? starved + 1 : 0
@@ -913,6 +1209,9 @@ async function measure() {
       pingReadings.set('', rememberPing(pingReadings.get(''), { ms: ms ?? Infinity, at }))
     }
     await checkLimits()
+    await checkIn()
+    await checkStrain()
+    if (screen) replan()
     const now = signal()
     if (now.grade !== lastGrade) log(`connection ${now.grade ?? 'unknown'}; ping ${now.pings.map((p) => `${p.k ? who(p.k) : 'network'} ${Number.isFinite(p.ms) ? `${p.ms} ms ±${p.spread} (${[p.steadiness, trouble(samples.get(p.k))].filter(Boolean).join(', ')})` : 'none'}`).join(', ')}`)
     lastGrade = now.grade
@@ -1059,6 +1358,7 @@ function end(quiet: boolean) {
   send(conv, null, { k: 'leave' })
   if (!deaf() && !quiet) sound('leave')
   callingSince = null
+  for (const s of [...inbound.keys()]) closeIn(s, false) // before the drops, which would ask for direct copies
   for (const k of [...peers.keys()]) drop(k)
   navigator.mediaDevices.removeEventListener('devicechange', onDeviceChange)
   if (sampler) clearInterval(sampler)
@@ -1077,6 +1377,11 @@ function end(quiet: boolean) {
   cameras.clear()
   wants.clear()
   shown.clear()
+  sealers.clear()
+  openers.clear()
+  early.clear()
+  spares.clear()
+  benched.clear()
   voices.clear()
   watched = null
   upload = null
@@ -1211,8 +1516,15 @@ async function handle(from: Key, c: string, d: any) {
     if (!!d.on !== shares.has(from)) log(`${who(from)} ${d.on ? 'started' : 'stopped'} sharing their screen`)
     if (d.on && !shares.has(from) && !deaf()) sound('stream')
     if (!d.on && watched === from) watched = null
-    if (d.on) shares.set(from, { name: String(d.name ?? '').slice(0, 100), width: n(d.width, 8192), height: n(d.height, 8192), fps: n(d.fps, 480), starved: !!d.starved, sound: !!d.sound, preview: shares.get(from)?.preview })
+    // via: only our own entry is read, and only a key in the call counts
+    const through = d.on && d.via && typeof d.via === 'object' && isKey(d.via[state.me]) && (d.via[state.me] === state.me || peers.has(d.via[state.me]) || isServer(d.via[state.me])) ? (d.via[state.me] as Key) : undefined
+    if (through && isServer(through)) window.api.call('fwdLink', through).catch(() => {}) // its offer comes over that link
+    if (d.on) shares.set(from, { name: String(d.name ?? '').slice(0, 100), width: n(d.width, 8192), height: n(d.height, 8192), fps: n(d.fps, 480), starved: !!d.starved, sound: !!d.sound, preview: shares.get(from)?.preview, via: through })
     else (shares.delete(from), shown.delete(`screen:${from}`))
+    noteSpare(from, d.spare)
+    if (inbound.get(from)?.via !== through) closeIn(from, !!d.on)
+    const e = early.get(from)
+    if (e && e.f === through && !inbound.has(from) && Date.now() - e.at < 10000) await takeOffer(e.f, from, e.sdp)
   } else if (d.k === 'preview') {
     const s = shares.get(from)
     const image = cleanPreview(d.image)
@@ -1221,6 +1533,9 @@ async function handle(from: Key, c: string, d: any) {
     const n = (v: unknown, max: number) => Math.max(0, Math.min(max, Math.round(Number(v)) || 0))
     if (d.on) cameras.set(from, { name: String(d.name ?? '').slice(0, 100), width: n(d.width, 8192), height: n(d.height, 8192), fps: n(d.fps, 480), starved: !!d.starved })
     else (cameras.delete(from), shown.delete(`camera:${from}`))
+  } else if (d.k === 'skey') {
+    // Kept under the sender's own key: the opener takes keys only from the person whose stream it opens
+    if (d.slot === 'screen' || d.slot === 'camera') openerFor(from, d.slot).take(from, d)
   } else if (d.k === 'voice') {
     voices.set(from, { muted: !!d.muted, deafened: !!d.deafened })
   } else if (d.k === 'want') {
@@ -1229,6 +1544,16 @@ async function handle(from: Key, c: string, d: any) {
       const heard = d.slot !== 'camera' && viewerCue(wants.get(id), d.level, !!screen)
       if (heard && !deaf()) sound(heard)
       wants.set(id, d.level)
+      shareKeys(d.slot === 'camera' ? 'camera' : 'screen')
+      if (d.slot !== 'camera') {
+        noteSpare(from, d.spare)
+        if (isKey(d.via)) viaOk.set(from, d.via)
+        else viaOk.delete(from)
+        // A forwarder whose machine cannot keep up drops out, and stays out a minute
+        const drop = d.strained === 1 && (ups.has(from) || downs.has(from))
+        if (drop) benched.set(from, Date.now() + 60000), log(`${who(from)} cannot keep up forwarding; their viewers move`)
+        if (screen) replan(drop ? [{ key: from, why: 'starved' }] : [])
+      }
       await applyLevel(from)
     }
   }

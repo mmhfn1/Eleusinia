@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import DHT from 'hyperdht'
 import createTestnet from 'hyperdht/testnet'
 import { afterAll, beforeAll, expect, onTestFailed, test } from 'vitest'
+import { createHub } from '../src/forwarder/hub'
 import { createNode } from '../src/main/node'
 import { type RelayLimits, HOSTED_LIMITS, createNet, relayKeyPair, startBlindRelay } from '../src/main/network'
 import { CALL_VERSION, type Event, type Group, type Msg, cleanProfile, dmId, identicon, isHandle, keyTail, mutedNow, normHandle, stack, versionOf } from '../src/shared/protocol'
@@ -1977,3 +1978,88 @@ test('with no relay anywhere a strict friend is unreachable, and a message waiti
   await until(() => texts(b, dm).includes('waiting for a relay'))
   await until(() => a.node.state().hostedRelayed.includes(b.key))
 }, 180000)
+
+test('forwarding: a forwarder takes a stream only from a call mate, serves only listed viewers in the call, and says so in hello', async () => {
+  const calls: string[] = []
+  const fake = {
+    addStream: (id: string) => (calls.push(`stream ${id}`), { answer: async () => 'v=0 answer', addIce: async () => {} }),
+    addViewer: async (_s: string, v: string) => (calls.push(`viewer ${v}`), { offer: 'v=0 offer', accept: async (sdp: string) => void calls.push(`accept ${v} ${sdp}`), addIce: async () => {} }),
+    setLayer: (_s: string, v: string, l: string) => calls.push(`layer ${v} ${l}`),
+    removeViewer: (_s: string, v: string) => calls.push(`remove ${v}`),
+    removeStream: (s: string) => calls.push(`unstream ${s}`),
+    stats: () => [],
+    close() {},
+  }
+  const toA: any[] = []
+  const toC: any[] = []
+  const a = start(undefined, undefined, { emit: (e: any) => e.type === 'fwd' && toA.push(e) })
+  const b = start(undefined, undefined, { forwarder: fake as any })
+  const c = start(undefined, undefined, { emit: (e: any) => e.type === 'fwd' && toC.push(e) })
+  const d = start()
+  for (const x of [a, c, d]) await befriend(b, x)
+  const gid = b.node.createGroup('fwd', [a.key, c.key, d.key])
+  await until(() => [a, c, d].every((x) => !!x.node.state().groups[gid]))
+  await until(() => a.node.state().canForward.includes(b.key) && !b.node.state().canForward.includes(a.key)) // hello.fwd
+  for (const x of [a, b, c]) x.node.signal(gid, null, { k: 'join' }) // d stays out of the call
+  const open = { k: 'open', sdp: 'v=0 offer', viewers: { [c.key]: 'full', [d.key]: 'full' } }
+  await until(() => (a.node.fwd(b.key, open), calls.includes(`stream ${a.key}`)))
+  await until(() => toA.some((e) => e.from === b.key && e.data.k === 'answer') && toC.some((e) => e.from === b.key && e.data.k === 'offer' && e.data.s === a.key))
+  expect(calls).toContain(`viewer ${c.key}`)
+  expect(calls).not.toContain(`viewer ${d.key}`) // listed, but not in the call
+  await until(() => b.node.state().forwarding[a.key] === 1)
+  c.node.fwd(b.key, { k: 'accept', s: a.key, sdp: 'v=0 answer' })
+  await until(() => calls.includes(`accept ${c.key} v=0 answer`))
+  // Someone outside the call is never served, even bypassing its own node's check
+  await d.node.destroy()
+  const raw = createNet(d.keyPair, { open() {}, close() {}, msg() {} }, { bootstrap: testnet.bootstrap })
+  raw.dial(b.key)
+  await until(() => b.node.state().online.includes(d.key))
+  raw.send(b.key, { t: 'fwd', ...open, viewers: { [c.key]: 'full' } })
+  await new Promise((r) => setTimeout(r, 1000))
+  expect(calls).not.toContain(`stream ${d.key}`)
+  // The streamer leaving stops its stream
+  a.node.signal(gid, null, { k: 'leave' })
+  await until(() => calls.includes(`unstream ${a.key}`) && !b.node.state().forwarding[a.key])
+  await raw.destroy()
+}, 120000)
+
+test('a server forwarder: the streamer and its viewers dial it, it serves only listed viewers, and its rtt reaches the window', async () => {
+  const calls: string[] = []
+  const fake = {
+    addStream: (id: string) => (calls.push(`stream ${id}`), { answer: async () => 'v=0 answer', addIce: async () => {} }),
+    addViewer: async (_s: string, v: string) => (calls.push(`viewer ${v}`), { offer: 'v=0 offer', accept: async (sdp: string) => void calls.push(`accept ${v} ${sdp}`), addIce: async () => {} }),
+    setLayer() {},
+    removeViewer() {},
+    removeStream: (s: string) => calls.push(`unstream ${s}`),
+    stats: () => [],
+  }
+  const skp = DHT.keyPair()
+  const sk = skp.publicKey.toString('hex')
+  const server = createNet(skp, { open: (k) => hub.opened(k), close: (k) => hub.closed(k), msg: (k, w) => w.t === 'fwd' && hub.msg(k, w) }, { bootstrap: testnet.bootstrap })
+  const hub = createHub({ forwarder: fake as any, used: () => 0, link: { send: server.send, linked: server.linked, ip: (k) => server.path(k) } })
+  await server.listening
+  const toA: any[] = []
+  const toC: any[] = []
+  const a = start(undefined, undefined, { hostedForwarders: [sk], emit: (e: any) => e.type === 'fwd' && toA.push(e) })
+  const c = start(undefined, undefined, { hostedForwarders: [sk], emit: (e: any) => e.type === 'fwd' && toC.push(e) })
+  await until(() => Number.isFinite(a.node.state().fwdServers[sk]))
+  a.node.fwd(sk, { k: 'open', sdp: 'v=0 offer', viewers: { [c.key]: 'full' } }) // no call mate, not linked yet: it waits for the link
+  await until(() => toA.some((e) => e.from === sk && e.data.k === 'answer'))
+  expect(calls).toEqual([`stream ${a.key}`, `viewer ${c.key}`])
+  c.node.fwdLink(sk)
+  await until(() => toC.some((e) => e.from === sk && e.data.k === 'offer' && e.data.s === a.key)) // held until c linked
+  c.node.fwd(sk, { k: 'accept', s: a.key, sdp: 'v=0 answer' })
+  await until(() => calls.includes(`accept ${c.key} v=0 answer`))
+  // A key the streamer did not list is never served
+  const raw = createNet(DHT.keyPair(), { open() {}, close() {}, msg() {} }, { bootstrap: testnet.bootstrap })
+  raw.dial(sk)
+  await until(() => raw.linked(sk) && server.keys().length === 3)
+  raw.send(sk, { t: 'fwd', k: 'accept', s: a.key, sdp: 'v=0 sneaky' })
+  await new Promise((r) => setTimeout(r, 500))
+  expect(calls.some((x) => x.includes('sneaky'))).toBe(false)
+  // The streamer's link closing stops its stream
+  await a.node.destroy()
+  await until(() => calls.includes(`unstream ${a.key}`))
+  await raw.destroy()
+  await server.destroy()
+}, 120000)

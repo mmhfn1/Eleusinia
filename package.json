@@ -15,7 +15,9 @@
     "inbox": "electron-vite build && electron . --inbox",
     "logs": "electron . --inbox --pull",
     "relay:build": "esbuild src/relay/main.ts --bundle --platform=node --target=node22 --format=cjs --external:hyperdht --external:blind-relay --outfile=deploy/relay/relay.cjs",
+    "forwarder:build": "esbuild src/forwarder/main.ts --bundle --platform=node --target=node22 --format=cjs --external:hyperdht --external:blind-relay --external:werift --outfile=deploy/relay/forwarder.cjs",
     "relay": "npm run relay:build && node deploy/relay/relay.cjs",
+    "inbox:build": "esbuild src/inbox/main.ts --bundle --platform=node --target=node22 --format=cjs --external:hyperdht --external:blind-relay --outfile=deploy/relay/inbox.cjs",
     "installer-art": "electron build/installer-art.cjs",
     "dist": "electron-vite build && electron-builder --win --publish never"
   },
@@ -29,7 +31,8 @@
     "hypercore-crypto": "^3.7.0",
     "hyperdht": "^6.34.1",
     "sodium-universal": "5.0.1",
-    "uiohook-napi": "^1.5.5"
+    "uiohook-napi": "^1.5.5",
+    "werift": "0.27.0"
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
@@ -57,7 +60,8 @@
     "files": [
       "out/**/*",
       "build/icon.png",
-      "package.json"
+      "package.json",
+      "!**/node_modules/mediabunny/**"
     ],
     "asarUnpack": [
       "**/node_modules/uiohook-napi/**",

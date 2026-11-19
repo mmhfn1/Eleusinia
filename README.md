@@ -1,89 +1,113 @@
 <p align="center"><img src="build/icon.png" alt="" width="112"></p>
 
-# Eleusinia
+<h1 align="center">Eleusinia</h1>
 
-Peer-to-peer chat and voice calls for desktop, with no central server. A Discord/TeamSpeak-style app where every message and call goes directly between the people involved.
+<p align="center">
+  Peer-to-peer chat, voice and screen sharing for desktop.<br>
+  A Discord-style app where every message and call goes directly between the people involved.
+</p>
 
-**Status:** tester build (0.0.18 at the time of writing, updating itself). Friends (found even while they are offline), direct and group chat with files (including delivery to people who were offline), voice calls, screen sharing and cameras work, and calls hold up on long, lossy routes. Problems can be reported from inside the app. Discord-style servers are planned next (see the roadmap).
+<p align="center">
+  <a href="https://mmhfn1.github.io/Eleusinia/">Download</a> ·
+  <a href="https://github.com/mmhfn1/Eleusinia/releases">Releases</a> ·
+  <a href="docs/roadmap-servers.md">Servers roadmap</a> ·
+  <a href="docs/roadmap-video.md">Video roadmap</a>
+</p>
+
+---
+
+**Status:** tester builds (0.1.x) for Windows, macOS and Linux, updating themselves. Chat, files, voice, screen sharing, cameras, game activity and Discord-style servers all work. Problems can be reported from inside the app.
+
+## Why Eleusinia
+
+- **No accounts.** Your identity is a key pair made on first launch and kept encrypted on your computer.
+- **No central server for your data.** Messages, files and calls travel between the people in the conversation. Nobody in the middle can read them.
+- **Works on hard networks.** When two routers won't connect directly, a mutual friend or an Eleusinia relay carries the encrypted link.
+- **Big calls without a big upload.** When your upload can't send your screen to everyone, people in the call pass it on, encrypted end to end.
 
 ## Features
 
-- **No accounts, no server.** Your identity is a key pair created on first launch and stored encrypted on your computer.
-- **Ready when it opens.** The app opens on a short splash, the logo breathing like a lamp, that says what it is doing (joining the network, checking for updates, connecting to your friends, catching up) and closes by itself once your friends are linked, who is in which call is known and missed messages have arrived. If someone cannot be reached within 20 seconds it opens anyway and says who it is still connecting to. A newer version found while it shows is downloaded and installed there, and Eleusinia opens again on it, signed in.
-- **Friends by ID.** You pick a username and get a random number, giving a friend ID like `name#1234`. Search an exact ID to see who holds it, with their picture, name and Unique Key (the last characters of their key), then send a request. Search works whether they are online or not: everyone publishes a small signed ID card on the DHT (where anyone can read it, but nobody can fake someone else's entry), refreshed every 6 hours and kept alive by their friends, so the request waits for them and arrives when they are back. Each result has an **Add friend** button on its left. A request arrives at once: it is announced on the DHT under a one-off key, with the sender sealed so only the recipient can read it (nobody watching can tell who is asking whom), and then the sender's app knocks on the recipient's door. The knock is turned away, so it reveals nothing, not even whether they are online, but it makes their app look right away. Accepting is just as quick, and both still work, through the DHT alone, when your two networks never allow a direct connection. Your name, ID and a small thumbnail of your picture come from a card you publish there, signed by your key; the full picture arrives once you are friends. Optionally (Settings → General, off by default) people typing the first 4 letters of your username are shown you while you are online. A desktop notification tells them a request arrived. Up to 200 requests wait at once (the oldest drops off if more arrive), **Decline all** clears them, and a declined request stays declined for 30 days.
-- **Profiles.** Display name, about line and picture. You can move, zoom and rotate a picture to line it up before it is saved. Until you upload one you get a pattern generated from your key. Clicking anyone (their name in chat, the top of a DM, their row in the members list, or them in a call, in the voice panel or above the chat) opens their profile beside them: their picture over a banner made from the game they are playing or their own picture, name, friend ID, about line, the highlights of what they are playing (game, where they are in it, the score, for how long), their volume while in your call, and a box to message them without leaving where you are. Its expand button opens the full profile, with everything about their game. Right-clicking them in the friends list opens it too.
-- **Direct and group chat.** Text messages, signed by their author. A conversation opens at its newest 200 messages; **Show earlier messages** loads more, so long histories stay light. Any member can give a group a picture (click its emblem in the conversation) or rename it (click its name), and everyone in it sees the change. Direct conversations with at least one message sit on the rail below your groups, the latest first (pinned ones on top). A count on a picture shows its unread messages and calls that started and ended without you; an open conversation counts as read only while the window has focus and you are at its newest messages. Right-click a conversation for its menu: mark as read, pin, mute, the profile, copy the friend ID, a nickname only you see, start a call, invite to a group, close the DM (it comes back with the next message), remove the friend or block them. Groups have mark as read, mute, start a call and leave. Anyone can also be blocked from their profile panel, strangers in a group included. Blocking ends the friendship, turns away their requests and connections, and hides their messages in groups you share; Settings → **Blocked people** lists them, each with **Unblock**. Someone who left a group can no longer rename it. Whoever creates a group owns it and can remove members (for good, like leaving); everyone else can add their friends. Each member is in only through a signed add by a member, leading back to the owner, so nobody can slip someone in by editing their copy, and name and picture changes are signed by the member who made them.
-- **Links.** Web addresses in messages are clickable and open in your browser, the full address shown on hover. While you type one, your own app reads the page and shows its preview (title, description, a small picture), which you can remove before sending; the preview travels in the message, signed by you, so the people reading it fetch nothing and no site learns who saw the link.
-- **Sharing files.** Attach any file, of any size, with the paperclip, by dropping it on a conversation or by pasting it (up to 10 per message). Pictures show in the chat; videos and sounds play there once downloaded; anything else is a card with **Download** and then **Show in folder**. Only the message (with each file's name, size and fingerprint) travels like text: the file itself is fetched from whoever has it, the sender or, in a group, any member who already downloaded it, so it stays available after the sender goes offline. Pictures up to 25 MB download by themselves; everything else only when you click, to a place you choose. JPEG and PNG pictures are re-encoded before sending, which removes location and camera details. Files you send are not copied (a moved or edited file can no longer be fetched), and downloaded pictures are kept within a cache limit set in Settings → Storage (1 GB by default, oldest deleted first). Through a mutual friend's relay only pictures travel; bigger files wait for a direct connection. Nobody outside a conversation can fetch its files, and SVG and HTML files are never shown in the chat.
-- **What you're playing.** On unless you turn it off in Settings → Activity: friends and group members see the game you are playing and for how long, in the friend list and in the members sidebar of a group or direct chat (where your own row shows it too): any Steam game exactly (from Steam itself), others by their program (a built-in list, plus any you add). For Steam games the card also shows the game's art, your total playtime, your achievements (how many of how many, the newest ones with their icons, when you got them and how rare they are) and, if you turn them on, its genre, developer, release date and description. Each detail has its own switch, Settings shows exactly what friends see, and any friend can be left out from their profile card. It never reaches anyone else, and nothing reads a game's memory, so anti-cheat has nothing to object to. Live match details for League of Legends, TFT and Rainbow Six Siege, and music from Spotify, YouTube Music and Apple Music, come next (`docs/roadmap-activity.md`).
-- **Live Counter-Strike 2 matches.** In Settings → Activity, the **Steam** tile has a switch per game; turning CS2 on adds a small file to its `cfg` folder (Valve's own Game State Integration, made for apps like this). From then on friends see the map, mode, round, the score with your side marked, how each round was won, the round clock and your kills, assists, deaths, MVPs and score, in the friend list ("Mirage 9–7") and on your card. Your live health, armor, money and weapon are shared only if you turn them on, since they would help someone playing against you. CS2 only tells the app about you, never about other players, so this cannot be used to cheat. Turning it off takes the file away again.
-- **Destiny 2 with your Bungie.net account.** In Settings → Activity, the **Bungie.net** tile opens bungie.net in your own browser to sign in (Eleusinia never sees your password). While you play, friends see the activity you are in with its picture, mode, place, time in it and the score in the Crucible, or "In orbit"; your guardian's class, title, power, Guardian Rank and emblem; your fireteam; and your subclass, weapons and exotic armor. Each part has its own switch, and **Unlink** forgets the link. Marathon has no Bungie.net data for apps yet, so it shows what Steam gives, like other games.
-- **Live Dota 2 matches.** The same switch on the Steam tile, for Dota 2. Friends see your hero and level, the kills on each side with yours marked, the match clock, day or night, and your kills, deaths, assists, last hits, denies, GPM and XPM ("Anti-Mage 14–21" in the friend list). Your gold, items, health, mana, respawn timer and buyback are shared only if you turn them on. Dota 2 also needs `-gamestateintegration` in its Steam launch options; Settings checks for it and says how to add it.
-- **Sounds.** Short, distinct sounds for muting, unmuting, deafening, undeafening, and someone joining or leaving your call. A direct call (not a group's) rings for the person called and plays a caller tune for the caller, each for up to 40 seconds; after that the call simply carries on until someone joins or leaves, it is never ended for lack of an answer. A call that comes in while you are elsewhere shows a bar with Join, Join muted and Silence at the top of whatever you are looking at, and while you are already in a call it gets two soft call-waiting beeps instead of the full ring; joining it leaves your current call. Sounds play on your chosen speakers at your output volume; joining and leaving are silent while you are deafened.
-- **Offline delivery.** You can send while the recipient is offline; it shows as pending and arrives when they are next online with you. In groups, any member who has a message passes it on.
-- **Voice calls.** 1:1 and group, audio sent directly between participants, with mute and deafen (shown to everyone in the call as an icon beside your name), a volume slider for each person from 0 to 200% (remembered between sessions), a ring around whoever is speaking, and in Settings: speakers, a master volume for everything you hear and a sound volume for the app's own sounds, then microphone, noise suppression (on by default: RNNoise, a small neural network running on your CPU during calls, removes taps, keyboards, fans and hum; voices in the room are speech and pass through) and mic sensitivity (only send while you are louder than a level you set, with your live level shown during a call), then the bitrate. A call that drops after a network blip or switch reconnects by itself, and restarting into an update during a call rejoins it as the new version starts; while someone's voice is still arriving the connection is left alone rather than restarted (restarting is what you would hear as a gap), and links to other continents get longer before a restart. Voice goes ahead of screen sharing and cameras when the connection is short of room, and on an uneven link the player keeps a little more audio in hand so words are not stretched or clipped. If your chosen headset or speakers are unplugged mid-call, the call moves to the system default and back when they return. Presence dots are green while someone is online and grey while they are away. A wifi sign next to **Voice Connected** shows your connection: green when good and stable, orange when degraded, red when poor (judged on lost and late audio first: a call to another continent is not marked down for distance alone); hover or focus it to see your ping to each person (or to the network when you are alone in the call): the typical value over the last minute, and whether it is steady or varies (±, judged against the ping itself, so a far but even link counts as steady). Measurements are kept in memory only. Audio stays light: Opus sends almost nothing while you are silent, with its error correction kept on.
-- **Calls on bad lines.** Voice has three layers against a poor connection: Opus repairs a single lost packet, the player holds a little more audio on an uneven link, and every packet carries a spare copy of the one before (about 17 kbps more upload per person), so a lost packet is rebuilt rather than guessed; on a simulated intercontinental line with 4 % loss this cut the voice patched over by about two thirds. Spare copies are left out through a friend's relay and above 64 kbps voice quality. Cameras and screens start sharp (at 1 Mbps, 720p within a few seconds instead of climbing from 180p), and on a long route that loses packets they wait for resent pieces instead of freezing. These holds rise at once and come down only by a clear step, so they do not wobble with the link. The call panel and Oculus use almost no animation during a call, which kept a high refresh rate monitor redrawing hundreds of times a second.
-- **Hotkeys.** Optional shortcuts for mute, deafen and push to talk, set in Settings by pressing the keys. They work while Eleusinia is in the background or minimised, and none are set unless you set them. For games that run as administrator, Settings has **Restart App as Administrator** (Windows). With push to talk set, your microphone only sends while you hold it, and a soft tick tells you when it opens and closes.
-- **Screen sharing.** Share a screen or window in any call, picked from **Screens** and **Applications** tabs (overlays such as the NVIDIA and Xbox Game Bar ones, and system windows, are left out). A shared screen can be watched full screen, and a share with sound has its own volume slider beside the full screen button; the button switches to **Exit full screen**, and Esc works too. Streams start at 720p and 30 fps; the streaming menu goes as high as your system allows (for example 4K at 120 fps), and your choice is always applied. You can switch to another screen or window mid-stream without stopping; your quality carries over as far as the new source allows. On Windows you can share your computer's sound with it: everything you hear except Eleusinia itself, so nobody in the call hears themselves back. Before a stream or camera starts, Eleusinia checks your measured upload can carry it to everyone and nobody already streaming is short of bandwidth; if not, a warning explains why, and you can lower the quality or start anyway. Viewers receive full quality for the stream they show large, a small copy for thumbnails, and nothing while the window is hidden or the screens are hidden. As on Discord, a stream is offered, not pushed: others see a **Join stream** tile where it would play, with a still of the shared screen refreshed every 10 s, and are sent nothing else of it (no video, no sound) until they join. Each person watches one stream at a time; joining another switches to it, and **Leave stream** stops it. A joined stream's sound keeps playing while your window is minimised or the video hidden, and the speaker icon beside its volume slider mutes it. If the chat link to someone drops for a moment while the call itself still works, they stay in the call.
-- **Cameras.** Turn your camera on in any call. Camera settings shows a preview and offers resolution and frame rate up to what your camera can do (720p at 30 fps by default). With only cameras on, everyone appears in a grid. While you watch a stream or share your own, everyone in the call has a tile along the bottom of the large view, full screen too: their camera when it is on, their picture otherwise, lit while they talk; the button on the row's edge folds it away, and folded it receives no cameras. Your camera turns off from the call panel, the stage or Camera settings, without stopping a share. The same upload check as screen sharing applies: a choice that would strain the call is warned about in the dialog as you make it, and one click still starts it.
-- **Connecting through a mutual friend.** When two people's routers never allow a direct connection, a friend you both have carries the link (see [Strict networks](#strict-networks)). That friend's app pairs your two encrypted streams without being able to read them: it sees that you are talking, when, and how much, never what is said. It is only used after a direct connection fails, only when there is something to send or the conversation is open, and it closes after 10 idle minutes. Voice, text and pictures only: screen sharing, cameras and other files are not sent through a friend, and their profile card says **Online through a friend**. Each person relays for at most 8 pairs at a time (4 involving the same friend), at up to 48 KB/s a pair, and only for their own friends, group and server members. The people asked first are those most likely to reach the other person (in their call, then sharing a server or group with them), and someone asked to relay for a person they are not connected to yet connects to them first. A group member you have never connected with is still shown by name, from the profile card everyone publishes. While someone is online but not connected to you yet, their row, profile, call tile and your waiting messages say so ("Online, connecting…"), and "Can't connect yet" once every way through has failed for now; it is tried again later.
-- **Runs in the tray.** Closing the window keeps Eleusinia running beside the clock, so calls, messages, hotkeys and updates carry on; click the icon to bring it back, or right-click it to quit. Settings → General turns this off, so closing the window quits. Opening Eleusinia again while it runs brings the same window back.
-- **Back and forward** with the mouse's side buttons (mouse 4 and 5), through the conversations you have opened.
-- **Problem and crash reports.** Settings → Help and feedback → **Report a problem** sends a bug report, feedback or an idea to the developers, with diagnostics you choose and preview first; crash reports go by themselves unless turned off. They travel peer to peer to the developers' inbox, with no account and no server; nothing identifying is included (see [docs/reports.md](docs/reports.md)).
-- **Resizable layout.** Groups sidebar, friends list split into online and offline (with message and call buttons on each friend, and live calls and friend requests beside it on wide windows), and in a conversation a voice sidebar, the chat and a members sidebar.
-- **The look: Ink and fog.** Black and white like the emblem, over a cold fog gradient sampled from the Shattered Throne's art; Bricolage Grotesque for titles and Instrument Sans for text, both bundled. In a call everyone appears above the chat under a pool of light, the person talking lifted and lit (settling after a moment of quiet); call controls are round icon buttons. A direct call you have not joined shows a bar to join, join muted or silence the ringing. Motion is short and stops when the system asks for reduced motion.
-- **Its own title bar.** The window's top strip is part of the app: it shows where you are, a way back to a call you are in elsewhere, and quiet minimize, maximize and close buttons; it still drags, snaps and maximizes on double-click like any window. The installer refreshes Windows' icon cache, so the taskbar shows the current icon after an update.
-- **Your bar and the call bar.** Under the rail and the left column, as wide as both: your picture and name (opening your profile), what you are playing or your friend ID, mute and deafen with a small arrow to pick the microphone or speakers (and the speakers' volume), and Settings. While you are in a call, wherever you are in the app, the call bar sits above it: the connection sign, where the call is (click it to go back), noise suppression, Disconnect, and the camera and screen share buttons.
-- **The emblem.** The emblem at the top of the rail takes you Home (friends and direct messages); right-click it for a small menu: go to any friend or group by typing, copy your friend ID, check for updates, report a problem, or quit.
-- **Servers.** Discord-style communities with no server behind them: text and voice channels in categories, roles in a chosen order with their own colours and permissions, channels limited to some roles, invite links (with an expiry and a use limit), a poke to ask members to join you in a voice channel, kick and ban, and an audit log. Create or join one from the **+** at the foot of the rail. A channel with unread messages is bold with its count, and the server's picture on the rail shows the total (muted channels and muted servers left out); right-click a server to mark it all read or mute it. Right-click a channel to mark it read, mute it for 15 minutes, an hour, 8 hours or until you turn it back on, copy its link, join or leave its call, open its chat, invite someone into it, and (with the permission) edit, duplicate or delete it or invite people. Right-click someone in a voice channel or a call for their profile, a message or a call, their volume, muting them or their video for you only, ignoring them (their DMs stop counting and ringing and their pokes stay silent), inviting them to one of your servers (a link sent in your DM), friending or blocking them, and, for members ranked below you with the permission, server mute, server deafen, moving them to another voice channel, or disconnecting them. An invite link in any chat shows as a card with the server's picture, name and members, and joins in one click. A server is a signed history of changes that every member's app replays the same way, so nobody can give themselves powers, and nobody can act before their own demotion. Not yet: encryption for limited channels (planned). See `docs/roadmap-servers.md`.
+### Friends and profiles
+- Friend IDs like `name#1234`. Search finds people even while they're offline, and requests wait until they're back.
+- Requests are sealed, so nobody watching can tell who is asking whom.
+- Profiles with a name, about line, picture and a banner. Click anyone to open their profile beside them, with what they're playing and a box to message them.
+- Nicknames, pins, mutes and blocking, all from a right-click.
 
-## Strict networks
+### Chat and files
+- Direct and group chat. Every message is signed by its author.
+- Messages reach people who were offline once you're both online. In groups, any member passes them on.
+- Files of any size: paste, drop or attach. Pictures show inline. Other files download on click, from anyone in the conversation who has them.
+- Link previews are made by the sender, so readers' apps fetch nothing.
+- Photos have their location and camera details stripped before sending.
 
-Some routers (common on mobile data and carrier-grade NAT) never allow a direct connection between two people behind them. Eleusinia then tries three routes, in this order:
+### Voice calls
+- 1:1 and group calls with mute, deafen, a volume per person and a ring around whoever is speaking.
+- Noise suppression on by default (RNNoise, running locally).
+- Push to talk and global hotkeys that work while a game is in front.
+- Calls hold up on bad lines: spare voice copies, a jitter buffer that adapts, and reconnecting by itself after a network switch.
+- A connection sign shows the ping to each person and how steady it is.
 
-1. **Direct**, skipped when both sides are known to be on strict networks.
-2. **A friend or server member relaying**: someone you both know whose own network is not strict. Voice and text only (pictures included), at most about 2 Mbit/s of their upload; their profile card says **Online through a friend**.
-3. **An Eleusinia relay**, run by the project. It carries everything, video and screen sharing included, and shows as **Online through an Eleusinia relay**.
+### Screen sharing and cameras
+- Share a screen or window, up to what your system allows (for example 4K at 120 fps), with your computer's sound on Windows.
+- Streams are offered, not pushed: viewers join when they want to watch, and get nothing until they do.
+- Cameras with a preview, and a row of people along the bottom of a stream.
+- An upload check warns before a stream would strain the call.
+- **Forwarding:** when your upload runs short, call mates pass your stream on, and an Eleusinia server does as a last resort. Forwarders only ever handle encrypted frames. The tile says who it came through.
 
-A relay only ever handles encrypted data: it cannot read messages or hear calls. It does see who connects to whom, when and how much, and both sides' IP addresses. That is why only friends, group and server members, and the project's own relays relay, never strangers.
+### Servers
+- Text and voice channels in categories, roles with colours and permissions, channels limited to some roles.
+- Invite links with an expiry and a use limit, and invite cards that join in one click.
+- Pokes to invite members into a voice channel.
+- Moderation: kick, ban, server mute and deafen, move, disconnect, and an audit log.
+- No server behind them: a server is a signed history that every member's app replays the same way, so nobody can give themselves powers.
 
-Relaying for others is always on, with no switch, unless your own network is strict (nobody could reach your relay then). Settings → General says so.
+### Game activity
+- What you're playing, shown to friends and group members only, with each detail behind its own switch.
+- Steam games with art, playtime and achievements.
+- Live **Counter-Strike 2** and **Dota 2** matches through Valve's Game State Integration: map, score and your stats. Health, money and items stay private unless you turn them on.
+- **Destiny 2** through your Bungie.net account: activity, guardian, fireteam and loadout.
+- Nothing reads a game's memory, so anti-cheat has nothing to object to.
 
-Limits: two people on strict networks cannot connect when the Eleusinia relay is down or full and no suitable friend or server member is online, or when a network blocks UDP entirely (some offices and schools), since there is no TCP route. They show as "Can't connect yet" and are tried again later.
+### The app
+- Opens on a short splash that waits until your friends are linked and missed messages have arrived, and installs any update first.
+- Its own title bar, a tray icon, mouse back and forward buttons, and resizable columns.
+- The look: black and white like the emblem, over a cold fog.
+- **Report a problem** sends a bug report to the developers. You preview it first, and nothing identifying is included ([docs/reports.md](docs/reports.md)).
+
+## Connecting on strict networks
+
+Some routers, common on mobile data and carrier-grade NAT, never allow a direct connection. Eleusinia tries these routes in order:
+
+1. **Direct.**
+2. **A mutual friend or server member relaying.** Voice, text and pictures only. Their profile card says *Online through a friend*.
+3. **An Eleusinia relay**, run by the project. It carries everything, video included, and shows as *Online through an Eleusinia relay*.
+
+A relay only handles encrypted data. It can see who connects to whom, when and how much, but never what is said. Only friends, group and server members, and the project's own relays ever relay for you.
+
+A network that blocks UDP entirely (some offices and schools) can't connect, since there is no TCP route.
 
 ## How it works
 
-| Part | Technology | What it carries |
-|---|---|---|
-| Finding and linking peers | [HyperDHT](https://github.com/holepunchto/hyperdht) (public DHT, encrypted streams) | Presence, friend requests, profiles, group membership, messages, call signaling |
-| Calls | WebRTC (Chromium, inside Electron), full mesh; falls back to the DHT link when no direct route exists (`src/main/relay.ts`) | Opus voice with spare copies (RED), screens and cameras (VP9 first) |
-| Storage | JSON and `.jsonl` files in the app's data folder | Friends, groups, settings, message logs |
+| Part | Technology |
+|---|---|
+| Finding and linking people | [HyperDHT](https://github.com/holepunchto/hyperdht): a public DHT and encrypted streams, found by public key |
+| Calls | WebRTC in Electron, full mesh, with peer forwarding for screens ([werift](https://github.com/shinyoshiaki/werift-webrtc)) |
+| Storage | JSON and `.jsonl` files in your data folder |
+| App | Electron, React and TypeScript |
 
-The only outside infrastructure is the public DHT's bootstrap nodes and a public STUN server, used to find peers and open direct connections. They never see messages or audio.
-
-- `src/main/network.ts`: one encrypted stream per peer, found by public key.
-- `src/main/node.ts`: friends, groups, message logs and their sync. No Electron imports, so the tests run it directly.
-- `src/shared/`: wire types, validation, signing and merge logic, and the per-peer call decisions (`callstate.ts`: early ICE candidates, reconnect timing).
-- `src/shared/quality.ts`: how a call's link is doing, and how long voice and video are held on an uneven or lossy one.
-- `src/renderer/`: the React UI (`App.tsx`, `Settings.tsx`, `Media.tsx`, `Chat.tsx`) and calls (`call.ts`).
+The only outside services are the DHT's bootstrap nodes, a public STUN server, and the project's relay and forwarder. None of them can read messages or hear calls. Developer notes on the architecture are in [CLAUDE.md](CLAUDE.md).
 
 ## Installing
 
-Testers: get it from the [download page](https://mmhfn1.github.io/Eleusinia/), which offers the file for your system from the newest release (the page lives in `docs/`), or from [Releases](https://github.com/mmhfn1/Eleusinia/releases). Nothing is signed by Microsoft or Apple yet, so each system asks once:
+Download from the [download page](https://mmhfn1.github.io/Eleusinia/) or [Releases](https://github.com/mmhfn1/Eleusinia/releases). Builds aren't signed by Microsoft or Apple yet, so each system asks once:
 
-- **Windows** (10 or 11, 64-bit): run `Eleusinia-Setup-<version>.exe`. At "Windows protected your PC" choose **More info → Run anyway**. Data stays in `%APPDATA%\Eleusinia` and is kept if you uninstall.
-- **macOS** (11 or later): open `Eleusinia-<version>-arm64.dmg` (Apple Silicon) or `-x64.dmg` (Intel) and drag Eleusinia into Applications. The first time, right-click it and choose **Open**, then **Open** again (macOS 15 and later: open it once, then **Open Anyway** in System Settings → Privacy & Security). It asks to move itself into Applications if started elsewhere, since it can only update itself from there. Microphone, camera and screen recording are asked for when first used; hotkeys need Accessibility permission.
-- **Linux** (64-bit): `Eleusinia-<version>.AppImage` runs on most distributions. Make it executable (**Properties → Allow executing as a program**, or `chmod +x`) and open it; keep it in a folder you can write to, so it can update itself. Hotkeys need X11 rather than Wayland; without a keyring (GNOME Keyring or KWallet) your identity is stored unencrypted, in a data folder (`~/.config/Eleusinia`) only your user account can open.
+- **Windows 10 or 11:** run `Eleusinia-Setup-<version>.exe`. At *Windows protected your PC*, choose **More info → Run anyway**.
+- **macOS 11 or later:** open the `.dmg` (`arm64` for Apple Silicon, `x64` for Intel) and drag Eleusinia into Applications. The first time, right-click it and choose **Open**. On macOS 15, use **Open Anyway** in System Settings → Privacy & Security.
+- **Linux:** make the `.AppImage` executable and run it from a folder you can write to. Hotkeys need X11.
 
-**Updates are automatic** from 0.0.2 on. Every time Eleusinia starts it first checks for a newer release (for a few seconds at most, so being offline never holds it up); if there is one, it downloads and installs it, then opens the new version. While running it checks again when a contact runs a newer version (at most every 10 minutes), when a call fails to connect, and hourly besides, and offers **Restart now**, or installs the next time you close it. Anyone on 0.0.1 installs 0.0.2 by hand once. On Windows the installer does this; on macOS and Linux the app replaces itself (the app in Applications, or the AppImage file), the way Sparkle-updated Mac apps do.
+**Updates are automatic.** Eleusinia checks on start, hourly, and when a friend runs a newer version. Every update is signed with Eleusinia's own key and checked before it is installed.
 
-**Releases** are made by GitHub itself: every push to `main` that changes the app (not only docs or tests) is type-checked, unit-tested, built and published as the next version (`.github/workflows/release.yml`). The version counts up by itself from the one in `package.json` (0.0.2, 0.0.3, …); raise its first two parts there for a bigger step. Each release is built on Windows, macOS and Linux machines at once and published together. Releases need three secrets in the repository's `release` environment (`UPDATE_SIGNING_KEY`, and `MAC_CERT_P12` and `MAC_CERT_PASSWORD` for Eleusinia's own macOS certificate) and are only made from `main`. Every push to `test` is also checked and built for all three systems (`.github/workflows/check.yml`), with the unsigned installers kept for a week under that run's artifacts for trying a build before release. A push that only touches docs or tests publishes nothing; to release anyway, run the workflow by hand (`gh workflow run release.yml --ref main`). Work happens on the `test` branch and is merged into `main` with `git merge --no-ff test` on a PC (merging through GitHub's page as well as locally copies commits and makes later merges conflict). Whatever reaches `main` reaches every tester within hours.
-
-**Signed updates:** nothing is signed by Microsoft or Apple yet, so every release also carries a signature by Eleusinia's own update key on each update file (`.exe.sig`, `-mac.zip.sig`, `.AppImage.sig`, made in the release workflow). macOS builds are also code-signed with Eleusinia's own self-signed certificate, the same for every release, so the Keychain keeps trusting the app across updates; it cannot be notarized by Apple, hence the first-launch step. An installed copy downloads an update, checks that signature against the key built into it, and deletes the download instead of installing it if it does not match. Copies older than this check install the first signed release without checking it.
-
-**Mixed versions:** everyone's profile card shows the Eleusinia version they run. Copies whose calls cannot work together do not try to connect, and the call panel says who needs to update.
-
-## Getting started
+## Development
 
 Requires [Node.js](https://nodejs.org) 22 or newer.
 
@@ -92,65 +116,42 @@ npm install
 npm run dev
 ```
 
-`npm install` also downloads the Electron app binary (about 100 MB, cached after the first time). If `npm run dev` says `Electron uninstall`, the install was run with scripts disabled; run `npx install-electron` once.
+If `npm run dev` says `Electron uninstall`, run `npx install-electron` once.
 
-### Trying it with two identities on one computer
+To run two identities on one computer, give the second its own data folder. In PowerShell:
 
-Each instance needs its own data folder. Start the first normally, then in a second terminal:
-
-```bash
-ELEUSINIA_DATA=/tmp/eleusinia-b npm run dev
+```powershell
+$env:ELEUSINIA_DATA = "C:\temp\eleusinia-b"; npm run dev
 ```
-
-On Windows PowerShell: `$env:ELEUSINIA_DATA = "C:\temp\eleusinia-b"; npm run dev`
-
-The two can find each other by exact friend ID even if one is closed, once each has been online long enough to publish their ID card.
-
-## Scripts
 
 | Command | What it does |
 |---|---|
-| `npm run dev` | Run the app with hot reload |
-| `npm run build` | Build into `out/` |
-| `npm start` | Run the built app |
-| `npm test` | Unit and integration tests on a local test DHT |
 | `npm run typecheck` | TypeScript check |
-| `npm run smoke` | Builds, then drives three real app windows on a local test DHT through setup, friend search, chat, a voice call, screen sharing (of its own windows only, with computer sound on Windows), a camera, offline delivery, and problem and crash reports to a test inbox (about two minutes, opens windows) |
-| `ELEUSINIA_NO_DIRECT=1 npm run smoke` | Same, but direct call routes are withheld, so the call must go through the relay |
-| `ELEUSINIA_SMOKE_RELAYED=1 npm run smoke` | A shorter run where two windows behave as behind strict routers (`ELEUSINIA_STRICT=1`, testing only): their chat and a voice call go through the third window, a mutual friend relaying, and screen sharing is held back |
-| `ELEUSINIA_SMOKE_RELAYED=1 ELEUSINIA_SMOKE_HOSTED=1 npm run smoke` | The same, but the third window relays for nobody: the run starts a hosted relay on the test DHT, and the chat, a voice call and a screen share (its video too) go through it |
-| `npm run relay` | Builds and runs the hosted relay (`src/relay/main.ts`); `npm run relay -- --print-key` prints its key. Setting one up on a server: [docs/oracle-setup.md](docs/oracle-setup.md) |
-| `npm run dist` | Builds the Windows installer into `dist/` (`Eleusinia-Setup-<version>.exe`); the macOS and Linux ones are built by GitHub (`npx electron-builder --mac` or `--linux` on those systems) |
-| `ELEUSINIA_SMOKE_EXE=dist/win-unpacked/Eleusinia.exe node test/smoke.mjs` | The same smoke run against the packaged app, after `npm run dist` |
-| `npm run inbox` | Runs the developers' inbox, which receives problem and crash reports and files them as GitHub issues (see [docs/reports.md](docs/reports.md)) |
-| `npm run logs` | Asks every tester's app for its logs (`npm run logs -- name#1234` for one); they arrive in the inbox's reports folder and, with GitHub filing set up, as one issue per pull 10 minutes later (see [docs/reports.md](docs/reports.md)) |
-| `npm run installer-art` | Redraws the installer's sidebar and header pictures in the app's look |
-| `ELEUSINIA_SMOKE_PUBLIC=1 npm run smoke` | Same, over the public DHT: an occasional real-network check, slower and sometimes flaky when the DHT is |
-| `ELEUSINIA_TEST_NET="delay=150,jitter=30,loss=0.03,burst=4"` | Testing only: a simulated bad line (delay, jitter, average loss, loss burst length, `outage=30:8` for 8 s of nothing from 30 s in) on relayed call packets; use with `ELEUSINIA_NO_DIRECT=1` so every packet takes that path |
+| `npm test` | Unit and integration tests on a local test DHT |
+| `npm run smoke` | Builds, then drives three real app windows through chat, calls, screen sharing and more (about 2 minutes) |
+| `npm run dist` | Windows installer into `dist/` |
+| `npm run relay` | The hosted relay ([server setup](docs/oracle-setup.md)) |
+| `npm run inbox` | The developers' inbox for problem reports ([docs/reports.md](docs/reports.md)) |
+
+The smoke run has modes for relayed, strict-network and forwarded calls. They are listed in [CLAUDE.md](CLAUDE.md).
+
+**Releases:** work happens on `test`. Each push there is checked and built on all three systems. Merging into `main` publishes the next version to every tester.
 
 ## Known limits
 
-- **Game activity reads what Steam and the system show.** A game that was already running when Eleusinia started counts from then. Steam updates the total playtime and achievements it keeps on the computer itself, sometimes only when the game closes. On macOS, finding the Steam game being played has not been tried on a real Mac yet.
-- **Friend IDs are not guaranteed unique.** Nothing central can reserve a name. Two people can hold the same `name#1234`; search lists both and shows each one's Unique Key so you can pick the right person. The Unique Key shown is the last 6 characters of the person's public key: it stops accidents, not a determined impostor.
-- **Finding someone offline needs their exact friend ID** (and that they were online at some point to publish it); a message needs sender and recipient, or another member of the group, online at the same time at some point.
-- **Your name, about line and a small thumbnail of your picture are visible to anyone who knows your ID**, since search reads your published card before you are friends.
-- **Only friends, fellow group members and people you asked can connect to you.** Anyone else is turned away before learning your network address, which also means a newly added group member gets the group from the friend who added them, not from other members they have never met. Someone who knows your full public key can still tell from the DHT whether you are online.
-- **A stolen key cannot fetch your old messages.** Friends never resend what your copy already confirmed holding, so whoever has your key gets only what you had not yet received. The other side of this: if you lose your messages but keep your identity, old messages do not come back; new ones carry on.
-- **Strict networks.** When routers block a direct call connection, the call is carried over the same encrypted link chat uses (shown as "relayed through the chat link"). This adds a little delay, and a call still fails if the two people cannot reach each other for chat either. When even chat cannot link, a relay carries it (see [Strict networks](#strict-networks)). The fallback needs a network address on your machine (IPv4, or IPv6 when there is no IPv4); without one, the call panel says the fallback is unavailable.
-- **On a long route that loses packets, video runs a little behind the voice.** Cameras and screens wait up to half a second for lost pieces to be resent instead of freezing; on short or clean links there is no wait.
-- **Groups hold up to 100 members.**
-- **Groups have one owner and no other roles.** Only the owner can remove someone; ownership cannot be handed over yet. Removing someone also drops the people only they had added, until a member adds them again. Removed members and leavers cannot be added back. A removed member keeps the messages they already had. For groups made before owners existed, each copy of the app works out the owner once, as the one member nobody added.
-- **Deleting an account only erases it from your computer.** Friends who are offline at the time keep you in their list, and everyone keeps the messages you already sent them.
-- **Computer sound with a share is Windows only**, and mono. Calls of more than about 6 to 8 full-quality streams (screens and cameras together) need peer forwarding, which is not built yet (see the roadmap).
-- **Hotkeys use a system-wide keyboard hook** ([uiohook-napi](https://github.com/SnosMe/uiohook-napi)), running only while a hotkey is set or being recorded. Keys are only compared in memory, never stored or sent. On Windows, keys pressed while a program running as administrator is in front (some games, launchers and anti-cheat tools) never reach it; **Settings → Restart App as Administrator** fixes that until Eleusinia is closed. On macOS it needs Accessibility permission; on Linux it needs X11 (not Wayland).
-- **In a big group you link with only a few members** (friends, people in your call, and 8 others), and messages, receipts and who is online travel along those links. Members you are not linked with show online from their presence notes, up to three minutes late, and what they are playing is not shown.
-- **A member can send at most about 20 messages a second** in a conversation (after a burst of 400); more are held back and fetched again shortly after. A long backlog arrives in pages of 200, and history from before you joined a group or server is not counted as unread.
-- **Joining a group with a long history** brings each person's newest 100 messages; **Show earlier messages** fetches older ones a page at a time from members who are online. Everything you have received stays on your computer, with no automatic clean-up: a busy group adds a few MB a day.
-- **No edits, deletes or reactions.** A shared file can only be fetched while someone who has it is online, and JPEG pictures arrive without their rotation tag (a phone photo may show sideways). GIF and WebP pictures are sent as they are, with any details they carry.
-- **Desktop only, one device per identity.** Windows, macOS and Linux, none signed by Microsoft or Apple (see Installing). Sharing computer sound with a screen and Restart as Administrator are Windows only.
-- **Reports reach the developers only while their inbox is running**; until then they wait on your computer.
+- **Friend IDs aren't unique.** Two people can hold the same `name#1234`. Search shows each one's Unique Key so you can pick the right one.
+- **Your name, about line and a picture thumbnail are public** to anyone who knows your friend ID.
+- **One device per identity**, desktop only.
+- **No message edits, deletes or reactions yet.**
+- **A file can only be fetched while someone who has it is online.**
+- **Groups hold up to 100 members** and have one owner, who can't hand ownership over yet.
+- **Forwarding covers screens only.** Cameras still go person to person.
+- **Computer sound with a share is Windows only.**
+- **Hotkeys** use a system-wide keyboard hook that runs only while a hotkey is set. On Windows, keys pressed in a game running as administrator need **Restart App as Administrator**.
+- **Deleting your account** only erases it from your computer.
 
 ## Roadmap
 
-- **Servers:** Discord-style communities beside groups, of up to about 200 members: text and voice channels, custom-named roles with permissions, channels limited to roles and end to end encrypted, invite links, kick and ban, all without a server (a signed history of changes that every member's app replays to the same result). Phase 1 is built (see Features), with server mute, deafen, move and disconnect; next is encryption for limited channels.
-- Screen sharing and cameras for calls of up to 15 to 20 people with no cap on sharers: per-viewer quality in the peer-to-peer mesh, and well-connected participants forwarding end-to-end encrypted video when needed. See [docs/roadmap-video.md](docs/roadmap-video.md).
+- **Servers:** encryption for limited channels next ([docs/roadmap-servers.md](docs/roadmap-servers.md)).
+- **Video:** forwarding tried across real networks, and cameras forwarded too ([docs/roadmap-video.md](docs/roadmap-video.md)).
+- **Activity:** League of Legends, TFT, Rainbow Six Siege, and music from Spotify and others ([docs/roadmap-activity.md](docs/roadmap-activity.md)).

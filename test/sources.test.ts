@@ -15,9 +15,11 @@ test('ordinary screens and windows are offered', () => {
   expect(shareable(win('Visual Studio Code'))).toBe(true)
 })
 
-test('a source with an empty thumbnail is dropped, screen or window', () => {
+test('a screen with an empty thumbnail is dropped, a window (a DirectX game) is kept', () => {
   expect(shareable(scr('Screen 1', true))).toBe(false)
-  expect(shareable(win('Notepad', true))).toBe(false)
+  expect(shareable(win('ELDEN RING', true))).toBe(true)
+  expect(shareable(win('', true))).toBe(false)
+  expect(shareable(win('NVIDIA GeForce Overlay', true))).toBe(false)
 })
 
 test('a window with an empty or blank name is dropped', () => {

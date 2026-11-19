@@ -10,10 +10,10 @@ import { autoUpdater } from 'electron-updater'
 import { UiohookKey, uIOhook } from 'uiohook-napi'
 import { type Bindings, type Hotkey, createMatcher, createRecorder } from '../shared/hotkeys'
 import { type FileRef, inlineKind, mimeOf, safeName } from '../shared/media'
-import { parseRelays } from '../shared/relays'
+import { parseForwarders, parseRelays } from '../shared/relays'
 import { isWebUrl } from '../shared/links'
 import { isKey } from '../shared/protocol'
-import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics, pullTargets } from '../shared/reports'
+import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared/reports'
 import { kindOf, shareable } from '../shared/sources'
 import { limiter } from '../shared/invite'
 import { isNewer, verifyUpdate } from '../shared/updatesig'
@@ -24,10 +24,11 @@ import type { Dota } from '../shared/dota'
 import { programs, watchActivity } from './activity'
 import { type BungieConfig, createBungie } from './bungie'
 import { GSI_GAMES, type GsiGame, createGsi } from './gsi'
-import { createInbox } from './inbox'
+import { runInbox } from './inbox'
 import { previewLink } from './links'
 import { type Staged, canInstall, fetchUpdate, install, tidy } from './selfupdate'
 import { createNode } from './node'
+import { createForwarder } from './forwarder'
 
 // `npm run inbox` runs the developers' inbox (inbox.ts) instead of the app, in a data folder of its own.
 const inboxMode = process.argv.includes('--inbox')
@@ -70,32 +71,12 @@ function privateDir(dir: string) {
   return dir
 }
 
-// The inbox's identity is kept in plain text on purpose: it only exists on the developers' machine, and whoever
-// holds it can receive every report. The GitHub token comes from the environment or github.json beside it.
+// The developers' inbox (inbox.ts runInbox; on a server, src/inbox/main.ts runs the same without Electron)
 function startInbox() {
-  const dir = privateDir(app.getPath('userData'))
-  const idFile = join(dir, 'inbox-identity.json')
-  if (!existsSync(idFile)) writeFileSync(idFile, JSON.stringify({ sk: DHT.keyPair().secretKey.toString('hex') }))
-  const secretKey = Buffer.from(JSON.parse(readFileSync(idFile, 'utf8')).sk, 'hex')
-  const config = join(dir, 'github.json')
-  const saved = existsSync(config) ? JSON.parse(readFileSync(config, 'utf8')) : {}
-  const token = process.env.GITHUB_TOKEN || saved.token
-  const repo = process.env.ELEUSINIA_REPORTS_REPO || saved.repo
   const log = (line: string) => console.log(`${new Date().toISOString().slice(0, 19).replace('T', ' ')}  ${line}`)
-  const inbox = createInbox({ dir, keyPair: { publicKey: secretKey.subarray(32), secretKey }, dht: testDht(), github: token && repo ? { token, repo } : undefined, log })
-  log(`Eleusinia inbox ${inbox.key}`)
-  log(`saving reports in ${join(dir, 'reports')}`)
-  log(token && repo ? `filing issues in ${repo}` : `not filing issues: put {"token": "...", "repo": "owner/name"} in ${config}`)
-  if (inbox.key !== INBOX_KEY && !process.env.ELEUSINIA_BOOTSTRAP) log('warning: the app sends reports to a different inbox (INBOX_KEY in src/shared/reports.ts)')
+  const { inbox, pull } = runInbox(app.getPath('userData'), testDht(), log)
   process.on('SIGINT', () => inbox.destroy().then(() => app.exit(0)))
   // A log pull (pullArg): here at start, or handed over by a second copy while this one runs
-  const pull = (arg: unknown) => {
-    if (typeof arg !== 'string') return
-    log(`pull asked for ${arg}`)
-    const to = pullTargets(arg)
-    if (!to) return log(`pull: "${arg}" is not a friend ID (name#1234) or Unique Key (6 characters); say all for everyone`)
-    inbox.pull(to).then((p) => log(p ? `pull ${p.id.slice(0, 6)} published for ${to === 'all' ? 'every tester' : to.join(', ')}; logs arrive as [logs] reports in the folder above` : 'pull: the DHT did not take it; try again in a minute'))
-  }
   pull(pullArg)
   app.on('second-instance', (_e, _argv, _cwd, data) => pull((data as { pull?: unknown } | undefined)?.pull))
 }
@@ -415,7 +396,10 @@ function startApp() {
       } catch {}
     } else writeFileSync(stayPut, '')
   }
+  // Testing only (a local test DHT): shown without taking focus, so smoke runs stay behind whatever the user is doing
+  const background = !!testDht() && process.env.ELEUSINIA_TEST_BACKGROUND === '1'
   const win = new BrowserWindow({
+    show: !background,
     width: 1280,
     height: 800,
     minWidth: 900,
@@ -429,6 +413,7 @@ function startApp() {
     trafficLightPosition: { x: 14, y: 9 }, // macOS: its own buttons, centred in our 32 px bar
     webPreferences: { preload: join(__dirname, '../preload/index.js') },
   })
+  if (background) win.showInactive()
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   // Events wait while the page loads, until it asks for its first state (App.tsx subscribes in the same effect), so
   // nothing sent meanwhile is lost, such as the join of someone already in a call. State events from before that ask
@@ -522,8 +507,14 @@ function startApp() {
     ...(process.env.ELEUSINIA_BOOTSTRAP && process.env.ELEUSINIA_TEST_GROUP_LINKS && { groupLinks: Number(process.env.ELEUSINIA_TEST_GROUP_LINKS) }),
     noRelay: !!process.env.ELEUSINIA_BOOTSTRAP && process.env.ELEUSINIA_TEST_NO_RELAY === '1', // testing, local test DHT only: relay for nobody (smoke's hosted mode)
     netsim: process.env.ELEUSINIA_TEST_NET, // testing: a simulated bad line for calls (shared/netsim.ts)
+    // Passes call mates' screens on (design/plan-stream-forwarding.md); the STUN server is the one call.ts uses
+    // ELEUSINIA_TEST_NO_FORWARD=1 (local test DHT only): a copy that cannot forward, as in the smoke's server mode
+    forwarder: process.env.ELEUSINIA_BOOTSTRAP && process.env.ELEUSINIA_TEST_NO_FORWARD === '1' ? undefined : createForwarder({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], log: (...a) => diagnostics.add('call', a.map((x) => String(x).replace(/[0-9a-f]{64}/g, (k) => '…' + k.slice(-6))).join(' ')) }),
+    // testing, local test DHT only: the upload probe reports this (smoke's forwarding mode)
+    ...(process.env.ELEUSINIA_BOOTSTRAP && Number(process.env.ELEUSINIA_TEST_UPLOAD_KBPS) > 0 && { testUploadKbps: Number(process.env.ELEUSINIA_TEST_UPLOAD_KBPS) }),
     // The project's hosted relays; ELEUSINIA_RELAYS replaces them only on a local test DHT
     hostedRelays: parseRelays(process.env.ELEUSINIA_BOOTSTRAP ? process.env.ELEUSINIA_RELAYS : undefined),
+    hostedForwarders: parseForwarders(process.env.ELEUSINIA_BOOTSTRAP ? process.env.ELEUSINIA_FORWARDERS : undefined),
     thumbnail: (avatar) => {
       const img = nativeImage.createFromDataURL(avatar)
       if (img.isEmpty()) return null
@@ -619,12 +610,16 @@ function startApp() {
   // Screen sharing: the page lists screens and windows (never this app's own), the user picks one in our own
   // picker, and the next getDisplayMedia call captures exactly that source. Anything else is refused.
   let chosen: string | null = null
+  let pickerSeen = ''
   ipcMain.handle('screens', async () => {
     const own = win.getMediaSourceId()
     const displays = screen.getAllDisplays()
-    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 180 } })
-    return sources
-      .filter((s) => s.id !== own && shareable({ id: s.id, name: s.name, emptyThumb: s.thumbnail.isEmpty() }))
+    const sources = await desktopCapturer.getSources({ types: ['screen', 'window'], thumbnailSize: { width: 320, height: 180 }, fetchWindowIcons: true })
+    const offered = sources.filter((s) => s.id !== own && shareable({ id: s.id, name: s.name, emptyThumb: s.thumbnail.isEmpty() }))
+    // Counts only (window titles can be private), and only when they change, as the picker asks again every few seconds
+    const seen = `share picker: ${offered.filter((s) => kindOf(s.id) === 'screen').length} screens, ${offered.filter((s) => kindOf(s.id) === 'window').length} windows (${offered.filter((s) => s.thumbnail.isEmpty()).length} without a preview), ${sources.length - offered.length} left out`
+    if (seen !== pickerSeen) diagnostics.add('call', (pickerSeen = seen))
+    return offered
       .map((s) => {
         // A window can be moved to any display, so it may go as high as the display it is listed on or the primary one.
         const d = displays.find((x) => String(x.id) === s.display_id) ?? screen.getPrimaryDisplay()
@@ -632,7 +627,9 @@ function startApp() {
           id: s.id,
           kind: kindOf(s.id),
           name: s.name,
-          thumb: s.thumbnail.toDataURL(),
+          // Games drawn with DirectX often give no preview yet capture fine: their icon stands in
+          thumb: s.thumbnail.isEmpty() ? '' : s.thumbnail.toDataURL(),
+          icon: s.appIcon && !s.appIcon.isEmpty() ? s.appIcon.toDataURL() : '',
           width: Math.round(d.size.width * d.scaleFactor),
           height: Math.round(d.size.height * d.scaleFactor),
           fps: Math.round(d.displayFrequency) || 60,

@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
+import DHT from 'hyperdht'
 import { type Key, keyTail } from '../shared/protocol'
-import { type Pull, type Report, cleanReport, describe, eventLine, pullRecord } from '../shared/reports'
+import { INBOX_KEY, type Pull, type Report, cleanReport, describe, eventLine, pullRecord, pullTargets } from '../shared/reports'
 import { createNet } from './network'
 
 // The developers' inbox, run with `npm run inbox`: receives problem and crash reports from anyone with the app,
@@ -158,6 +159,55 @@ export function createInbox({ dir, keyPair, dht, github, log = () => {}, fileEve
       await net.destroy()
     },
   }
+}
+
+// The inbox in a data folder, as `npm run inbox` (index.ts) and the server's plain Node entry (src/inbox/main.ts) run
+// it. The identity is kept in plain text on purpose: it only exists where the inbox runs, and whoever holds it
+// receives every report. The GitHub token comes from the environment or github.json beside it.
+export function runInbox(dir: string, dht: object | undefined, log: (line: string) => void) {
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  chmodSync(dir, 0o700)
+  const idFile = join(dir, 'inbox-identity.json')
+  if (!existsSync(idFile)) writeFileSync(idFile, JSON.stringify({ sk: DHT.keyPair().secretKey.toString('hex') }), { mode: 0o600 })
+  const secretKey = Buffer.from(JSON.parse(readFileSync(idFile, 'utf8')).sk, 'hex')
+  const config = join(dir, 'github.json')
+  const saved = existsSync(config) ? JSON.parse(readFileSync(config, 'utf8')) : {}
+  const token = process.env.GITHUB_TOKEN || saved.token
+  const repo = process.env.ELEUSINIA_REPORTS_REPO || saved.repo
+  const inbox = createInbox({ dir, keyPair: { publicKey: secretKey.subarray(32), secretKey }, dht, github: token && repo ? { token, repo } : undefined, log })
+  log(`Eleusinia inbox ${inbox.key}`)
+  log(`saving reports in ${join(dir, 'reports')}`)
+  log(token && repo ? `filing issues in ${repo}` : `not filing issues: put {"token": "...", "repo": "owner/name"} in ${config}`)
+  if (inbox.key !== INBOX_KEY && !dht) log('warning: the app sends reports to a different inbox (INBOX_KEY in src/shared/reports.ts)')
+  // A log pull: "all", friend IDs (name#1234) or Unique Keys (6 characters)
+  const pull = (arg: unknown) => {
+    if (typeof arg !== 'string') return
+    log(`pull asked for ${arg}`)
+    const to = pullTargets(arg)
+    if (!to) return log(`pull: "${arg}" is not a friend ID (name#1234) or Unique Key (6 characters); say all for everyone`)
+    inbox.pull(to).then((p) => log(p ? `pull ${p.id.slice(0, 6)} published for ${to === 'all' ? 'every tester' : to.join(', ')}; logs arrive as [logs] reports in the folder above` : 'pull: the DHT did not take it; try again in a minute'))
+  }
+  return { inbox, pull }
+}
+
+// A pull asked from the command line while a server's inbox runs (src/inbox/main.ts): one file per ask in <dir>/asks,
+// written under a temporary name and renamed, so the inbox never reads half of one. Taken oldest first.
+let asked = 0 // two asks within one millisecond still sort in the order they were made
+export function askPull(dir: string, arg: string) {
+  const asks = join(dir, 'asks')
+  mkdirSync(asks, { recursive: true, mode: 0o700 })
+  const name = join(asks, `${Date.now()}-${String(asked++ % 1e6).padStart(6, '0')}-${randomBytes(4).toString('hex')}`)
+  writeFileSync(name + '.tmp', arg)
+  renameSync(name + '.tmp', name)
+}
+export function takeAsks(dir: string): string[] {
+  const asks = join(dir, 'asks')
+  if (!existsSync(asks)) return []
+  return readdirSync(asks).filter((f) => !f.endsWith('.tmp')).sort().map((f) => {
+    const text = readFileSync(join(asks, f), 'utf8')
+    rmSync(join(asks, f))
+    return text
+  })
 }
 
 // @mentions in what testers wrote would ping GitHub users; a zero-width space keeps them as plain text.

@@ -14,7 +14,9 @@ STANDUP.md
 
 graphify-out/
 
-# hosted relay: built by npm run relay:build, and its local data (key included)
-deploy/relay/relay.cjs
+# hosted relay and server inbox: built by npm run relay:build and inbox:build, and their local data (keys included)
+deploy/relay/*.cjs
 deploy/relay/node_modules/
 relay-data/
+inbox-data/
+forwarder-data/

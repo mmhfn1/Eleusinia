@@ -2018,6 +2018,17 @@ hr {
   background: #000;
   border-radius: var(--r-sm);
 }
+.source .no-preview {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  object-fit: scale-down;
+  background: #000;
+  border-radius: var(--r-sm);
+}
+.sources-hint {
+  grid-column: 1 / -1;
+}
 .source span {
   overflow: hidden;
   text-overflow: ellipsis;

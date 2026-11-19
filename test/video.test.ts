@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { PREVIEW_MAX, cameraSource, canStream, choices, cleanPreview, defaultQuality, encodingFor, fitQuality, streamKbps, widthFor } from '../src/shared/video'
+import { PREVIEW_MAX, cameraSource, canStream, choices, cleanPreview, defaultQuality, encodingFor, fitQuality, streamKbps, streamSummary, widthFor } from '../src/shared/video'
 
 const fourK = { width: 3840, height: 2160, fps: 120 }
 const laptop = { width: 1920, height: 1080, fps: 60 }
@@ -64,4 +64,13 @@ test('a screen preview is shown only as small JPEG data', () => {
   expect(cleanPreview('https://example.com/x.jpg')).toBe(undefined)
   expect(cleanPreview('data:image/jpeg;base64,' + 'A'.repeat(PREVIEW_MAX))).toBe(undefined)
   expect(cleanPreview(42)).toBe(undefined)
+})
+
+test('a stream summary counts viewers by level and lists what each full-size viewer gets', () => {
+  const q = { height: 1080, fps: 60, motion: true }
+  const sent = [{ reason: 'bandwidth', fps: 29.6, height: 720 }, { reason: 'none', fps: 60, height: 1080 }]
+  expect(streamSummary(q, ['full', 'thumb', 'full', 'off'], 12000, sent)).toBe(
+    '1080p60 motion, 4 viewers (full 2, thumb 1, audio 0, off 1), upload 12000 kbps, full: bandwidth 30fps 720p, none 60fps 1080p',
+  )
+  expect(streamSummary({ ...q, motion: false }, [], null, [])).toBe('1080p60, 0 viewers (full 0, thumb 0, audio 0, off 0), upload ? kbps, full: none')
 })

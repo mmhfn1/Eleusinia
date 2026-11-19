@@ -90,3 +90,14 @@ export function canStream(o: { kbps: number; viewers: number; uploadKbps: number
   if (o.uploadKbps !== null && needKbps > o.uploadKbps * UPLOAD_SHARE) return { ok: false, reason: 'upload', needKbps, uploadKbps: o.uploadKbps }
   return { ok: true }
 }
+
+// What each full-size viewer actually gets of a stream we send (outbound-rtp), for the diagnostics.
+export type Sent = { reason: string; fps: number; height: number }
+
+// One diagnostics line about a stream we send, numbers only: how many people forwarding would serve
+// (design/plan-stream-forwarding.md, phase 1).
+export function streamSummary(q: Quality, levels: Level[], uploadKbps: number | null, sent: Sent[]) {
+  const n = (l: Level) => levels.filter((x) => x === l).length
+  const each = sent.map((s) => `${s.reason} ${Math.round(s.fps)}fps ${s.height}p`).join(', ') || 'none'
+  return `${q.height}p${q.fps}${q.motion ? ' motion' : ''}, ${levels.length} viewers (full ${n('full')}, thumb ${n('thumb')}, audio ${n('audio')}, off ${n('off')}), upload ${uploadKbps ?? '?'} kbps, full: ${each}`
+}

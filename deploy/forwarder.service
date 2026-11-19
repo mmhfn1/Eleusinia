@@ -1,0 +1,22 @@
+# The server forwarder (docs/oracle-setup.md, part F): copy to /etc/systemd/system/eleusinia-forwarder.service
+[Unit]
+Description=Eleusinia server forwarder
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=eleusinia
+Group=eleusinia
+WorkingDirectory=/var/lib/eleusinia/relay-app
+ExecStart=/usr/bin/node forwarder.cjs --data /var/lib/eleusinia/forwarder --public-ip PUBLIC_IP --ports 32768-60999 --relay-usage /var/lib/eleusinia/relay/usage.json
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/var/lib/eleusinia/forwarder
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

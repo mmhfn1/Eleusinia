@@ -35,3 +35,8 @@ export const pendingWords = (r: Reach) =>
 // relay carries voice and text only, an Eleusinia (hosted) relay everything.
 export const routeWords = (st: Pick<State, 'relayed' | 'hostedRelayed'>, k: Key) =>
   st.hostedRelayed.includes(k) ? 'through an Eleusinia relay' : st.relayed.includes(k) ? 'through a friend' : undefined
+
+// Peer forwarding: a screen reaching us through a call mate (the stage's tile line), and what a forwarder's own
+// window says about the streams it passes on (its call panel row)
+export const throughWords = (name?: string) => (name ? `through ${name}` : 'through an Eleusinia server') // none: a server forwarder
+export const forwardingWords = (name: string, n: number) => `Forwarding ${name}'s stream to ${n} ${n === 1 ? 'person' : 'people'}`
