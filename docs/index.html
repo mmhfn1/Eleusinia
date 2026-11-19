@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#050608">
 <title>Download Eleusinia</title>
 <meta name="description" content="Eleusinia: chat and voice calls that go straight to your friends, with no server in between. Download for Windows, macOS and Linux.">
 <link rel="icon" href="emblem.png">
@@ -21,16 +22,18 @@
     font-display: swap;
   }
 
-  /* Light mode, sampled from the Shattered Throne art: the fog's cyan-grey haze as the ground,
-     its navy body as ink, and stone for everything secondary. */
+  /* The app's room (src/renderer/style.css, splash.css): the void, cold fog from above, a lamp's warm light below.
+     Three moods drift through it, fog, ember and veil (the app's --fog, --ember, --violet), each a layer that only
+     fades and moves, the cheapest work for the graphics card. */
   :root {
-    --paper: #f4f5f6;   /* the near-white peaks */
-    --haze: #c8d6d3;    /* the haze */
-    --fog: #dfe7ea;     /* the haze, thinned */
-    --stone: #425a6b;   /* fog and stone */
-    --ink: #010d25;     /* the navy body of every frame */
-    --line: rgb(66 90 107 / 0.22);
-    color-scheme: light;
+    --void: #050608;
+    --silver: #f5f3ef;
+    --mist: #b9b5ad;
+    --ember: #d8c39c;
+    --word: #e6d6b4;
+    --line: #36312a;
+    --breath: 2.6s;
+    color-scheme: dark;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -40,13 +43,37 @@
     place-items: center;
     min-height: 100%;
     padding: 48px 16px;
-    background:
-      radial-gradient(70% 45% at 50% 0%, var(--haze), transparent 70%),
-      linear-gradient(180deg, var(--fog), var(--paper) 60%);
-    color: var(--ink);
+    overflow-x: hidden;
+    background: var(--void);
+    color: var(--silver);
     font: 16px/1.55 'Instrument Sans', 'Segoe UI', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
   }
+  .room { position: fixed; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
+  .mood {
+    position: absolute;
+    width: 90vmax;
+    height: 90vmax;
+    border-radius: 50%;
+    opacity: 0;
+    will-change: opacity, transform;
+    animation: mood 24s ease-in-out infinite, drift 18s ease-in-out infinite alternate;
+  }
+  .fog { left: -20vmax; top: -45vmax; background: radial-gradient(closest-side, rgb(66 90 107 / 0.8), transparent); }
+  .ember { right: -30vmax; bottom: -55vmax; background: radial-gradient(closest-side, rgb(216 195 156 / 0.38), transparent); animation-delay: -8s, -8s; }
+  .veil { left: -35vmax; bottom: -40vmax; background: radial-gradient(closest-side, rgb(169 152 214 / 0.36), transparent); animation-delay: -16s, -16s; }
+  /* the app's own fog and lamp, always there under the moods */
+  .room::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(90% 60% at 50% -10%, rgb(66 90 107 / 0.3), transparent 62%),
+      radial-gradient(70% 45% at 50% 118%, rgb(216 195 156 / 0.1), transparent 72%);
+  }
+  @keyframes mood { 0%, 100% { opacity: 0.25; } 33% { opacity: 1; } 66% { opacity: 0.4; } }
+  @keyframes drift { from { transform: translate(0, 0) scale(1); } to { transform: translate(14vmax, 10vmax) scale(1.2); } }
+
   main {
     width: min(420px, 100%);
     display: grid;
@@ -54,22 +81,37 @@
     gap: 16px;
     text-align: center;
   }
+  /* The splash's lantern: a warm lamp breathing inside the emblem */
   .emblem {
-    width: 96px;
-    height: 96px;
-    background: var(--ink);
+    position: relative;
+    width: 112px;
+    height: 112px;
     -webkit-mask: url('emblem.png') center / contain no-repeat;
     mask: url('emblem.png') center / contain no-repeat;
+    background: radial-gradient(circle at 50% 56%, #6b5a4c, #2a2320 55%, var(--void));
   }
+  .emblem::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(circle at 50% 56%, #eadedc 0%, #d8c39c 32%, #8c6f4e 62%, #2a2320 92%);
+    will-change: opacity;
+    animation: lamp var(--breath) ease-in-out infinite alternate;
+  }
+  @keyframes lamp { from { opacity: 0.55; } to { opacity: 1; } }
+  /* The wordmark, as in the app */
   h1 {
-    margin: 4px 0 0;
-    font: 700 40px/1.1 'Bricolage Grotesque', 'Segoe UI', sans-serif;
-    letter-spacing: -0.01em;
+    margin: 8px 0 0;
+    padding-left: 0.42em;
+    font: 600 22px/1.1 'Bricolage Grotesque', 'Segoe UI', sans-serif;
+    letter-spacing: 0.42em;
+    text-transform: uppercase;
+    color: var(--word);
   }
   .lede {
     margin: 0;
     max-width: 34ch;
-    color: var(--stone);
+    color: var(--mist);
   }
   .download {
     display: inline-flex;
@@ -79,40 +121,43 @@
     margin-top: 12px;
     padding: 14px 32px;
     border-radius: 999px;
-    background: var(--ink);
-    color: var(--paper);
+    background: var(--silver);
+    color: var(--void);
     text-decoration: none;
     font-weight: 600;
     font-size: 17px;
     transition: transform 160ms ease, box-shadow 200ms ease;
   }
-  .download:hover { box-shadow: 0 10px 28px -12px rgb(1 13 37 / 0.55); transform: translateY(-1px); }
+  .download:hover { box-shadow: 0 0 0 1px rgb(216 195 156 / 0.5), 0 12px 36px -10px rgb(216 195 156 / 0.45); transform: translateY(-1px); }
   .download:active { transform: translateY(0); }
-  .download:focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
-  .download small { font-weight: 400; font-size: 13px; opacity: 0.75; }
-  .meta {
+  .download:focus-visible { outline: 2px solid var(--ember); outline-offset: 4px; }
+  .download small { font-weight: 400; font-size: 13px; opacity: 0.7; }
+  .meta, .others {
     margin: 0;
-    color: var(--stone);
+    color: var(--mist);
     font-size: 14px;
   }
-  .meta a { color: var(--ink); }
-  .others {
-    margin: 0;
-    color: var(--stone);
-    font-size: 14px;
-  }
-  .others a { color: var(--ink); white-space: nowrap; }
+  .meta a, .others a { color: var(--silver); text-decoration-color: rgb(216 195 156 / 0.5); }
+  .meta a:hover, .others a:hover { color: var(--ember); }
+  .others a { white-space: nowrap; }
   .note {
     margin: 20px 0 0;
     padding-top: 16px;
     border-top: 1px solid var(--line);
-    color: var(--stone);
+    color: var(--mist);
     font-size: 13px;
   }
-  @media (prefers-reduced-motion: reduce) { .download { transition: none; } }
+  /* Still under reduced motion, as the splash is: the fog mood held, the lamp lit */
+  @media (prefers-reduced-motion: reduce) {
+    .download { transition: none; }
+    .mood, .emblem::after { animation: none; }
+    .fog { opacity: 1; }
+    .emblem::after { opacity: 0.85; }
+  }
 </style>
 </head>
 <body>
+<div class="room" aria-hidden="true"><div class="mood fog"></div><div class="mood ember"></div><div class="mood veil"></div></div>
 <main>
   <div class="emblem" aria-hidden="true"></div>
   <h1>Eleusinia</h1>
