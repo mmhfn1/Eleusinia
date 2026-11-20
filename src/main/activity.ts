@@ -53,6 +53,59 @@ async function steamNow(): Promise<SteamNow | null> {
   return { root, app: vnum(vget(steam, 'RunningAppID')) ?? 0, user: vnum(vget(steam, 'ActiveProcess', 'ActiveUser')) ?? 0 }
 }
 
+// Name from the app's manifest in any library folder; undefined when it is not installed here.
+function manifestName(root: string, app: number) {
+  const libs = libraryPaths(readVdf(join(root, 'steamapps/libraryfolders.vdf')) ?? {})
+  for (const lib of [root, ...libs]) {
+    const name = vget(readVdf(join(lib, 'steamapps', `appmanifest_${app}.acf`)) ?? {}, 'AppState', 'name')
+    if (typeof name === 'string' && name) return name
+  }
+  return undefined
+}
+
+// The signed-in Steam account, also when no game runs: the registry's active user, else the account folder used last
+async function steamUser(): Promise<{ root: string; user: number } | null> {
+  const s = await steamNow()
+  if (!s) return null
+  let user = s.user
+  if (!user && WINDOWS) user = Number(parseReg(await run('reg', ['query', 'HKCU\\Software\\Valve\\Steam\\ActiveProcess', '/v', 'ActiveUser'])).ActiveUser) || 0
+  if (!user)
+    try {
+      const dirs = readdirSync(join(s.root, 'userdata')).filter((d) => /^\d+$/.test(d))
+      user = Number(dirs.sort((a, b) => mtime(join(s.root, 'userdata', b, 'config/localconfig.vdf')) - mtime(join(s.root, 'userdata', a, 'config/localconfig.vdf')))[0]) || 0
+    } catch {}
+  return user ? { root: s.root, user } : null
+}
+
+// For the profile showcase: the installed games this account played an hour or more, most hours first
+export async function steamGames(): Promise<{ app: number; name: string; hours: number }[]> {
+  const u = await steamUser()
+  if (!u) return []
+  const apps = vget(readVdf(join(u.root, 'userdata', String(u.user), 'config/localconfig.vdf')) ?? {}, 'UserLocalConfigStore', 'Software', 'Valve', 'Steam', 'apps')
+  if (!apps || typeof apps === 'string') return []
+  return Object.entries(apps)
+    .flatMap(([id, v]) => {
+      const minutes = vnum(vget(v, 'Playtime')), app = Number(id)
+      const name = minutes && minutes >= 60 && app ? manifestName(u.root, app) : undefined
+      return name ? [{ app, name, hours: Math.round(minutes! / 60) }] : []
+    })
+    .sort((a, b) => b.hours - a.hours)
+    .slice(0, 40)
+}
+
+// And one game's unlocked achievements, newest first, with Steam's icon file name
+export async function steamUnlocked(app: number): Promise<{ ach: string; icon: string }[]> {
+  const u = await steamUser()
+  if (!u || !Number.isSafeInteger(app) || app <= 0) return []
+  try {
+    const schema = parseKv(readFileSync(join(u.root, 'appcache/stats', `UserGameStatsSchema_${app}.bin`)))
+    const statsFile = join(u.root, 'appcache/stats', `UserGameStats_${u.user}_${app}.bin`)
+    return achievementsOf(schema, existsSync(statsFile) ? parseKv(readFileSync(statsFile)) : null).unlocked.map((a) => ({ ach: a.name || a.id, icon: a.icon }))
+  } catch {
+    return []
+  }
+}
+
 // Where a Steam game is installed: its library folder (the one whose app list has it) and the manifest's installdir.
 export async function steamAppDir(app: number): Promise<string | null> {
   const s = await steamNow()
@@ -119,15 +172,6 @@ export function watchActivity({ settings, onGame, fetch, diag, every = 10000 }: 
     }
   }
 
-  // Name from the app's manifest in any library folder; the store's name when it is not installed here.
-  function manifestName(root: string, app: number) {
-    const libs = libraryPaths(readVdf(join(root, 'steamapps/libraryfolders.vdf')) ?? {})
-    for (const lib of [root, ...libs]) {
-      const name = vget(readVdf(join(lib, 'steamapps', `appmanifest_${app}.acf`)) ?? {}, 'AppState', 'name')
-      if (typeof name === 'string' && name) return name
-    }
-    return undefined
-  }
   function playtime(root: string, user: number, app: number) {
     const conf = readVdf(join(root, 'userdata', String(user), 'config/localconfig.vdf'))
     return vnum(vget(conf ?? {}, 'UserLocalConfigStore', 'Software', 'Valve', 'Steam', 'apps', String(app), 'Playtime'))

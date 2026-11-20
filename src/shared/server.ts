@@ -1,3 +1,4 @@
+import { cleanWeave } from './mark'
 import { createHash } from 'node:crypto'
 import crypto from 'hypercore-crypto'
 import { type Key, isGroupId, isKey, isPicture } from './protocol'
@@ -23,11 +24,24 @@ export type ChannelKind = 'text' | 'voice' | 'category'
 export type Channel = { id: string; name: string; kind: ChannelKind; parent?: string; topic?: string; userLimit?: number; position: number; overrides: Record<string, Override> }
 export type Member = { roles: string[]; nick?: string; joinedAt: number }
 export type Invite = { id: string; pub: Key; by: Key; expires?: number; maxUses?: number; uses: number; revoked: boolean }
+// A server's banner: woven from its id (shared/mark.ts), a picture, or a game's art (Steam's, by app id), with how
+// dark it is drawn so the name stays readable. Without one, the weave its id gives.
+export type ServerBanner = ({ kind: number; shift: number } | { pic: string } | { app: number }) & { dark?: number }
+export const BANNER_GAMES = [730, 570, 1085660] // Counter-Strike 2, Dota 2, Destiny 2
+export function cleanBanner(v: any): ServerBanner | undefined {
+  if (!v || typeof v !== 'object') return undefined
+  const dark = Number.isInteger(v.dark) && v.dark >= 0 && v.dark <= 90 ? { dark: v.dark as number } : {}
+  if (isPicture(v.pic)) return { pic: v.pic, ...dark }
+  if (BANNER_GAMES.includes(v.app)) return { app: v.app, ...dark }
+  const w = cleanWeave(v)
+  return w && { ...w, ...dark }
+}
 export type ServerState = {
   id: string
   owner: Key
   name: string
   avatar: string
+  banner?: ServerBanner
   roles: Role[] // index = position: @everyone (id = server id) at 0, higher = more power
   members: Record<Key, Member>
   channels: Channel[]
@@ -201,8 +215,11 @@ function apply(s: ServerState, o: Op, latest: number): boolean {
   switch (o.kind) {
     case 'server.edit': {
       if (!p.has('manageServer') || (b.name !== undefined && !isName(b.name)) || (b.avatar !== undefined && b.avatar !== '' && !isPicture(b.avatar))) return false
+      if (b.banner !== undefined && b.banner !== null && !cleanBanner(b.banner)) return false
       s.name = b.name ?? s.name
       s.avatar = b.avatar ?? s.avatar
+      if (b.banner === null) delete s.banner // back to the weave its id gives
+      else if (b.banner !== undefined) s.banner = cleanBanner(b.banner)
       return true
     }
     case 'role.add': {

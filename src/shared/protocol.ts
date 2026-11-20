@@ -1,4 +1,6 @@
-import type { Activity, ActivitySettings } from './activity'
+import { type Weave, cleanWeave } from './mark'
+import type { ServerBanner } from './server'
+import { type Activity, type ActivitySettings, type Showcase, cleanShowcase } from './activity'
 import type { Action, Bindings } from './hotkeys'
 import type { LinkPreview } from './links'
 import type { FileRef } from './media'
@@ -29,12 +31,19 @@ export type Group = {
 export type Msg = { conv: string; author: Key; seq: number; ts: number; text: string; files?: FileRef[]; link?: LinkPreview; lsig?: string; sig: string }
 export type Have = Record<Key, number> // highest seq held, per author
 // handle: the unique-ish ID friends type, username#1234. avatar: small image data URL, or ''.
-export type Profile = { handle: string; name: string; about: string; avatar: string }
+// banner: what their banner shows: a weave from their key (shared/mark.ts), their picture softened (`fade`), or a picture
+// or GIF of their own (`pic`); without it, their picture softened, else their key's weave. gameArt: false keeps the
+// banner while they play instead of the game's art.
+export type Banner = Weave | { fade: true } | { pic: string }
+// status: a line under their name, until a time (unix ms) or until cleared; quiet: no pokes reach them while it is set
+export type Status = { text: string; until?: number; quiet?: true }
+export type Profile = { handle: string; name: string; about: string; avatar: string; banner?: Banner; gameArt?: false; status?: Status; showcase?: Showcase }
 // Device labels are kept beside the ids, since an id can change while the name stays (see devices.ts).
 // volumes: how loud each person is played in calls, 0 to 1, kept between sessions.
 // hotkeys: only those the user bound; none by default.
 // outVolume: everything heard in calls, 0 to 2 (default 1). micGate: mic sensitivity in dB, or unset to always send.
 export type Settings = {
+  verified?: Key[] // people whose key we compared in person or on a call: a seal on their profile and messages
   audioKbps: number
   mic: string
   out: string
@@ -68,7 +77,7 @@ export const mutedNow = (st: Settings, c: string, now = Date.now()) => {
   const m = st.muted?.[c]
   return m === true || (typeof m === 'number' && m > now)
 }
-export const KEY_SETTINGS = ['ignored', 'localMuted', 'noVideo'] as const
+export const KEY_SETTINGS = ['ignored', 'localMuted', 'noVideo', 'verified'] as const
 export const MAX_KEY_SETTING = 5000
 // A key list setting from the window: keys only, no repeats, capped
 export const isKeyList = (x: unknown): x is Key[] => Array.isArray(x) && x.length <= MAX_KEY_SETTING && x.every(isKey) && new Set(x).size === x.length
@@ -109,6 +118,7 @@ export type ServerView = {
   id: string
   name: string
   avatar: string
+  banner?: ServerBanner
   owner: Key
   roles: { id: string; name: string; color: number; hoist: boolean; perms: ServerPerm[] }[]
   members: Record<Key, { roles: string[]; nick?: string; joinedAt: number }>
@@ -199,10 +209,26 @@ export const dmId = (a: Key, b: Key) => [a, b].sort().join('_')
 // Profiles arrive from other people, so every field is checked and capped before it is stored or shown.
 // A small picture as a data URL: JPEG, PNG or WebP only (never SVG, which can carry scripts), and capped in size.
 export const isPicture = (v: unknown): v is string => typeof v === 'string' && v.length <= 60000 && /^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(v)
+// A profile's own picture or banner, GIFs included. Small enough that a greeting carrying both stays under the wire's
+// 1 MiB line (network.ts MAX_LINE).
+export const MAX_MEDIA = 400_000
+export const isMedia = (v: unknown): v is string => typeof v === 'string' && v.length <= MAX_MEDIA && /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v)
+// Their status while it lasts: one past its time is shown as none
+export const statusOf = (p: Pick<Profile, 'status'> | undefined, now = Date.now()) => (p?.status && (!p.status.until || p.status.until > now) ? p.status : undefined)
+export function cleanBanner(v: any): Banner | undefined {
+  if (v?.fade === true) return { fade: true }
+  if (isMedia(v?.pic)) return { pic: v.pic }
+  return cleanWeave(v)
+}
 export function cleanProfile(p: any): Profile {
   const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '')
-  const ok = isPicture(p?.avatar)
-  return { handle: isHandle(p?.handle) ? p.handle : '', name: str(p?.name, 40), about: str(p?.about, 200), avatar: ok ? p.avatar : '' }
+  const ok = isMedia(p?.avatar)
+  const banner = cleanBanner(p?.banner)
+  const showcase = cleanShowcase(p?.showcase)
+  const st = p?.status
+  const text = typeof st?.text === 'string' ? st.text.trim().slice(0, 60) : ''
+  const status: Status | undefined = text ? { text, ...(Number.isSafeInteger(st.until) && st.until > 0 && { until: st.until }), ...(st.quiet === true && { quiet: true as const }) } : undefined
+  return { handle: isHandle(p?.handle) ? p.handle : '', name: str(p?.name, 40), about: str(p?.about, 200), avatar: ok ? p.avatar : '', ...(banner && { banner }), ...(p?.gameArt === false && { gameArt: false as const }), ...(status && { status }), ...(showcase && { showcase }) }
 }
 
 export const isUsername = (s: unknown): s is string => typeof s === 'string' && /^[a-z0-9_.]{2,20}$/.test(s)
@@ -210,13 +236,6 @@ export const isHandle = (s: unknown): s is string => typeof s === 'string' && /^
 // What someone typed, forgiving case and stray spaces.
 export const normHandle = (s: string) => s.toLowerCase().replace(/\s+/g, '')
 
-// The picture someone has until they upload one: a colour and a mirrored 5x5 pattern taken from their public key.
-export function identicon(key: Key) {
-  const byte = (i: number) => parseInt(key.slice(i * 2, i * 2 + 2), 16) || 0
-  const cells: boolean[] = []
-  for (let row = 0; row < 5; row++) for (let col = 0; col < 5; col++) cells.push(((byte(row) >> Math.min(col, 4 - col)) & 1) === 1)
-  return { hue: Math.round(((byte(5) * 256 + byte(6)) / 65536) * 360), cells }
-}
 // Shown next to a person so two people with the same friend ID can be told apart. Public key only.
 export const keyTail = (key: Key) => key.slice(-6).toUpperCase()
 

@@ -516,3 +516,19 @@ test('voice moderation: mute, deafen, move and disconnect need the permission an
   const want = JSON.stringify(w.state())
   for (let i = 0; i < 5; i++) expect(JSON.stringify(w.state(shuffled(w.ops)))).toBe(want)
 })
+
+test('a server banner: a weave, a picture or a game, checked, and null puts the default back', () => {
+  const w = world()
+  w.by(w.o, 'server.edit', { banner: { kind: 2, shift: 40, dark: 50 } })
+  expect(w.state().banner).toEqual({ kind: 2, shift: 40, dark: 50 })
+  w.by(w.o, 'server.edit', { banner: { app: 730 } })
+  expect(w.state().banner).toEqual({ app: 730 })
+  w.by(w.o, 'server.edit', { banner: { pic: 'data:image/png;base64,AAAA', extra: 1 } })
+  expect(w.state().banner).toEqual({ pic: 'data:image/png;base64,AAAA' })
+  // turned away whole: a weave out of range, a game not on the list, a picture that is not one
+  for (const bad of [{ kind: 9, shift: 0 }, { app: 1 }, { pic: 'javascript:x' }, 'arcade']) w.by(w.o, 'server.edit', { name: 'nope', banner: bad })
+  expect(w.state().name).toBe('test')
+  expect(w.state().banner).toEqual({ pic: 'data:image/png;base64,AAAA' })
+  w.by(w.o, 'server.edit', { banner: null })
+  expect(w.state().banner).toBeUndefined()
+})

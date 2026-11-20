@@ -1,6 +1,7 @@
 // Small shared pieces of the Eleusinia interface: icons, portraits, emblems, dialogs and ornaments.
 import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useRef, useState } from 'react'
-import { type Group, type Key, type Profile, identicon } from '../shared/protocol'
+import { type Drawing, type Weave, WEAVES, banner, bytesOf, defaultWeave, picture, tones } from '../shared/mark'
+import { type Banner, type Group, type Key, MAX_MEDIA, type Profile, type ServerView } from '../shared/protocol'
 
 const ICONS: Record<string, ReactNode> = {
   home: <path d="M3.5 10.5 12 3.5l8.5 7V20a1 1 0 0 1-1 1h-5v-6h-5v6h-5a1 1 0 0 1-1-1z" />,
@@ -168,32 +169,250 @@ export function Wordmark({ className = '' }: { className?: string }) {
   )
 }
 
-// A person's portrait: their uploaded picture, or a pattern drawn from their public key. With `online` set,
-// a presence mark is added: filled when online, hollow when offline, so it does not rely on colour alone.
+// Shapes from shared/mark.ts as an SVG.
+export function Drawn({ d, slice, className }: { d: Drawing; slice?: boolean; className?: string }) {
+  return (
+    <svg className={className} viewBox={`0 0 ${d.w} ${d.h}`} preserveAspectRatio={slice ? 'xMidYMid slice' : undefined} aria-hidden="true">
+      {d.shapes.map((s, i) => {
+        const T = s.tag
+        return <T key={i} {...s.a} />
+      })}
+    </svg>
+  )
+}
+
+// A person's portrait: their uploaded picture, or a built form drawn from their public key (shared/mark.ts). With
+// `online` set, a presence mark is added: filled when online, hollow when offline, so it does not rely on colour alone.
 export function Avatar({ k, p, size = 32, online }: { k: Key; p: Profile; size?: number; online?: boolean }) {
-  const { hue, cells } = identicon(k)
   return (
     <span className="avatar" style={{ width: size, height: size }}>
-      {p.avatar ? (
-        <img src={p.avatar} alt="" />
-      ) : (
-        <svg viewBox="0 0 5 5" aria-hidden="true" style={{ background: `hsl(${hue} 38% 18%)` }}>
-          {cells.map((on, i) => on && <rect key={i} x={i % 5} y={Math.floor(i / 5)} width={1.02} height={1.02} fill={`hsl(${hue} 70% 72%)`} />)}
-        </svg>
-      )}
+      {p.avatar ? <img src={p.avatar} alt="" /> : <Drawn d={picture(k)} />}
       {online !== undefined && <span className={online ? 'presence on' : 'presence'} title={online ? 'Online' : 'Offline'} />}
     </span>
   )
 }
 
-// A group's (or server's) tile: its first letter on a tinted stone square, coloured from the group id.
+// A group's (or server's) tile: its picture, or a built form drawn from its id.
 export function GroupEmblem({ g, size = 32 }: { g: Pick<Group, 'id' | 'name' | 'avatar'>; size?: number }) {
-  const hue = 190 + (parseInt(g.id.slice(0, 4), 16) % 80)
   if (g.avatar) return <img className="crest" src={g.avatar} alt="" style={{ width: size, height: size }} />
   return (
-    <span className="crest" style={{ width: size, height: size, fontSize: size * 0.46, ['--hue' as string]: hue }} aria-hidden="true">
-      {(g.name.trim()[0] ?? '?').toUpperCase()}
+    <span className="crest drawn" style={{ width: size, height: size }} aria-hidden="true">
+      <Drawn d={picture(g.id)} />
     </span>
+  )
+}
+
+// A banner woven from a key or id (shared/mark.ts); fills its parent.
+export function Woven({ id, weave, tall }: { id: string; weave?: Weave; tall?: boolean }) {
+  return <Drawn className="woven" d={banner(id, weave, !tall)} slice />
+}
+
+// A picture's colour, the most saturated pixels weighing most, brought to a lightness both themes read well
+function colourOf(src: string): Promise<string> {
+  return new Promise((ok, no) => {
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas')
+        c.width = c.height = 12
+        const x = c.getContext('2d')!
+        x.drawImage(img, 0, 0, 12, 12)
+        const d = x.getImageData(0, 0, 12, 12).data
+        let r = 0, g = 0, b = 0, w = 0
+        for (let i = 0; i < d.length; i += 4) {
+          const max = Math.max(d[i], d[i + 1], d[i + 2]), min = Math.min(d[i], d[i + 1], d[i + 2])
+          const s = max ? (max - min) / max : 0
+          const k = 0.05 + s * s
+          r += d[i] * k
+          g += d[i + 1] * k
+          b += d[i + 2] * k
+          w += k
+        }
+        const h = Math.round((Math.atan2(Math.sqrt(3) * (g / w - b / w), 2 * (r / w) - g / w - b / w) * 180) / Math.PI + 360) % 360
+        ok(`hsl(${h} 55% 62%)`)
+      } catch (e) {
+        no(e)
+      }
+    }
+    img.onerror = no
+    img.src = src
+  })
+}
+
+// A person's accent: the colour of what their banner shows (game art, their picture or their own banner picture), else
+// their weave's tone. Profiles set it as --person, which is a registered colour, so a change fades rather than jumps.
+export function useAccent(id: string, p: Profile, app?: number) {
+  const b = p.banner
+  const src = app ? `eleusinia-art://steam/${app}/header` : b && 'pic' in b ? b.pic : (!b || 'fade' in b) && p.avatar ? p.avatar : null
+  const fallback = tones(bytesOf(id), b && 'kind' in b ? b.shift : 0)[1]
+  const [c, setC] = useState(fallback)
+  useEffect(() => {
+    let gone = false
+    if (!src) setC(fallback)
+    else colourOf(src).then((x) => !gone && setC(x), () => !gone && setC(fallback))
+    return () => void (gone = true)
+  }, [src, fallback])
+  return c
+}
+
+// A picture's first frame as a still: a GIF banner moves only where someone is looking at a profile
+function useStill(src: string) {
+  const [still, setStill] = useState('')
+  useEffect(() => {
+    let gone = false
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      try {
+        const c = document.createElement('canvas')
+        c.width = img.naturalWidth
+        c.height = img.naturalHeight
+        c.getContext('2d')!.drawImage(img, 0, 0)
+        if (!gone) setStill(c.toDataURL('image/jpeg', 0.85))
+      } catch {
+        if (!gone) setStill(src)
+      }
+    }
+    img.onerror = () => !gone && setStill(src)
+    img.src = src
+    return () => void (gone = true)
+  }, [src])
+  return still
+}
+function StillImg({ src, className }: { src: string; className: string }) {
+  const still = useStill(src)
+  return still ? <img className={className} src={still} alt="" /> : null
+}
+
+// A seal beside a name: we compared this person's key with them, so it is really them
+export function VerifiedSeal() {
+  return (
+    <span className="verified-seal" title="Verified in person: you compared their key">
+      <Icon name="check" size={11} />
+    </span>
+  )
+}
+
+// What a person's banner shows: their own picture or GIF, their picture softened, or a weave from their key. With no
+// choice made, their picture softened if they have one, else their key's weave.
+// still: drawn from the first frame, so a GIF banner does not move (call banners, cards on Home)
+export function BannerArt({ id, p, tall, still }: { id: string; p: Profile; tall?: boolean; still?: boolean }) {
+  const b = p.banner
+  if (b && 'pic' in b) return still ? <StillImg className="woven banner-pic" src={b.pic} /> : <img className="woven banner-pic" src={b.pic} alt="" />
+  if ((!b || 'fade' in b) && p.avatar) return still ? <StillImg className="woven banner-fade" src={p.avatar} /> : <img className="woven banner-fade" src={p.avatar} alt="" />
+  return <Woven id={id} weave={b && 'kind' in b ? b : undefined} tall={tall} />
+}
+
+// A GIF picture as it is, so it still moves (a cropper would flatten it to one frame)
+export async function gifFrom(file: File): Promise<string> {
+  const url = await new Promise<string>((ok, no) => {
+    const r = new FileReader()
+    r.onload = () => ok(String(r.result))
+    r.onerror = () => no(new Error('That file could not be read'))
+    r.readAsDataURL(file)
+  })
+  if (url.length > MAX_MEDIA) throw new Error('That GIF is too large: pictures can be up to about 300 KB')
+  return url
+}
+
+// A chosen banner picture: a GIF as it is (so it still moves), anything else cut to a wide 1200 x 440 JPEG
+async function bannerFrom(file: File): Promise<string> {
+  if (file.type === 'image/gif') return gifFrom(file)
+  const img = await createImageBitmap(file)
+  const w = 1200, h = 440, scale = Math.min(img.width / w, img.height / h)
+  const c = document.createElement('canvas')
+  c.width = w
+  c.height = h
+  c.getContext('2d')!.drawImage(img, (img.width - w * scale) / 2, (img.height - h * scale) / 2, w * scale, h * scale, 0, 0, w, h)
+  img.close()
+  for (let q = 0.85; q > 0.2; q -= 0.1) {
+    const out = c.toDataURL('image/jpeg', q)
+    if (out.length <= MAX_MEDIA) return out
+  }
+  throw new Error('That picture is too detailed to use as a banner')
+}
+
+// The banner choices: your picture softened, the four weaves of your key (with their tones), or an upload
+export function BannerPick({ id, p, set }: { id: string; p: Profile; set: (b: Banner) => void }) {
+  const [err, setErr] = useState('')
+  const b = p.banner
+  const on = b && 'pic' in b ? 'pic' : b && 'kind' in b ? b.kind : b || p.avatar ? 'fade' : defaultWeave(id).kind
+  const weave = b && 'kind' in b ? b : { kind: defaultWeave(id).kind, shift: 0 }
+  return (
+    <div className="weave-pick">
+      <div className="weave-kinds" role="radiogroup" aria-label="Banner">
+        <button type="button" role="radio" aria-checked={on === 'fade'} className={`weave-kind ${on === 'fade' ? 'on' : ''}`} onClick={() => set({ fade: true })}>
+          <BannerArt id={id} p={{ ...p, banner: { fade: true } }} tall />
+          <span>Your picture</span>
+        </button>
+        {WEAVES.map((name, kind) => (
+          <button key={name} type="button" role="radio" aria-checked={on === kind} className={`weave-kind ${on === kind ? 'on' : ''}`} onClick={() => set({ kind, shift: weave.shift })}>
+            <Woven id={id} weave={{ kind, shift: weave.shift }} tall />
+            <span>{name}</span>
+          </button>
+        ))}
+        <label role="radio" aria-checked={on === 'pic'} className={`weave-kind upload ${on === 'pic' ? 'on' : ''}`}>
+          {b && 'pic' in b ? <img className="woven banner-pic" src={b.pic} alt="" /> : <Icon name="attach" size={20} />}
+          <span>{b && 'pic' in b ? 'Change' : 'Upload'}</span>
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp,image/gif"
+            className="visually-hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              e.target.value = '' // so the same file can be chosen again
+              if (f) bannerFrom(f).then((pic) => (setErr(''), set({ pic })), (x) => setErr(String(x.message ?? x)))
+            }}
+          />
+        </label>
+      </div>
+      {typeof on === 'number' && (
+        <label className="weave-tones">
+          Tones
+          <input type="range" min={0} max={359} value={weave.shift} onChange={(e) => set({ ...weave, shift: +e.target.value })} />
+          <button type="button" className="button subtle" onClick={() => set({ ...weave, shift: Math.floor(Math.random() * 360) })}>
+            Shuffle
+          </button>
+        </label>
+      )}
+      {err && <span className="form-error">{err}</span>}
+    </div>
+  )
+}
+
+// A server's banner behind its name: the weave its id gives or the one chosen, a picture, or a game's art, darkened
+// as chosen so the name stays readable.
+export function ServerBannerArt({ sv, b = sv.banner }: { sv: Pick<ServerView, 'id' | 'banner'>; b?: ServerView['banner'] }) {
+  const src = b && 'pic' in b ? b.pic : b && 'app' in b ? `eleusinia-art://steam/${b.app}/header` : null
+  return (
+    <span className="server-banner" aria-hidden="true" style={{ ['--dark' as string]: b?.dark ?? 45 }}>
+      {src ? <img src={src} alt="" /> : <Woven id={sv.id} weave={b && 'kind' in b ? b : undefined} />}
+    </span>
+  )
+}
+
+// The four weaves a key can give, each drawn from that key, and how far its tones turn.
+export function WeavePick({ id, value, set, disabled }: { id: string; value?: Weave; set: (w: Weave) => void; disabled?: boolean }) {
+  const w = value ?? defaultWeave(id)
+  return (
+    <div className="weave-pick">
+      <div className="weave-kinds" role="radiogroup" aria-label="Pattern">
+        {WEAVES.map((name, kind) => (
+          <button key={name} type="button" role="radio" aria-checked={w.kind === kind} className={`weave-kind ${w.kind === kind ? 'on' : ''}`} disabled={disabled} onClick={() => set({ ...w, kind })}>
+            <Woven id={id} weave={{ kind, shift: w.shift }} tall />
+            <span>{name}</span>
+          </button>
+        ))}
+      </div>
+      <label className="weave-tones">
+        Tones
+        <input type="range" min={0} max={359} value={w.shift} disabled={disabled} onChange={(e) => set({ ...w, shift: +e.target.value })} />
+        <button type="button" className="button subtle" disabled={disabled} onClick={() => set({ ...w, shift: Math.floor(Math.random() * 360) })}>
+          Shuffle
+        </button>
+      </label>
+    </div>
   )
 }
 
@@ -255,7 +474,9 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
   )
 }
 
-const [MIN_W, MAX_W] = [180, 480]
+const [MIN_W, MAX_W] = [180, 640]
+// A column's default: a share of the window, so wide screens get wide columns rather than a vast middle
+export const fit = (share: number, min: number, max: number) => Math.round(Math.max(min, Math.min(max, window.innerWidth * share)))
 // A sidebar width the user can drag, remembered on this computer.
 export function useWidth(id: string, initial: number) {
   const [w, setW] = useState(() => Number(localStorage.getItem('width-' + id)) || initial)

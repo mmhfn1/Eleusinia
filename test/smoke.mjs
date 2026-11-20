@@ -208,7 +208,8 @@ async function until(label, fn, secs = 90) {
 const open = (text) => `(async () => {
   document.querySelector('.rail-mark')?.click()
   for (let i = 0; i < 50; i++) {
-    const row = [...document.querySelectorAll('.row-button')].find(x => x.textContent.includes('${text}'))
+    // friends on Home, groups on the rail (by their label)
+    const row = [...document.querySelectorAll('.row-button, .rail-group')].find(x => (x.textContent + (x.getAttribute('aria-label') ?? '')).includes('${text}'))
     if (row) return row.click()
     await new Promise(r => setTimeout(r, 100))
   }
@@ -535,6 +536,16 @@ try {
   console.log('     ', JSON.stringify(layout))
   if (!(layout.idSection && layout.summary === 'Settings' && layout.hidden === 'none' && layout.shown === 'block' && layout.rightOfLabel)) throw new Error('settings layout wrong')
   console.log('ok   friend ID is its own section; Settings separate; (i) sits right of the bitrate and shows its tip on focus')
+  // The theme: Ivory switches the whole window, and Ink brings it back (theme.ts, kept in this window's storage)
+  const themeTo = (label) => a.ev(`[...document.querySelectorAll('dialog[open] [role=radiogroup][aria-label=Theme] [role=radio]')].find((x) => x.textContent === '${label}').click()`)
+  await themeTo('Ivory')
+  await until('Ivory switches the window to the light theme', () => a.ev(`document.documentElement.dataset.theme === 'light' && getComputedStyle(document.body).backgroundColor !== 'rgb(11, 13, 17)'`), 5)
+  await a.ev(`document.activeElement.blur(); document.querySelector('dialog[open] .dialog-close').click()`)
+  await sleep(300)
+  await a.shot('home-ivory')
+  await a.ev(`document.querySelector('.user-bar button[title="Settings"]').click()`)
+  await themeTo('Ink')
+  await until('and Ink brings the dark theme back', () => a.ev(`document.documentElement.dataset.theme === 'dark'`), 5)
   await a.ev(`document.activeElement.blur(); document.querySelector('dialog[open] .dialog-close').click()`)
 
   // Chromium's fake microphone beeps a steady tone, which noise suppression rightly removes as noise: the checks
@@ -803,8 +814,8 @@ try {
   await until('a message sent from the panel reaches Ann, and the panel says it was sent', async () => (await a.ev(shows('from the panel'))) && b.ev(pop((p) => !!p.querySelector('.pop-sent'))), 15)
   await b.ev(escape)
   await until('Escape closes the panel', () => b.ev(`!document.querySelector('.profile-pop')`), 5)
-  await b.ev(`document.querySelector('aside.voice .chamber-id.person').click()`)
-  await until('clicking her in the voice sidebar opens the same panel', () => b.ev(annPop), 5)
+  await b.ev(`document.querySelector('aside.members .person-head').click()`)
+  await until('clicking her in the profile column beside the chat opens the same panel', () => b.ev(annPop), 5)
   await b.ev(`document.querySelector('.msgs').dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`)
   await until('a click elsewhere closes it', () => b.ev(`!document.querySelector('.profile-pop')`), 5)
   await b.ev(`document.querySelector('.rail-mark').click()`)
@@ -821,7 +832,7 @@ try {
   await until('mouse 5 goes forward: the DM again', () => b.ev(`!!document.querySelector('.chat-person')`), 5)
 
   console.log('--- Rail: direct conversations and the emblem')
-  const railDm = `document.querySelector('.rail-dm[aria-label^="Ann"]')`
+  const railDm = `document.querySelector('.dm-row[aria-label^="Ann"]')` // the DMs now sit in the Home column, not on the rail
   await until('the DM with Ann, opened earlier, sits on the rail', () => b.ev(`!!${railDm}`), 5)
   await b.ev(`document.querySelector('.rail-mark').click()`)
   await until('clicking the emblem goes Home, and it is marked as where we are', () => b.ev(`!!document.querySelector('main.home') && document.querySelector('.rail-mark').classList.contains('active')`), 5)
@@ -846,8 +857,8 @@ try {
   await b.ev(rightClick(railDm))
   await b.ev(item('Add nickname'))
   await b.ev(`(() => { const i = document.querySelector('dialog[open] input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, 'Annie'); i.dispatchEvent(new Event('input', { bubbles: true })); i.form.requestSubmit() })()`)
-  await until('a nickname replaces her name on the rail and in the chat', () => b.ev(`!!document.querySelector('.rail-dm[aria-label^="Annie"]') && [...document.querySelectorAll('.msg .user')].some((u) => u.textContent === 'Annie')`), 5)
-  await b.ev(rightClick(`document.querySelector('.rail-dm[aria-label^="Annie"]')`))
+  await until('a nickname replaces her name on the rail and in the chat', () => b.ev(`!!document.querySelector('.dm-row[aria-label^="Annie"]') && [...document.querySelectorAll('.msg .user')].some((u) => u.textContent === 'Annie')`), 5)
+  await b.ev(rightClick(`document.querySelector('.dm-row[aria-label^="Annie"]')`))
   await b.ev(item('Change nickname'))
   await b.ev(`(() => { const i = document.querySelector('dialog[open] input'); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(i, ''); i.dispatchEvent(new Event('input', { bubbles: true })); i.form.requestSubmit() })()`)
   await until('an empty nickname gives her own name back', () => b.ev(`!!${railDm}`), 5)
@@ -856,37 +867,37 @@ try {
   await b.ev(item('Close DM'))
   await until('Close DM takes Ann off the rail and goes Home', () => b.ev(`!${railDm} && !!document.querySelector('main.home')`), 5)
   await a.ev(say('are you there'))
-  await until("Ann's new message brings her back, with a count of 1", () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '1'`), 15)
+  await until("Ann's new message brings her back, with a count of 1", () => b.ev(`${railDm}?.querySelector('.dm-count')?.textContent === '1'`), 15)
   await a.ev(say('hello?'))
-  await until('a second message makes it 2', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '2'`), 15)
+  await until('a second message makes it 2', () => b.ev(`${railDm}?.querySelector('.dm-count')?.textContent === '2'`), 15)
   await sleep(400) // past the rail's and the page's transitions
   await b.shot('rail')
   // A call that comes and goes while B is elsewhere counts too
   await a.ev(press('Start call'))
-  await until('B sees Ann calling', () => b.ev(`!!${railDm}?.querySelector('.rail-badge')`), 15)
+  await until('B sees Ann calling', () => b.ev(`!!${railDm}?.querySelector('.dm-badge')`), 15)
   await a.ev(press('Disconnect'))
-  await until('the missed call makes it 3', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '3'`), 15)
+  await until('the missed call makes it 3', () => b.ev(`${railDm}?.querySelector('.dm-count')?.textContent === '3'`), 15)
   await b.ev(rightClick(railDm))
   await b.ev(item('Mute'))
-  await until('muting hides the count', () => b.ev(`!!${railDm} && !${railDm}.querySelector('.rail-count')`), 5)
+  await until('muting hides the count', () => b.ev(`!!${railDm} && !${railDm}.querySelector('.dm-count')`), 5)
   await b.ev(rightClick(railDm))
   await b.ev(item('Unmute'))
-  await until('unmuting shows it again', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '3'`), 5)
+  await until('unmuting shows it again', () => b.ev(`${railDm}?.querySelector('.dm-count')?.textContent === '3'`), 5)
   // Ignore (the person menu's): an ignored person's DM leaves the rail counts; un-ignoring brings it back
   await b.ev(`api.call('setSettings', { ignored: ['${await a.ev(`api.call('state').then((s) => s.me)`)}'] })`)
-  await until("ignoring Ann takes her DM's count off the rail", () => b.ev(`!!${railDm} && !${railDm}.querySelector('.rail-count')`), 5)
+  await until("ignoring Ann takes her DM's count off the rail", () => b.ev(`!!${railDm} && !${railDm}.querySelector('.dm-count')`), 5)
   await b.ev(`api.call('setSettings', { ignored: [] })`)
-  await until('un-ignoring brings it back', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '3'`), 5)
+  await until('un-ignoring brings it back', () => b.ev(`${railDm}?.querySelector('.dm-count')?.textContent === '3'`), 5)
   await b.ev(`${railDm}.click()`)
-  await until('opening the DM reads it: the count is gone', () => b.ev(`!!document.querySelector('.chat-person') && !${railDm}.querySelector('.rail-count')`), 5)
+  await until('opening the DM reads it: the count is gone', () => b.ev(`!!document.querySelector('.chat-person') && !${railDm}.querySelector('.dm-count')`), 5)
   // Shown but not focused (on a second screen during a game) is not read. The page is told it has no focus, so the
   // step does not depend on which window the system happens to focus
   await b.ev(`document.hasFocus = () => false`)
   await a.ev(say('still there?'))
-  await until('in an unfocused window, the open DM still counts a new message', () => b.ev(`${railDm}?.querySelector('.rail-count')?.textContent === '1'`), 15)
+  await until('in an unfocused window, the open DM still counts a new message', () => b.ev(`${railDm}?.querySelector('.dm-count')?.textContent === '1'`), 15)
   await b.ev(`delete document.hasFocus`) // back to the real one, which focus emulation answers with true
   await b.ev(`window.dispatchEvent(new Event('focus'))`)
-  await until('focusing the window reads it', () => b.ev(`!${railDm}.querySelector('.rail-count')`), 5)
+  await until('focusing the window reads it', () => b.ev(`!${railDm}.querySelector('.dm-count')`), 5)
 
   console.log('--- Voice call from the left sidebar')
   const joinsBefore = (await sounds(a)).filter((x) => x === 'join').length // the missed call above played one
@@ -1267,10 +1278,10 @@ try {
     await sleep(500)
     await a.ev(`document.querySelector('.rail-mark')?.click()`)
   }
-  await until('A, B and C list both groups in the Home sidebar', async () => {
+  await until('A, B and C list both groups on the rail', async () => {
     for (const p of [a, b, c]) {
       await p.ev(`document.querySelector('.rail-mark')?.click()`)
-      if (!(await p.ev(`['Trio','Second'].every(g => [...document.querySelectorAll('aside .item')].some(x => x.textContent.includes(g)))`))) return false
+      if (!(await p.ev(`['Trio','Second'].every(g => [...document.querySelectorAll('.rail-group')].some(x => x.getAttribute('aria-label').includes(g)))`))) return false
     }
     return true
   })
@@ -1306,6 +1317,7 @@ try {
   await b.ev(press('Disconnect'))
   await c.ev(press('Disconnect'))
 
+  await a.shot('conversation')
   console.log('--- Resizable sidebars')
   const widths = await a.ev(`(() => {
     const out = {}
@@ -1318,14 +1330,14 @@ try {
     return out
   })()`)
   await sleep(300)
-  const after = await a.ev(`[document.querySelector('aside.voice').getBoundingClientRect().width, document.querySelector('aside.members').getBoundingClientRect().width, localStorage.getItem('width-voice'), localStorage.getItem('width-members')]`)
+  const after = await a.ev(`[document.querySelector('aside.voice').getBoundingClientRect().width, document.querySelector('aside.members').getBoundingClientRect().width, localStorage.getItem('width-conv-left'), localStorage.getItem('width-conv-right')]`)
   console.log('     ', JSON.stringify(widths), '->', JSON.stringify(after))
-  if (!(after[0] === 336 && after[1] === 246 && after[2] === '336' && after[3] === '246')) throw new Error('sidebars did not resize and persist')
+  if (!(after[0] === 316 && after[1] === 336 && after[2] === '316' && after[3] === '336')) throw new Error('sidebars did not resize and persist')
   console.log('ok   voice and members sidebars grew by 16px and the widths were saved')
   await a.ev(`document.querySelector('.rail-mark').click()`)
   const home = await a.ev(`(() => { const s = document.querySelector('.splitter'); s.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); return new Promise(r => setTimeout(() => r(document.querySelector('aside').getBoundingClientRect().width), 200)) })()`)
-  if (home !== 276) throw new Error('home sidebar did not resize: ' + home)
-  console.log('ok   home sidebar resized independently (260 -> 276), narrower than the voice sidebar')
+  if (home !== 316) throw new Error('home sidebar did not resize: ' + home)
+  console.log('ok   home sidebar resized independently (300 -> 316)')
 
   console.log('--- Bob goes offline (process killed)')
   b.child.kill()
@@ -1520,6 +1532,15 @@ try {
   }
   await until('the audit log lists the server being made', () => a.ev(`(document.querySelector('dialog[open]')?.textContent ?? '').includes('Ann')`), 10)
   await a.shot('server-settings')
+  // The server's banner: a game's art, saved, shows behind the name for Ann and for Bob (server.edit's banner)
+  await a.ev(`[...document.querySelectorAll('dialog[open] .settings-page')].find((x) => x.textContent.trim() === 'Overview').click()`)
+  await a.ev(`[...document.querySelectorAll('dialog[open] [aria-label="Banner from"] [role=radio]')].find((x) => x.textContent === "A game's art").click()`)
+  await a.ev(`[...document.querySelectorAll('dialog[open] .banner-games button')].find((x) => x.textContent === 'Dota 2').click()`)
+  await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Save changes').click()`)
+  const banner570 = `document.querySelector('.server-head .server-banner img')?.getAttribute('src') === 'eleusinia-art://steam/570/header'`
+  await until("Ann sets the server's banner to Dota 2's art", () => a.ev(banner570), 10)
+  await until('and it reaches Bob with the server', () => b.ev(`api.call('state').then((s) => Object.values(s.servers).some((v) => v.banner?.app === 570))`), 30)
+  await a.shot('server-banner')
   await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
 
   console.log('--- Opening the app beside a voice channel, and restarting in one')
@@ -1532,8 +1553,9 @@ try {
   // Sent in a DM, the link shows as an invite card, which joins in one click
   const cyKey = await c.ev(`api.call('state').then((s) => s.me)`)
   await a.ev(`api.call('state').then((s) => api.call('send', [s.me, '${cyKey}'].sort().join('_'), 'come in ${link2}'))`)
-  await until("Cy gets Ann's DM on the rail", () => c.ev(`!!document.querySelector('.rail-dm[aria-label^="Ann"]')`), 30)
-  await c.ev(`document.querySelector('.rail-dm[aria-label^="Ann"]').click()`)
+  await c.ev(`document.querySelector('.rail-mark').click()`) // the DMs are listed in the Home column
+  await until("Cy gets Ann's DM in the Home column", () => c.ev(`!!document.querySelector('.dm-row[aria-label^="Ann"]')`), 30)
+  await c.ev(`document.querySelector('.dm-row[aria-label^="Ann"]').click()`)
   await until('the link shows as an invite card: Smoke Server, its members, Join; the link text itself is not repeated', () =>
     c.ev(`(() => { const k = document.querySelector('.invite-card'); return !!k && k.textContent.includes('Smoke Server') && /\\d+ members?, \\d+ online/.test(k.textContent) && k.querySelector('button').textContent === 'Join' && !document.querySelector('.msgs').textContent.includes('eleusinia://') && document.querySelector('.msgs').textContent.includes('come in') })()`), 30)
   await c.shot('invite-card')

@@ -89,9 +89,10 @@ export function useMenus({ st, people, open: here, go, show, run }: Props) {
   }
   function groupMenu(c: string): Item[][] {
     const g = st.groups[c]
+    const addable = Object.keys(st.friends).filter((k) => st.friends[k] === 'friend' && !g.members.includes(k))
     return [
       common(c),
-      [{ label: 'Start a call', act: () => startCall(c) }],
+      [{ label: 'Start a call', act: () => startCall(c) }, ...folding('Add member', 'add', addable.map((k) => ({ label: people.name(k), act: () => run(api.call('addToGroup', c, k)) })))],
       [
         {
           label: 'Leave group',
@@ -100,6 +101,30 @@ export function useMenus({ st, people, open: here, go, show, run }: Props) {
             confirm(`Leave ${groupName(g)}?`, 'Its messages are deleted from this computer, and you cannot be added back to this group.', 'Leave group', () => (call.conv === c && call.leave(), leaveIfOpen(c), run(api.call('leaveGroup', c)))),
         },
       ],
+    ]
+  }
+  // A server's tile on the rail: what its own menu offers that fits the rail, by what we may do there
+  function serverMenu(sid: string): Item[][] {
+    const sv = st.servers[sid]
+    const perms = new Set(sv.mine.perms)
+    const manage = ['manageServer', 'manageRoles', 'manageChannels', 'kick', 'ban', 'viewAuditLog'].some((p) => perms.has(p))
+    return [
+      common(sid),
+      [
+        ...(perms.has('createInvites') ? [{ label: 'Invite people', act: () => setAsk({ invite: sid }) }] : []),
+        ...(manage ? [{ label: 'Server settings', act: () => setAsk({ edit: sid }) }] : []),
+        { label: 'Copy server ID', act: () => copyText(sid) },
+      ],
+      // The owner cannot leave until ownership can be handed over (shared/server.ts)
+      sv.owner === st.me
+        ? []
+        : [
+            {
+              label: 'Leave server',
+              danger: true,
+              act: () => confirm(`Leave ${sv.name}?`, 'You can come back only with a new invite.', 'Leave server', () => (call.conv?.startsWith(sid + '.') && call.leave(), leaveIfOpen(sid), run(api.call('serverAct', sid, 'leave', {})))),
+            },
+          ],
     ]
   }
   function channelMenu(c: string): Item[][] {
@@ -214,7 +239,7 @@ export function useMenus({ st, people, open: here, go, show, run }: Props) {
         : st.groups[t]
           ? groupMenu(t)
           : st.servers[t]
-            ? [common(t)]
+            ? serverMenu(t)
             : t.includes('.')
               ? channelMenu(t)
               : st.friends[otherIn(t, st.me)] === 'friend' || st.chats[t]
@@ -308,7 +333,6 @@ export function Rail(props: Props) {
       {badges(c)}
     </button>
   )
-  const dms = railDms(st)
   const servers = Object.values(st.servers ?? {})
   return (
     <nav className="rail" aria-label="Main">
@@ -325,10 +349,6 @@ export function Rail(props: Props) {
       <div className="rail-groups">
         {servers.map((v) => conv(v.id, labelOf(v.id, v.name), <GroupEmblem g={v} size={34} />, 'rail-group rail-server'))}
         {Object.values(st.groups).map((g) => conv(g.id, labelOf(g.id, groupName(g)), <GroupEmblem g={g} size={34} />, 'rail-group'))}
-        {dms.map((c) => {
-          const k = otherIn(c, st.me)
-          return conv(c, labelOf(c, people.name(k)), <Avatar k={k} p={people.prof(k)} size={34} online={people.isOnline(k)} />, 'rail-dm')
-        })}
       </div>
       <div className="rail-foot">
         <button

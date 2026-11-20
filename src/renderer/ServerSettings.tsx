@@ -2,7 +2,7 @@
 // what the replay would refuse (src/shared/server.ts) is disabled here first, with the reason beside it.
 import { type DragEvent, type FormEvent, type KeyboardEvent, useEffect, useState } from 'react'
 import { type Key, type ServerView, type State } from '../shared/protocol'
-import { Avatar, CopyButton, Dialog, Icon } from './ui'
+import { Avatar, CopyButton, Dialog, GroupEmblem, Icon, ServerBannerArt, WeavePick } from './ui'
 import { NOBODY, type Run, api, labelOf } from './common'
 import './server-settings.css'
 
@@ -64,13 +64,15 @@ const when = (ts: number) => new Date(ts).toLocaleString(undefined, { dateStyle:
 // A member's rank as the replay counts it: the owner above everyone, otherwise their highest role's index.
 const rankOf = (s: Srv, k: Key) => (k === s.owner ? Infinity : Math.max(0, ...(s.members[k]?.roles ?? []).map((r) => s.roles.findIndex((x) => x.id === r))))
 
-// A square crop of a chosen picture, small enough for a server op (isPicture: at most 60000 characters).
-async function shrink(file: File): Promise<string> {
+// A centred crop of a chosen picture (square for the server's picture, wide for its banner), small enough for a server
+// op (isPicture: at most 60000 characters).
+async function shrink(file: File, w = 256, h = 256): Promise<string> {
   const img = await createImageBitmap(file)
-  const side = Math.min(img.width, img.height)
+  const scale = Math.min(img.width / w, img.height / h), sw = w * scale, sh = h * scale
   const c = document.createElement('canvas')
-  c.width = c.height = 256
-  c.getContext('2d')!.drawImage(img, (img.width - side) / 2, (img.height - side) / 2, side, side, 0, 0, 256, 256)
+  c.width = w
+  c.height = h
+  c.getContext('2d')!.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, 0, 0, w, h)
   img.close()
   for (let q = 0.85; q > 0.2; q -= 0.15) {
     const url = c.toDataURL('image/jpeg', q)
@@ -98,7 +100,7 @@ export function ServerSettings({ st, id, channel, close, run }: { st: State; id:
     <Dialog label={`${s.name} settings`} close={close} className="server-settings">
       <nav className="settings-nav" aria-label="Server settings">
         <div className="settings-nav-head">
-          <ServerCrest s={s} size={28} />
+          <GroupEmblem g={s} size={28} />
           <span className="row-text">
             <span className="row-title">{s.name}</span>
             <span className="row-sub">Server settings</span>
@@ -132,13 +134,84 @@ const name = (st: State, k: Key) => labelOf(st.profiles[k] ?? (k === st.me ? st.
 const targetOf = (st: State, s: ServerView, t: string) =>
   /^[0-9a-f]{64}$/.test(t) ? name(st, t) : (s.roles.find((r) => r.id === t)?.name ?? (s.channels.find((c) => c.id === t) ? '#' + s.channels.find((c) => c.id === t)!.name : ''))
 
-// The server's picture, or its first letter like a group's crest (GroupEmblem in ui.tsx takes a Group).
-function ServerCrest({ s, size }: { s: Srv; size: number }) {
-  if (s.avatar) return <img className="crest" src={s.avatar} alt="" style={{ width: size, height: size }} />
+const GAMES: [number, string][] = [[730, 'Counter-Strike 2'], [570, 'Dota 2'], [1085660, 'Destiny 2']]
+type Banner = NonNullable<Srv['banner']>
+
+// The server's banner: woven from its id (a pattern and tones), a picture, or a game's art, with how dark it is drawn.
+// A draft until Save changes, shown in a preview of the channel column's head.
+function BannerSection({ s, can, act, run }: { s: Srv; can: boolean; act: P['act']; run: Run }) {
+  const [draft, setDraft] = useState<Banner | null>(s.banner ?? null)
+  const [busy, setBusy] = useState(false)
+  const src = !draft || 'kind' in draft ? 'key' : 'pic' in draft ? 'pic' : 'game'
+  const dark = draft?.dark ?? 45
+  const dirty = JSON.stringify(draft) !== JSON.stringify(s.banner ?? null)
+  const pick = (b: Banner) => setDraft({ ...b, dark })
+  const weave = draft && 'kind' in draft ? { kind: draft.kind, shift: draft.shift } : undefined
+  const save = () => {
+    setBusy(true)
+    run(act('server.edit', { banner: draft }).finally(() => setBusy(false)))
+  }
   return (
-    <span className="crest" style={{ width: size, height: size, fontSize: size * 0.46, ['--hue' as string]: 190 + (parseInt(s.id.slice(0, 4), 16) % 80) }} aria-hidden="true">
-      {(s.name.trim()[0] ?? '?').toUpperCase()}
-    </span>
+    <section className="settings-section banner-section">
+      <h2>Banner</h2>
+      <div className="banner-preview">
+        <ServerBannerArt sv={s} b={draft ?? undefined} />
+        <span className="server-name">{s.name}</span>
+      </div>
+      <div className="segmented" role="radiogroup" aria-label="Banner from">
+        <button type="button" role="radio" aria-checked={src === 'key'} className={src === 'key' ? 'on' : ''} disabled={!can} onClick={() => pick(weave ?? { kind: 0, shift: 0 })}>
+          From the server's key
+        </button>
+        <label role="radio" aria-checked={src === 'pic'} className={`segmented-file ${src === 'pic' ? 'on' : ''} ${can ? '' : 'disabled'}`}>
+          A picture
+          <input
+            type="file"
+            accept="image/png,image/jpeg,image/webp"
+            className="visually-hidden"
+            disabled={!can}
+            onChange={(e) => {
+              const f = e.target.files?.[0]
+              e.target.value = '' // so the same file can be chosen again
+              if (f) run(shrink(f, 600, 220).then((pic) => pick({ pic })))
+            }}
+          />
+        </label>
+        <button type="button" role="radio" aria-checked={src === 'game'} className={src === 'game' ? 'on' : ''} disabled={!can} onClick={() => pick({ app: 730 })}>
+          A game's art
+        </button>
+      </div>
+      {src === 'key' && <WeavePick id={s.id} value={weave} set={(w) => pick(w)} disabled={!can} />}
+      {src === 'game' && (
+        <div className="banner-games" role="radiogroup" aria-label="Game">
+          {GAMES.map(([app, name]) => {
+            const on = !!draft && 'app' in draft && draft.app === app
+            return (
+              <button key={app} type="button" role="radio" aria-checked={on} className={on ? 'on' : ''} disabled={!can} onClick={() => pick({ app })}>
+                <img src={`eleusinia-art://steam/${app}/header`} alt="" />
+                <span>{name}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+      <label className="weave-tones">
+        Darkness
+        <input type="range" min={0} max={90} value={dark} disabled={!can} onChange={(e) => setDraft({ ...(draft ?? { kind: 0, shift: 0 }), dark: +e.target.value })} />
+      </label>
+      <div className="settings-row">
+        <button type="button" className="button primary" disabled={!can || busy || !dirty} onClick={save}>
+          {busy ? 'Saving…' : 'Save changes'}
+        </button>
+        <button type="button" className="button subtle" disabled={!can || busy || !dirty} onClick={() => setDraft(s.banner ?? null)}>
+          Reset
+        </button>
+        {s.banner && (
+          <button type="button" className="button subtle" disabled={!can || busy} onClick={() => (setDraft(null), run(act('server.edit', { banner: null })))}>
+            Use the default
+          </button>
+        )}
+      </div>
+    </section>
   )
 }
 
@@ -162,7 +235,7 @@ function Overview({ s, act, run }: P) {
     <>
       {!can && <Lacks what="Manage server" />}
       <div className="portrait-pick">
-        <ServerCrest s={s} size={88} />
+        <GroupEmblem g={s} size={88} />
         <div>
           <label className={can && !busy ? 'button file-button' : 'button file-button disabled'} aria-disabled={!can || busy}>
             {s.avatar ? 'Change picture' : 'Choose a picture'}
@@ -196,6 +269,7 @@ function Overview({ s, act, run }: P) {
           </button>
         </div>
       </form>
+      <BannerSection s={s} can={can} act={act} run={run} />
     </>
   )
 }

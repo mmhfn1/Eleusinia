@@ -59,7 +59,7 @@ export function ActivityLine({ a }: { a?: Activity }) {
   )
 }
 // What is happening in the game right now, from its live details, or '' without any.
-function liveOf(g: Game) {
+export function liveOf(g: Game) {
   const c = g.cs2
   const d = g.dota
   const n = g.destiny

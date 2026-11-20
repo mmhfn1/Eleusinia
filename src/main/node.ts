@@ -44,7 +44,7 @@ import type { Layer } from '../shared/vp8layers'
 import { type InviteCard, type InviteLink, type JoinReason, askOrder, checkJoinAsk, cleanInviteCard, inviteCard, isJoinAnswer, isJoinAsk, joinTopic, limiter, makeInvite, newInvite, parseInvite, serverTopic } from '../shared/invite'
 import { type ServerState, joinProof, verifyJoin } from '../shared/server'
 import { createFiles } from './files'
-import { type Activity, type Game, cleanActivity, shareable } from '../shared/activity'
+import { type Activity, type Game, cleanActivity, dayKey, shareable, weekOf } from '../shared/activity'
 import { type RelayLimits, RELAY_LIMITS, createNet } from './network'
 import { pickRelays } from '../shared/relaypick'
 import { type Hop, nearest, routeFor } from '../shared/relays'
@@ -53,6 +53,7 @@ import { isNewer } from '../shared/updatesig'
 import { type Check, type StartupEvent, type StepId, startupEvent } from '../shared/startup'
 
 type Saved = {
+  played?: Record<string, Record<string, number>> // our minutes per game per day (YYYY-MM-DD), the last 7 days, for the week we share
   unread?: Record<string, number> // per conversation: messages from others and missed calls since it was last read
   lastAt?: Record<string, number> // per conversation: when its newest message arrived here
   blocked?: Record<Key, number> // people we blocked, and when: no friend requests, no links, their messages uncounted
@@ -146,7 +147,11 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     kept.add(v.slice(4))
     return existsSync(join(pics, v.slice(4))) ? readFileSync(join(pics, v.slice(4)), 'utf8') : ''
   }
-  const picUrl = (p: Profile): Profile => (p.avatar ? { ...p, avatar: 'eleusinia-pic://' + picId(p.avatar) } : p)
+  const picUrl = (p: Profile): Profile => ({
+    ...p,
+    ...(p.avatar && { avatar: 'eleusinia-pic://' + picId(p.avatar) }),
+    ...(p.banner && 'pic' in p.banner && { banner: { pic: 'eleusinia-pic://' + picId(p.banner.pic) } }),
+  })
   const s: Saved = {
     profile: { handle: '', name: '', about: '', avatar: '' },
     friends: {},
@@ -154,10 +159,10 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     groups: {},
     acked: {},
     settings: { audioKbps: 32, mic: '', out: '' },
-    ...(existsSync(file) ? JSON.parse(readFileSync(file, 'utf8'), (k, v) => (k === 'avatar' ? fromRef(v) : v)) : {}),
+    ...(existsSync(file) ? JSON.parse(readFileSync(file, 'utf8'), (k, v) => (k === 'avatar' || k === 'pic' ? fromRef(v) : v)) : {}),
   }
   const save = () => {
-    writeFileSync(file + '.tmp', JSON.stringify(s, function (k, v) { return this === s && k === 'confirmed' ? undefined : k === 'avatar' ? toRef(v) : v }))
+    writeFileSync(file + '.tmp', JSON.stringify(s, function (k, v) { return this === s && k === 'confirmed' ? undefined : k === 'avatar' || k === 'pic' ? toRef(v) : v }))
     renameSync(file + '.tmp', file) // atomic, so a crash mid-write cannot corrupt the state
   }
   // Groups from before owners: their owner is found once, from the copy on this computer, and kept from then on, so a
@@ -229,11 +234,21 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   let mine: Game | null = null
   const theirs = new Map<Key, Activity>()
   const sentActivity = new Map<Key, string>()
-  const ourActivity = () => shareable({ now: Date.now(), ...(mine && { game: mine }) }, s.settings.activity)
+  const ourActivity = () => shareable({ now: Date.now(), ...(mine && { game: mine }), week: weekOf(s.played ?? {}) }, s.settings.activity)
+  // Each minute of a game counts toward today; days older than a week are dropped
+  const playClock = setInterval(() => {
+    if (!mine) return
+    const day = dayKey(Date.now())
+    const played = (s.played ??= {})
+    played[day] = { ...played[day], [mine.name]: (played[day]?.[mine.name] ?? 0) + 1 }
+    for (const d of Object.keys(played)) if (d < dayKey(Date.now() - 7 * 864e5)) delete played[d]
+    saveSoon()
+    shareActivity()
+  }, 60000)
   function sendActivity(key: Key) {
     if (!known(key) || !net.linked(key)) return
     const a = s.settings.activity?.hidden?.includes(key) ? { now: Date.now() } : ourActivity()
-    const body = JSON.stringify(a.game ?? null)
+    const body = JSON.stringify([a.game ?? null, a.week ?? null])
     if (sentActivity.get(key) === body) return
     sentActivity.set(key, body)
     net.send(key, { t: 'activity', a })
@@ -1486,10 +1501,11 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   function publishCard() {
     if (!s.profile.handle) return
     published = Math.max(published + 1, Math.floor(Date.now() / 1000))
-    const { name, handle } = s.profile
+    const { name, handle, banner, gameArt, status } = s.profile
     const thumb = s.profile.avatar ? thumbnail?.(s.profile.avatar) : null
     if (thumb) net.putShared(thumbSeed, thumb, published)
-    const card = (about: string) => Buffer.from(JSON.stringify({ name, handle, about, nat: ourNat(), ...(thumb && { thumb: DHT.keyPair(thumbSeed).publicKey.toString('hex') }) }))
+    const card = (about: string) => Buffer.from(JSON.stringify({ name, handle, about, nat: ourNat(), ...(banner && !('pic' in banner) && { banner }), ...(gameArt === false && { gameArt }), ...(status && { status }), // a picture banner comes with the greeting, too big for a card
+      ...(thumb && { thumb: DHT.keyPair(thumbSeed).publicKey.toString('hex') }) }))
     let about = s.profile.about
     while (card(about).length > 1000) about = about.slice(0, -10) // records hold 1000 bytes; friends get it whole
     net.publish(card(about), published)
@@ -1701,6 +1717,8 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     async setProfile(p: Partial<Profile> & { username?: string }) {
       const clean = cleanProfile({ ...p, handle: s.profile.handle })
       if (!clean.name) throw new Error('Please enter a display name')
+      // Dropped by the check above only when too large or not a picture: say so rather than lose it quietly
+      if ((p.avatar && !clean.avatar) || (p.banner && 'pic' in p.banner && !(clean.banner && 'pic' in clean.banner))) throw new Error('That picture is too large: pictures and GIFs can be up to about 300 KB')
       const fresh = !clean.handle
       if (fresh) {
         const username = normHandle(String(p.username ?? ''))
@@ -2117,6 +2135,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       clearInterval(pulls)
       clearInterval(announcer)
       clearInterval(presenceTimer)
+      clearInterval(playClock)
       clearInterval(measurer)
       if (preDialing) clearTimeout(preDialing)
       for (const t of floodRetry.values()) clearTimeout(t)

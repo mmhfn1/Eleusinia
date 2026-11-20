@@ -30,18 +30,18 @@
 ### Friends and profiles
 - Friend IDs like `name#1234`. Search finds people even while they're offline, and requests wait until they're back.
 - Requests are sealed, so nobody watching can tell who is asking whom.
-- Profiles with a name, about line, picture and a banner. Click anyone to open their profile beside them, with what they're playing and a box to message them.
+- Profiles with a name, about line, picture and a banner. Without an uploaded picture, everyone gets one built from their key (an arch, steps, a split disc), so the same person always looks the same and a copy looks different. Banners can be your picture softened, a pattern woven from your key in tones you pick, or a picture or GIF you upload; pictures can be GIFs too (up to about 300 KB each). While you play, friends see the game's art as your banner unless you turn that off. Click anyone to open their profile beside them, with what they're playing and a box to message them.
 - Nicknames, pins, mutes and blocking, all from a right-click.
 
 ### Chat and files
-- Direct and group chat. Every message is signed by its author.
+- Direct and group chat. Every message is signed by its author; hover one for its seal. A DM's header says why it is private and how it travels (direct, or through a relay).
 - Messages reach people who were offline once you're both online. In groups, any member passes them on.
 - Files of any size: paste, drop or attach. Pictures show inline. Other files download on click, from anyone in the conversation who has them.
 - Link previews are made by the sender, so readers' apps fetch nothing.
 - Photos have their location and camera details stripped before sending.
 
 ### Voice calls
-- 1:1 and group calls with mute, deafen, a volume per person and a ring around whoever is speaking.
+- 1:1 and group calls with mute, deafen and a volume per person. Everyone stands as a tall banner; whoever talks is lit, with a seam of light as long as their voice is loud.
 - Noise suppression on by default (RNNoise, running locally).
 - Push to talk and global hotkeys that work while a game is in front.
 - Calls hold up on bad lines: spare voice copies, a jitter buffer that adapts, and reconnecting by itself after a network switch.
@@ -56,6 +56,7 @@
 
 ### Servers
 - Text and voice channels in categories, roles with colours and permissions, channels limited to some roles.
+- A banner behind the server's name: woven from the server's key, a picture, or a game's art.
 - Invite links with an expiry and a use limit, and invite cards that join in one click.
 - Pokes to invite members into a voice channel.
 - Moderation: kick, ban, server mute and deafen, move, disconnect, and an audit log.
@@ -71,7 +72,11 @@
 ### The app
 - Opens on a short splash that waits until your friends are linked and missed messages have arrived, and installs any update first.
 - Its own title bar, a tray icon, mouse back and forward buttons, and resizable columns.
-- The look: black and white like the emblem, over a cold fog.
+- The rail holds your servers and groups. Home opens on friends in game, as art cards with the live match, then live calls and everyone online; its column has a live feed of what friends are doing (right-click to join them) and your direct messages, which stay beside any open conversation.
+- A DM shows the other person beside it: their status, what they play, a week of play, their showcase, your time together and the pictures you shared.
+- Profiles: a status that can clear itself and hold back pokes, a showcase of up to three favourite games or achievements, an accent colour taken from the banner, and a seal for people whose key you compared in person.
+- Settings has an index of its sections and a preview of what others see as you change your profile.
+- The look: Ink by night, muted ivory by day, or whichever Windows uses (Settings, General), set in Commissioner.
 - **Report a problem** sends a bug report to the developers. You preview it first, and nothing identifying is included ([docs/reports.md](docs/reports.md)).
 
 ## Connecting on strict networks
