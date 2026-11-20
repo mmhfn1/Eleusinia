@@ -14,6 +14,8 @@ contextBridge.exposeInMainWorld('api', {
   checkUpdates: () => ipcRenderer.invoke('checkUpdates'),
   quit: () => ipcRenderer.invoke('quit'),
   programs: () => ipcRenderer.invoke('programs'), // running programs, for Settings → Activity → Add a game
+  steamGames: () => ipcRenderer.invoke('steamGames'), // for the profile showcase: installed games with their hours
+  steamUnlocked: (app: number) => ipcRenderer.invoke('steamUnlocked', app), // and a game's unlocked achievements
   openSteam: (app: number, kind: 'store' | 'run') => ipcRenderer.invoke('openSteam', app, kind),
   openLink: (url: string) => ipcRenderer.invoke('openLink', url),
   previewLink: (url: string) => ipcRenderer.invoke('previewLink', url), // made by our own app, for a link we are sending

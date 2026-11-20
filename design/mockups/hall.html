@@ -1,0 +1,1431 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The hall</title>
+<!-- Mockup only: the app would bundle the font (@fontsource), never fetch it -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Commissioner:FLAR,VOLM,wght@0..100,0..100,300..800&display=swap" rel="stylesheet">
+<style>
+/* Common ground: the app's own layout (Discord's shape, Steam's game shelf) and the lamp's gold, with a few ideas from
+   postmodern buildings, each doing a job. Ink by night, ivory by day. */
+:root {
+  --sans: 'Commissioner', 'Segoe UI', system-ui, sans-serif;
+  --body: 'FLAR' 12, 'VOLM' 0;
+  --title: 'FLAR' 100, 'VOLM' 60;
+}
+* { box-sizing: border-box; margin: 0 }
+body { background: #26282c; color: #e9e4da; font: 15px/1.5 var(--sans); font-variation-settings: var(--body); padding: 40px; }
+.page-head { display: flex; align-items: flex-start; gap: 24px; max-width: 1280px; margin-bottom: 28px }
+.page-head h1 { font-size: 40px; font-weight: 600; font-variation-settings: var(--title); letter-spacing: -0.01em; line-height: 1.1 }
+.page-head p { max-width: 74ch; color: #bdb6a8; margin-top: 10px }
+.switch-theme { margin-left: auto; display: flex; border: 1px solid #55524b; flex: none }
+.switch-theme button { font: inherit; font-size: 14px; background: none; color: #d8d2c6; border: 0; padding: 7px 14px; cursor: pointer }
+.switch-theme button[aria-pressed='true'] { background: #e9e4da; color: #1c1a16 }
+section.mock { max-width: 1280px; margin-bottom: 56px }
+section.mock > h2 { font-size: 24px; font-weight: 600; font-variation-settings: var(--title); margin-bottom: 6px }
+section.mock > p { max-width: 96ch; color: #bdb6a8; font-size: 14px; margin-bottom: 16px }
+section.mock > p b { color: #efe9de; font-weight: 600 }
+
+/* ---------- Tokens: ink by night (default), ivory by day ---------- */
+.app {
+  --bg0: #0b0d11; --bg1: #101318; --bg2: #14181e; --bg3: #1b2028; --bg4: #242a33;
+  --line: #22262d; --line2: #343a44;
+  --t1: #efe9de; --t2: #b4ad9f; --t3: #857f73;
+  --lamp: #d8b878; --lamp-2: #f0d9a6; --on-lamp: #1b1408; /* the lamp: selection, primary actions, in game */
+  --voice: #93a8d2; /* indigo: voice */
+  --live: #e2664e; /* vermilion: unread, live, danger */
+  --on: #8db47a; /* online */
+  --fog: linear-gradient(180deg, rgb(147 168 210 / 0.07), transparent 40%);
+  --pool: radial-gradient(60% 50% at 50% 110%, rgb(216 184 120 / 0.08), transparent 70%);
+  --mark: #f4eee2; /* the mark on default pictures */
+  --shadow: 0 12px 32px rgb(0 0 0 / 0.45);
+}
+.app.light {
+  --bg0: #ddd5c4; --bg1: #e7e0d1; --bg2: #efe9dd; --bg3: #f8f4eb; --bg4: #e2dacb;
+  --line: #d6ccb9; --line2: #c3b8a3;
+  --t1: #211d18; --t2: #5c5447; --t3: #877e6e;
+  --lamp: #8b692b; --lamp-2: #6f521c; --on-lamp: #fbf6ea;
+  --voice: #34496e; --live: #b03f2b; --on: #4f6e3b;
+  --fog: linear-gradient(180deg, rgb(52 73 110 / 0.05), transparent 40%);
+  --pool: radial-gradient(60% 50% at 50% 110%, rgb(139 105 43 / 0.09), transparent 70%);
+  --shadow: 0 12px 32px rgb(60 45 20 / 0.16);
+}
+
+.app { width: 1280px; height: 800px; display: grid; grid-template: 36px 1fr auto / 72px 240px 1fr; background: var(--bg2); color: var(--t1);
+  overflow: hidden; position: relative; box-shadow: 0 30px 80px rgb(0 0 0 / 0.5); font-size: 14px; transition: background .25s, color .25s }
+.app.server { grid-template-columns: 72px 240px 1fr 232px }
+svg.i { width: 18px; height: 18px; flex: none }
+
+/* Title bar */
+.tbar { grid-column: 1 / -1; display: flex; align-items: center; gap: 4px; background: var(--bg0); padding-left: 16px; color: var(--t2) }
+.tbar .nav { display: flex; gap: 2px }
+.tbar .nav span { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 4px }
+.tbar .nav span:hover { background: var(--bg3); color: var(--t1) }
+.search { margin: 0 auto; width: 420px; height: 26px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--bg2);
+  border: 1px solid var(--line); border-radius: 4px; color: var(--t3); font-size: 13px }
+.search kbd { margin-left: auto; font: inherit; font-size: 11px; border: 1px solid var(--line2); padding: 0 5px; border-radius: 3px }
+.win { display: flex } .win span { width: 46px; height: 36px; display: grid; place-items: center } .win span:hover { background: var(--bg3) }
+.win svg { width: 11px; height: 11px }
+
+/* Rail: Discord's tiles; the selected one is lit by a slit of light (Ando), not a white pill */
+.rail { grid-row: 2; background: var(--bg0); display: flex; flex-direction: column; align-items: center; gap: 8px; padding-top: 10px; position: relative }
+.rail .tile { width: 48px; height: 48px; border-radius: 50%; position: relative; display: grid; place-items: center; cursor: pointer;
+  transition: border-radius .18s ease, transform .18s ease; background: var(--bg3) }
+.rail .tile:hover, .rail .tile.on { border-radius: 15px }
+.rail .tile > svg.pic { width: 48px; height: 48px; border-radius: inherit; overflow: hidden }
+.rail .tile::before { content: ''; position: absolute; left: -12px; top: 50%; width: 3px; height: 0; translate: 0 -50%; background: var(--lamp-2);
+  border-radius: 0 2px 2px 0; box-shadow: 0 0 10px 1px var(--lamp); transition: height .18s ease; opacity: .95 }
+.rail .tile:hover::before { height: 18px } .rail .tile.on::before { height: 36px }
+.rail .tile.unread::before { height: 8px }
+.rail .emblem { background: none } .rail .emblem img { width: 44px; height: 44px; border-radius: 50%; display: block }
+.app.light .rail .emblem img { filter: invert(1) sepia(.25) }
+.rail hr { width: 32px; border: 0; border-top: 1px solid var(--line2); margin: 2px 0 }
+.rail .add { background: none; border: 1px dashed var(--line2); color: var(--t2) }
+.badge { position: absolute; right: -5px; bottom: -4px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--live); color: #fff;
+  font-size: 11px; font-weight: 700; display: grid; place-items: center; border: 3px solid var(--bg0); box-sizing: content-box }
+.tip { position: absolute; left: 62px; background: var(--bg4); color: var(--t1); font-size: 13px; padding: 5px 9px; border-radius: 4px; white-space: nowrap;
+  pointer-events: none; opacity: 0; translate: -4px 0; transition: .12s; box-shadow: var(--shadow); z-index: 5 }
+.rail .tile:hover .tip { opacity: 1; translate: 0 0 }
+
+/* Side column */
+.side { grid-row: 2; background: var(--bg1); display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line) }
+.side-head { height: 52px; flex: none; display: flex; align-items: center; padding: 0 16px; font-weight: 650; font-size: 15px; border-bottom: 1px solid var(--line) }
+.side-head.banner { height: 96px; align-items: flex-end; padding-bottom: 12px; position: relative; overflow: hidden; color: #fff }
+.side-head.banner .weave { position: absolute; inset: 0; opacity: .9 }
+.side-head.banner::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 25%, rgb(10 12 16 / .7)) }
+.side-head.banner b { position: relative; z-index: 1; font-size: 17px; font-variation-settings: var(--title) }
+.side-head.banner small { position: relative; z-index: 1; margin-left: auto; font-weight: 400; opacity: .85; font-size: 12px }
+.side-body { padding: 10px 8px; overflow: hidden; flex: 1 }
+.cat { display: flex; align-items: center; color: var(--t3); font-size: 12.5px; font-weight: 600; padding: 14px 8px 6px }
+.cat .n { margin-left: 6px; font-weight: 400 }
+.cat svg { margin-left: auto; width: 15px; height: 15px }
+.row { display: flex; align-items: center; gap: 10px; padding: 5px 8px; border-radius: 5px; color: var(--t2); cursor: pointer; position: relative; min-height: 34px }
+.row:hover { background: var(--bg3); color: var(--t1) }
+.row.on { background: var(--bg4); color: var(--t1) }
+.row.on::after { content: ''; position: absolute; left: 0; top: 7px; bottom: 7px; width: 2px; background: var(--lamp); border-radius: 2px }
+.row .nm { font-weight: 550; color: inherit; line-height: 1.2 }
+.row .sub { font-size: 12px; color: var(--t3); line-height: 1.25; display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden }
+.row .sub.game { color: var(--lamp) }
+.row .sub.voice { color: var(--voice) }
+.row .count { margin-left: auto; background: var(--live); color: #fff; font-size: 11px; font-weight: 700; min-width: 18px; height: 18px; border-radius: 9px; display: grid; place-items: center; padding: 0 5px }
+.row.unread .nm { color: var(--t1); font-weight: 700 }
+.row .chan { width: 18px; height: 18px; color: var(--t3) }
+.row .cap { width: 14px; height: 10px; border-radius: 2px; flex: none }
+.voice-people { padding-left: 34px; margin: 2px 0 6px }
+.voice-people .row { min-height: 28px; padding: 3px 8px }
+.voice-people .nm { font-weight: 450; font-size: 13px }
+.voice-people .row.speaking .av { box-shadow: 0 0 0 2px var(--bg1), 0 0 0 4px var(--lamp) }
+.live-pill { margin-left: auto; font-size: 10.5px; font-weight: 700; color: #fff; background: var(--live); padding: 0 5px; border-radius: 3px; line-height: 16px }
+
+/* Pictures: a crest on a tint from the key, so the same key always looks the same */
+.av { display: inline-block; vertical-align: middle; position: relative; flex: none; width: 32px; height: 32px; border-radius: 50%; transition: box-shadow .2s }
+.av > svg { width: 100%; height: 100%; display: block; border-radius: 50% }
+.av.s { width: 24px; height: 24px } .av.l { width: 40px; height: 40px } .av.xl { width: 80px; height: 80px }
+.dot { position: absolute; right: -2px; bottom: -2px; width: 12px; height: 12px; border-radius: 50%; border: 3px solid var(--bg1); box-sizing: content-box; width: 8px; height: 8px }
+.dot.online { background: var(--on) }
+.dot.game { background: var(--lamp); border-radius: 2px; rotate: 45deg; width: 7px; height: 7px } /* a diamond: in game */
+.dot.voice { background: none; box-shadow: inset 0 0 0 2.5px var(--voice) } /* a ring: in voice */
+.main .dot, .members .dot { border-color: var(--bg2) }
+
+/* User and voice bars, as wide as the rail and the column (the app's own) */
+.bars { grid-row: 3; grid-column: 1 / 3; background: var(--bg0); border-top: 1px solid var(--line) }
+.vbar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid var(--line) }
+.vbar .st { color: var(--on); font-weight: 650; font-size: 13px; display: flex; gap: 6px; align-items: center }
+.vbar .where { color: var(--t3); font-size: 12px }
+.vbar .ib:last-child { margin-left: auto }
+.ubar { display: flex; align-items: center; gap: 10px; padding: 8px 10px; height: 56px }
+.ubar .who { line-height: 1.2 } .ubar .who b { font-weight: 650; display: block } .ubar .who small { color: var(--t3); font-size: 12px }
+.ubar .tools { margin-left: auto; display: flex; gap: 2px }
+.ib { width: 32px; height: 32px; display: grid; place-items: center; border-radius: 5px; color: var(--t2); cursor: pointer }
+.ib:hover { background: var(--bg3); color: var(--t1) }
+.ib.off { color: var(--live) }
+
+/* Main */
+.main { grid-row: 2 / 4; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--fog), var(--pool), var(--bg2); position: relative }
+.main-head { height: 52px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 20px; border-bottom: 1px solid var(--line) }
+.main-head h3 { font-size: 17px; font-weight: 650; font-variation-settings: var(--title) }
+.main-head .meta { color: var(--t3); font-size: 13px }
+.main-head .right { margin-left: auto; display: flex; gap: 8px; align-items: center }
+.scroll { flex: 1; overflow: hidden; padding: 20px 24px; min-height: 0 }
+h4.shelf { font-size: 15px; font-weight: 650; margin: 4px 0 12px; display: flex; align-items: baseline; gap: 8px; font-variation-settings: var(--title) }
+h4.shelf .n { color: var(--t3); font-weight: 400; font-size: 13px; font-variation-settings: var(--body) }
+
+/* Buttons: the primary one has a single knife-cut corner (Pei's East Building) */
+.btn { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 13px; font: inherit; font-size: 13.5px; font-weight: 600; border: 0;
+  border-radius: 5px; background: var(--bg4); color: var(--t1); cursor: pointer; white-space: nowrap; transition: filter .15s, transform .1s }
+.btn:hover { filter: brightness(1.12) } .btn:active { transform: translateY(1px) }
+.btn svg { width: 16px; height: 16px }
+.btn.primary { background: var(--lamp); color: var(--on-lamp); border-radius: 5px 0 5px 5px; clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 0 100%) }
+.btn.voice { background: color-mix(in srgb, var(--voice) 22%, var(--bg3)); color: var(--t1) }
+.btn.danger { background: var(--live); color: #fff; clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 0 100%); border-radius: 5px 0 5px 5px }
+.btn.ghost { background: none; color: var(--t2) } .btn.ghost:hover { background: var(--bg3); color: var(--t1) }
+.btn.on { background: color-mix(in srgb, var(--on) 26%, var(--bg3)) }
+
+/* Playing now: Steam's shelf of art; each card's frame steps in once, like a portal (Bofill), and the art moves on hover */
+.shelf-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 26px }
+.gcard { position: relative; height: 188px; border-radius: 8px; overflow: hidden; cursor: pointer; isolation: isolate; color: #fff }
+.gcard .art { position: absolute; inset: -6px; z-index: -2; transition: transform .5s cubic-bezier(.2,.7,.2,1) }
+.gcard:hover .art { transform: scale(1.05) translateY(-4px) }
+.gcard::before { content: ''; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, rgb(0 0 0 / .05) 20%, rgb(8 9 12 / .88)) }
+.gcard::after { content: ''; position: absolute; inset: 7px; border: 1px solid rgb(255 255 255 / .16); border-radius: 4px; pointer-events: none; transition: inset .3s }
+.gcard:hover::after { inset: 11px; border-color: rgb(255 255 255 / .3) }
+.gcard .top { position: absolute; left: 16px; right: 16px; top: 16px; display: flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600 }
+.gcard .top .g { background: rgb(0 0 0 / .45); padding: 1px 7px; border-radius: 3px }
+.gcard .top .lv { margin-left: auto; background: var(--live); padding: 0 6px; border-radius: 3px; display: flex; gap: 5px; align-items: center }
+.gcard .top .lv::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: #fff; animation: beat 1.6s infinite }
+@keyframes beat { 50% { opacity: .3 } }
+.gcard .bot { position: absolute; left: 16px; right: 16px; bottom: 14px }
+.gcard .score { font-size: 22px; font-weight: 650; font-variation-settings: var(--title); line-height: 1.15; font-variant-numeric: tabular-nums }
+.gcard .line { font-size: 12.5px; opacity: .82; margin-bottom: 10px }
+.gcard .foot { display: flex; align-items: center; gap: 8px; font-weight: 600 }
+.gcard .foot .btn { margin-left: auto; background: rgb(255 255 255 / .14); color: #fff; backdrop-filter: blur(6px); height: 30px }
+.gcard .foot .av .dot { border-color: transparent }
+.gcard .clock { font-variant-numeric: tabular-nums }
+
+.calls { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 26px }
+.ccard { display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: var(--bg3); border: 1px solid var(--line); border-radius: 8px }
+.ccard .stack { display: flex } .ccard .stack .av { margin-left: -8px; box-shadow: 0 0 0 2px var(--bg3) } .ccard .stack .av:first-child { margin-left: 0 }
+.ccard .what b { display: block; font-weight: 650 } .ccard .what small { color: var(--t3); font-size: 12.5px }
+.ccard .btn { margin-left: auto }
+.ccard .wave { display: inline-flex; gap: 2px; align-items: center; height: 12px; margin-right: 5px; vertical-align: -1px }
+.ccard .wave i { width: 2px; background: var(--voice); border-radius: 1px; animation: wv 1s infinite ease-in-out }
+.ccard .wave i:nth-child(2) { animation-delay: .2s } .ccard .wave i:nth-child(3) { animation-delay: .4s }
+@keyframes wv { 0%, 100% { height: 3px } 50% { height: 12px } }
+
+.people .row { padding: 8px 10px; border-top: 1px solid var(--line); border-radius: 0 }
+.people .row:hover { border-radius: 5px; border-color: transparent }
+.people .row .acts { margin-left: auto; display: flex; gap: 2px; opacity: 0; transition: opacity .12s }
+.people .row:hover .acts { opacity: 1 }
+
+/* Chat */
+.chat { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; padding: 0 0 8px; overflow: hidden; min-height: 0 }
+.day { display: flex; align-items: center; gap: 10px; color: var(--t3); font-size: 12px; font-weight: 600; margin: 10px 24px }
+.day::before, .day::after { content: ''; flex: 1; border-top: 1px solid var(--line) }
+.msg { display: grid; grid-template-columns: 40px 1fr auto; column-gap: 14px; padding: 4px 24px; position: relative }
+.msg:hover { background: color-mix(in srgb, var(--bg3) 60%, transparent) }
+.msg .av { grid-row: span 2; margin-top: 2px }
+.msg .h { display: flex; align-items: baseline; gap: 8px } .msg .h b { font-weight: 650 } .msg .h time { color: var(--t3); font-size: 12px }
+.msg p { grid-column: 2; color: var(--t1); line-height: 1.45 }
+.msg.cont { padding-top: 0 } .msg.cont .av { visibility: hidden; height: 0 }
+.msg .role { font-weight: 650 }
+/* The seal: every message is signed by its author; it shows on hover and says what it proves when clicked */
+.seal { grid-row: 1 / 3; grid-column: 3; align-self: center; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; cursor: pointer;
+  color: var(--live); border: 1.5px solid color-mix(in srgb, var(--live) 60%, transparent); opacity: 0; transition: opacity .15s, transform .15s }
+.msg:hover .seal, .msg.hover .seal { opacity: 1 } .seal:hover { transform: rotate(-12deg) scale(1.08) }
+.seal svg { width: 13px; height: 13px }
+.msg.new .seal { animation: press .7s ease-out both }
+@keyframes press { 0% { opacity: 1; transform: scale(1.9) rotate(-30deg) } 55% { opacity: 1; transform: scale(.92) } 100% { opacity: 0; transform: scale(1) } }
+.msg.new { animation: rise .25s ease-out }
+@keyframes rise { from { opacity: 0; transform: translateY(6px) } }
+.invite { grid-column: 2; margin-top: 6px; width: 380px; display: flex; gap: 12px; align-items: center; padding: 12px; background: var(--bg3); border: 1px solid var(--line); border-radius: 8px }
+.invite .sv { width: 44px; height: 44px; border-radius: 13px; overflow: hidden; flex: none } .invite .sv svg { width: 100%; height: 100% }
+.invite b { display: block } .invite small { color: var(--t3); font-size: 12px } .invite .btn { margin-left: auto }
+
+.composer { margin: 0 20px 18px; display: flex; align-items: center; gap: 8px; padding: 0 8px 0 12px; height: 48px; background: var(--bg3); border: 1px solid var(--line);
+  border-radius: 8px; position: relative; overflow: hidden }
+/* Focus is a coloured rail along the box's foot (Stirling's handrails) */
+.composer::after { content: ''; position: absolute; left: 0; right: 0; bottom: 0; height: 2px; background: var(--voice); transform: scaleX(0); transform-origin: left; transition: transform .3s }
+.composer:focus-within::after { transform: none }
+.composer input { flex: 1; font: inherit; background: none; border: 0; color: var(--t1); outline: none }
+.composer input::placeholder { color: var(--t3) }
+.composer .priv { font-size: 12px; color: var(--t3); display: flex; gap: 5px; align-items: center; white-space: nowrap }
+.composer .priv svg { width: 13px; height: 13px; color: var(--on) }
+
+/* The private chip: what keeps this conversation private, at a glance; a click opens the keep */
+.chip { display: inline-flex; align-items: center; gap: 6px; height: 26px; padding: 0 10px; border-radius: 13px; font-size: 12.5px; font-weight: 600; cursor: pointer;
+  color: var(--on); background: color-mix(in srgb, var(--on) 13%, transparent); border: 1px solid color-mix(in srgb, var(--on) 30%, transparent) }
+.chip svg { width: 14px; height: 14px }
+.chip:hover { background: color-mix(in srgb, var(--on) 20%, transparent) }
+.pop { position: absolute; z-index: 20; width: 380px; background: var(--bg3); border: 1px solid var(--line2); border-radius: 8px; box-shadow: var(--shadow); padding: 16px;
+  opacity: 0; translate: 0 -6px; pointer-events: none; transition: .16s }
+.pop.open { opacity: 1; translate: 0 0; pointer-events: auto }
+.pop h6 { font-size: 15px; font-weight: 650; display: flex; gap: 8px; align-items: center; margin-bottom: 2px; font-variation-settings: var(--title) }
+.pop > small { color: var(--t3); font-size: 12.5px }
+.keep { display: grid; grid-template-columns: 88px 1fr; gap: 14px; margin-top: 12px; align-items: start }
+.keep svg.walls { width: 88px; height: 88px; margin-top: 6px }
+.walls .w { fill: none; stroke: var(--line2); stroke-width: 1.3; transition: stroke .2s, fill .2s }
+.walls .w.lit { stroke: var(--on); fill: color-mix(in srgb, var(--on) 9%, transparent) }
+.facts div { padding: 6px 8px; border-radius: 5px; cursor: default; margin-bottom: 2px }
+.facts div:hover { background: var(--bg4) }
+.facts b { display: block; font-size: 13px; font-weight: 650 } .facts span { color: var(--t2); font-size: 12.5px; line-height: 1.35; display: block }
+.pop .keyline { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; gap: 10px; align-items: center; font-size: 12px; color: var(--t3) }
+.pop .keyline code { font: 12px ui-monospace, Consolas, monospace; color: var(--t2); letter-spacing: .04em }
+
+/* Members (Discord's list), role colours from the server */
+.members { grid-row: 2 / 4; background: var(--bg1); border-left: 1px solid var(--line); padding: 8px; overflow: hidden }
+.members .row { min-height: 42px }
+
+/* Call: Discord's tiles; each person's banner behind them, the speaker's edge lit by the lamp */
+.stage { flex: 1; display: grid; gap: 10px; padding: 16px; grid-template-columns: 1.9fr 1fr; grid-template-rows: repeat(3, 1fr); min-height: 0 }
+.vt { position: relative; border-radius: 10px; overflow: hidden; display: grid; place-items: center; background: var(--bg3); isolation: isolate; transition: box-shadow .25s }
+.vt .weave { position: absolute; inset: 0; z-index: -2; opacity: .35; filter: saturate(.8) }
+.vt::before { content: ''; position: absolute; inset: 0; z-index: -1; background: radial-gradient(70% 70% at 50% 45%, transparent, color-mix(in srgb, var(--bg0) 85%, transparent)) }
+.vt.big { grid-row: span 3 }
+.vt .av.xl { width: 64px; height: 64px }
+.vt.speaking { box-shadow: inset 0 0 0 2px var(--lamp), 0 0 24px -4px var(--lamp) }
+.vt .av.xl { box-shadow: 0 0 0 4px color-mix(in srgb, var(--bg0) 60%, transparent) }
+.vt.speaking .av.xl { box-shadow: 0 0 0 4px var(--lamp) }
+.vt .tag { position: absolute; left: 10px; bottom: 10px; display: flex; gap: 6px; align-items: center; background: rgb(8 9 12 / .66); color: #f3eee4; padding: 4px 9px; border-radius: 5px; font-size: 13px }
+.vt .tag b { font-weight: 650 } .vt .tag span { opacity: .75 }
+.vt .tag svg { width: 14px; height: 14px; color: #ff9b86 }
+.vt.screen { background: #0f1218 }
+.vt.screen .shot { position: absolute; inset: 0; background: linear-gradient(150deg, #34485e, #18202b 55%, #3c2a1c) }
+.vt.screen .shot::after { content: 'Mirage, round 18'; position: absolute; left: 50%; top: 42%; translate: -50% -50%; color: rgb(255 255 255 / .55); font-size: 26px; font-weight: 650; font-variation-settings: var(--title) }
+.vt.screen .live { position: absolute; top: 10px; left: 10px; background: var(--live); color: #fff; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 3px }
+.vt.screen .watch { position: absolute; top: 10px; right: 10px; font-size: 12px; color: #fff; background: rgb(0 0 0 / .45); padding: 2px 8px; border-radius: 4px }
+.callbar { display: flex; justify-content: center; gap: 8px; padding: 0 16px 16px }
+.callbar .ib { width: 44px; height: 40px; background: var(--bg3); border-radius: 8px }
+
+/* The call as banners: each person a tall banner from their key, side by side; whoever talks is lit */
+.hall { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 12px; padding: 18px 20px 14px }
+.hall .stream { display: none; flex: 1; position: relative; border-radius: 10px; overflow: hidden; background: #0f1218 }
+.hall.watching .stream { display: block }
+.stream .shot { position: absolute; inset: 0; background: linear-gradient(150deg, #34485e, #18202b 55%, #3c2a1c) }
+.stream .shot::after { content: 'Mirage, round 18'; position: absolute; left: 50%; top: 45%; translate: -50% -50%; color: rgb(255 255 255 / .5); font-size: 26px; font-weight: 650; font-variation-settings: var(--title) }
+.stream .live { position: absolute; top: 10px; left: 10px; background: var(--live); color: #fff; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 3px }
+.stream .watch { position: absolute; top: 10px; right: 10px; font-size: 12px; color: #fff; background: rgb(0 0 0 / .45); padding: 2px 8px; border-radius: 4px }
+.stream .tag { position: absolute; left: 10px; bottom: 10px; display: flex; gap: 6px; background: rgb(8 9 12 / .66); color: #f3eee4; padding: 4px 9px; border-radius: 5px; font-size: 13px }
+.stream .tag span { opacity: .75 }
+.stream .back { position: absolute; right: 10px; bottom: 10px; background: rgb(8 9 12 / .66); color: #f3eee4 }
+.banners { flex: 1; display: flex; gap: 12px; justify-content: center; min-height: 0 }
+.hall.watching .banners { flex: 0 0 132px }
+.bn { position: relative; flex: 1; max-width: 200px; border-radius: 10px; overflow: hidden; isolation: isolate; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 2px; padding: 16px 10px; background: var(--bg3); outline: 1px solid var(--line); outline-offset: -1px;
+  transition: outline-color .3s, box-shadow .3s }
+.bn .weave { position: absolute; inset: 0; z-index: -2; opacity: .55; transition: opacity .35s, filter .35s; filter: saturate(.75) brightness(.9) }
+/* the banner fades into the tile at its foot, where the name sits */
+.bn::before { content: ''; position: absolute; inset: 0; z-index: -1; background: linear-gradient(180deg, transparent 30%, color-mix(in srgb, var(--bg3) 92%, transparent) 78%) }
+.bn .av.xl { width: 72px; height: 72px; margin-bottom: 10px; box-shadow: 0 0 0 3px var(--bg3), 0 0 0 4px var(--line2); transition: box-shadow .3s }
+.bn .nm { font-weight: 650; font-size: 15px }
+.bn .sub { font-size: 12px; color: var(--t3); white-space: nowrap } .bn .sub.game { color: var(--lamp) }
+.bn .watch-btn { margin-top: 10px; height: 28px; background: var(--live); color: #fff }
+.hall.watching .bn { justify-content: flex-end; padding: 10px 8px } .hall.watching .bn .av.xl { width: 48px; height: 48px; margin-bottom: 6px }
+.hall.watching .bn .watch-btn, .hall.watching .bn .sub { display: none }
+/* Talking: the banner brightens, its outline is lit, and a seam of light runs down from the top, as long as the voice is loud */
+.bn .seam { position: absolute; top: 0; left: 50%; width: 2px; height: var(--lvl, 0px); translate: -50% 0; border-radius: 0 0 2px 2px; opacity: 0;
+  background: linear-gradient(180deg, var(--lamp-2), transparent); box-shadow: 0 0 8px 1px color-mix(in srgb, var(--lamp) 60%, transparent);
+  transition: height .09s linear, opacity .3s }
+.bn.speaking { outline-color: color-mix(in srgb, var(--lamp) 75%, transparent); box-shadow: 0 0 22px -8px var(--lamp) }
+.bn.speaking .weave { opacity: .9; filter: saturate(1) brightness(1.15) }
+/* the seam lets a little light into the banner below it */
+.bn::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; opacity: 0; transition: opacity .4s;
+  background: radial-gradient(45% 30% at 50% 0, color-mix(in srgb, var(--lamp) 22%, transparent), transparent) }
+.bn.speaking::after { opacity: 1 }
+.bn.speaking .seam { opacity: 1 }
+.bn.speaking .av.xl { box-shadow: 0 0 0 3px var(--bg3), 0 0 0 5px var(--lamp) }
+.bn.muted .nm::after { content: ''; display: inline-block; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%; background: var(--live); vertical-align: 1px }
+@media (prefers-reduced-motion: reduce) { .bn .seam { transition: none; height: 40px !important } }
+.gallery { display: grid; grid-template-columns: repeat(8, 1fr); gap: 12px 8px; margin-top: 4px }
+.gallery div { display: flex; flex-direction: column; align-items: center; gap: 4px; font-size: 12px; color: var(--t3) }
+.gallery .av { width: 48px; height: 48px }
+
+/* ---------- The hall: banners on a curved colonnade, rings on the floor, a pool's reflection ---------- */
+.court { position: relative; flex: 1; min-height: 0; overflow: hidden; perspective: 1150px; perspective-origin: 50% 24%;
+  --mx: 50%; --my: 30% }
+.court::before { content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 3; mix-blend-mode: screen;
+  background: radial-gradient(260px 200px at var(--mx) var(--my), color-mix(in srgb, var(--lamp) 10%, transparent), transparent 70%) }
+.app.light .court::before { mix-blend-mode: multiply; background: radial-gradient(260px 200px at var(--mx) var(--my), rgb(255 248 230 / .0), transparent 70%) }
+.floor { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none }
+.floor .ring { fill: none; stroke: var(--line2); stroke-width: 1 }
+.floor .ring.facade { stroke: color-mix(in srgb, var(--lamp) 30%, var(--line2)); stroke-width: 1.3 }
+.floor .lawn { fill: color-mix(in srgb, var(--on) 7%, transparent); stroke: none }
+.floor .forum { fill: color-mix(in srgb, var(--bg0) 45%, transparent); stroke: var(--line2) }
+.floor text { fill: var(--t3); font-size: 15px; letter-spacing: .32em; font-variation-settings: var(--title); opacity: .7 }
+.floor .ripple { fill: none; stroke: var(--lamp); stroke-width: 1.4; opacity: 0 }
+.world { position: absolute; left: 50%; top: 66%; transform-style: preserve-3d; transition: transform .6s cubic-bezier(.2,.7,.2,1), filter .6s }
+.court.staged .world { transform: translateZ(-260px) translateY(-30px); filter: brightness(.7) saturate(.8) }
+.court.left .world { filter: grayscale(1) brightness(.45) }
+.world .bn { position: absolute; left: -74px; top: -318px; width: 148px; height: 318px; max-width: none; flex: none; cursor: pointer;
+  transform-origin: 50% 100%; transform: translateX(var(--x)) translateZ(var(--z)) rotateY(var(--ry)) translateY(var(--lift, 0px));
+  transition: transform .35s cubic-bezier(.2,.7,.2,1), outline-color .3s, box-shadow .3s;
+  -webkit-box-reflect: below 10px linear-gradient(transparent 62%, rgb(0 0 0 / .2)) }
+.world .bn:hover { --lift: -10px }
+.world .bn .vol { position: absolute; left: 10px; right: 10px; bottom: 8px; height: 3px; border-radius: 2px; background: var(--line2); opacity: 0; transition: opacity .2s }
+.world .bn .vol i { display: block; height: 100%; width: var(--v, 100%); background: var(--voice); border-radius: 2px }
+.world .bn .vol b { position: absolute; right: 0; bottom: 6px; font-size: 11px; font-weight: 600; color: var(--t2) }
+.world .bn:hover .vol, .world .bn.vol-show .vol { opacity: 1 }
+.world .bn.cam .weave { opacity: 1; filter: none; background: linear-gradient(120deg, #3b4a5c, #6b5a4a, #2e3b4b); background-size: 300% 300%; animation: camfeed 6s ease-in-out infinite }
+.world .bn.cam .weave svg { display: none } .world .bn.cam .av.xl { opacity: 0 }
+@keyframes camfeed { 50% { background-position: 100% 50% } }
+.world .bn.cam::before { background: linear-gradient(180deg, transparent 55%, color-mix(in srgb, var(--bg3) 85%, transparent)) }
+.bn .floaty { position: absolute; left: 50%; top: 40%; translate: -50% 0; font-weight: 700; font-size: 18px; color: var(--lamp-2); pointer-events: none;
+  text-shadow: 0 0 12px var(--lamp); animation: floatup 1.8s ease-out forwards; font-variation-settings: var(--title) }
+@keyframes floatup { from { opacity: 0; transform: translateY(10px) scale(.8) } 15% { opacity: 1 } to { opacity: 0; transform: translateY(-120px) scale(1.15) } }
+.bn.deaf .nm::after { content: ''; display: inline-block; width: 8px; height: 8px; margin-left: 6px; border-radius: 50%; background: var(--live); outline: 2px solid color-mix(in srgb, var(--live) 40%, transparent) }
+
+/* The portico: a stream stands in the middle, framed like Bofill's gate */
+.portico { position: absolute; left: 50%; top: 46%; width: 560px; translate: -50% -50%; z-index: 4; opacity: 0; pointer-events: none;
+  transform: translateY(40px) scale(.96); transition: opacity .45s, transform .6s cubic-bezier(.2,.7,.2,1) }
+.court.staged .portico { opacity: 1; pointer-events: auto; transform: none }
+.portico .lintel { height: 12px; margin: 0 -18px; background: linear-gradient(180deg, color-mix(in srgb, var(--lamp) 45%, var(--bg4)), var(--bg4) 70%); border-bottom: 1px solid var(--line2);
+  border-radius: 2px; box-shadow: 0 1px 0 color-mix(in srgb, var(--lamp) 60%, transparent) inset }
+.portico .span { display: flex; gap: 8px; align-items: stretch }
+.portico .col { width: 10px; flex: none; background: linear-gradient(90deg, var(--bg4), color-mix(in srgb, var(--lamp) 30%, var(--bg4)) 45%, var(--bg3)); border-radius: 1px }
+.portico .screen { flex: 1; height: 300px; position: relative; overflow: hidden; background: #0f1218; margin-top: 6px }
+.portico .shot { position: absolute; inset: 0; background: linear-gradient(150deg, #34485e, #18202b 55%, #3c2a1c) }
+.portico .shot::after { content: attr(data-t); position: absolute; left: 50%; top: 45%; translate: -50% -50%; color: rgb(255 255 255 / .55); font-size: 24px; font-weight: 650; white-space: nowrap; font-variation-settings: var(--title) }
+.portico .live { position: absolute; top: 8px; left: 8px; background: var(--live); color: #fff; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 3px }
+.portico .who { position: absolute; left: 8px; bottom: 8px; color: #f3eee4; background: rgb(8 9 12 / .6); font-size: 13px; padding: 3px 8px; border-radius: 4px }
+.portico .watching { position: absolute; right: 8px; top: 8px; color: #fff; background: rgb(0 0 0 / .45); font-size: 12px; padding: 1px 7px; border-radius: 4px }
+.portico .plinth { height: 10px; margin: 0 -26px; background: var(--bg4); border-top: 1px solid var(--line2); border-radius: 1px;
+  box-shadow: 0 18px 30px -12px rgb(0 0 0 / .5) }
+.portico .close-portico { position: absolute; right: 24px; bottom: 26px; height: 28px; background: rgb(8 9 12 / .66); color: #f3eee4 }
+.left-call { position: absolute; inset: 0; z-index: 6; display: none; flex-direction: column; align-items: center; justify-content: center; gap: 6px; text-align: center }
+.court.left .left-call { display: flex }
+.left-call b { font-size: 20px; font-variation-settings: var(--title) } .left-call span { color: var(--t2); margin-bottom: 8px }
+.callbar { align-items: center }
+.callbar .ib.cb.off { background: color-mix(in srgb, var(--live) 22%, var(--bg3)); color: var(--live) }
+.callbar .btn.on { background: color-mix(in srgb, var(--voice) 30%, var(--bg3)) }
+.react { display: flex; gap: 4px; padding: 0 6px; border-left: 1px solid var(--line); border-right: 1px solid var(--line); margin: 0 4px }
+.react button { font: inherit; font-size: 13px; font-weight: 650; height: 32px; padding: 0 11px; border-radius: 16px; border: 1px solid var(--line2); background: none; color: var(--t2); cursor: pointer }
+.react button:hover { color: var(--lamp-2); border-color: var(--lamp); background: color-mix(in srgb, var(--lamp) 10%, transparent) }
+.mini-pop { width: auto; padding: 0; border: 0; background: none; box-shadow: none }
+
+/* ---------- Plain frames (profiles, settings) ---------- */
+.app.plain { display: block; background: var(--fog), var(--bg2) }
+.seg { display: inline-flex; background: var(--bg1); border: 1px solid var(--line2); border-radius: 7px; padding: 3px; gap: 2px }
+.seg button { font: inherit; font-size: 13px; font-weight: 600; border: 0; background: none; color: var(--t2); padding: 5px 12px; border-radius: 5px; cursor: pointer }
+.seg button[aria-pressed='true'] { background: var(--bg4); color: var(--t1) }
+.seg.small button { padding: 3px 10px }
+
+.profile-stage { position: relative; height: 100%; display: grid; grid-template-columns: 232px 320px 1fr; gap: 0 }
+.profile-stage > .seg { position: absolute; right: 24px; top: 18px; z-index: 2 }
+.members.fake { grid-row: 1; height: 100%; padding-top: 18px }
+.mini-slot { padding: 120px 0 0 12px }
+.full-slot { padding: 64px 28px 0 20px; display: flex; justify-content: center }
+
+/* The small profile */
+.mini { width: 300px; background: var(--bg3); border: 1px solid var(--line2); border-radius: 10px; overflow: hidden; box-shadow: var(--shadow); position: relative }
+.pban { position: relative; overflow: hidden; height: 104px; transition: height .4s cubic-bezier(.2,.7,.2,1) }
+.pban .weave, .pban .art { position: absolute; inset: 0; transition: opacity .5s }
+.pban .art { opacity: 0 } .ingame .pban .art { opacity: 1 } .ingame .pban .weave { opacity: 0 }
+.pban .art::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgb(0 0 0 / .1), rgb(8 9 12 / .7)) }
+.pban .gline { position: absolute; left: 100px; right: 12px; bottom: 9px; color: #fff; font-size: 12px; font-weight: 600; display: none; align-items: center; gap: 6px; z-index: 1 }
+.ingame .pban .gline { display: flex }
+.gline .lv { background: var(--live); padding: 0 5px; border-radius: 3px; font-size: 10.5px; font-weight: 700 }
+.mini .ppic { position: absolute; left: 14px; top: 64px; width: 76px; height: 76px; z-index: 2 }
+.mini .ppic .av { width: 76px; height: 76px; box-shadow: 0 0 0 5px var(--bg3) }
+.mini .ppic .dot { width: 12px; height: 12px; border-width: 4px; border-color: var(--bg3); right: 1px; bottom: 1px }
+.mini .ppic .dot.game { width: 11px; height: 11px }
+.mini .pbody { padding: 44px 16px 14px }
+.pname { font-size: 19px; font-weight: 650; font-variation-settings: var(--title); line-height: 1.15 }
+.phandle { color: var(--t3); font-size: 12.5px }
+.pabout { color: var(--t2); font-size: 13px; margin: 8px 0 10px }
+.now { position: relative; overflow: hidden; border-radius: 8px; background: var(--bg4); padding: 10px 12px; margin: 8px 0; isolation: isolate }
+.now .bg { position: absolute; inset: 0; z-index: -1; opacity: .22; filter: blur(1px) }
+.now .k { font-size: 11.5px; color: var(--t3); font-weight: 600 } .now .t { font-weight: 650; font-variation-settings: var(--title) }
+.now .score { font-size: 22px; font-weight: 650; font-variant-numeric: tabular-nums; font-variation-settings: var(--title); line-height: 1.1 }
+.now .meta { color: var(--t2); font-size: 12px }
+.rounds { display: flex; gap: 3px; margin: 7px 0 5px; flex-wrap: wrap }
+.rounds i { width: 8px; height: 12px; border-radius: 4px 4px 1px 1px; border: 1px solid var(--line2); display: block }
+.rounds i.w { background: var(--lamp); border-color: transparent } .rounds i.l { background: color-mix(in srgb, var(--t3) 35%, transparent); border-color: transparent }
+.rounds i.cur { border-color: var(--lamp); animation: breathe 1.8s ease-in-out infinite }
+@keyframes breathe { 50% { box-shadow: 0 0 0 3px color-mix(in srgb, var(--lamp) 25%, transparent) } }
+.stats { display: flex; gap: 14px; font-size: 12px; color: var(--t2) } .stats b { color: var(--t1); font-variant-numeric: tabular-nums }
+.pmutual { display: flex; align-items: center; gap: 8px; color: var(--t3); font-size: 12.5px; margin-bottom: 10px }
+.pmutual .stack { display: flex } .pmutual .stack .av { width: 20px; height: 20px; margin-left: -6px; box-shadow: 0 0 0 2px var(--bg3) } .pmutual .stack .av:first-child { margin-left: 0 }
+.pmsg { display: flex; gap: 6px } .pmsg input { flex: 1; font: inherit; font-size: 13px; background: var(--bg2); border: 1px solid var(--line); color: var(--t1); border-radius: 6px; height: 34px; padding: 0 10px; outline: none }
+.pmsg input:focus { border-color: var(--voice) }
+.pmsg .btn { height: 34px }
+.sent-note { font-size: 12px; color: var(--on); margin-top: 6px; height: 16px }
+
+/* The full profile */
+.card { width: 100%; max-width: 640px; background: var(--bg3); border: 1px solid var(--line2); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); position: relative }
+.card .pban { height: 172px }
+.ingame .card .pban { height: 210px }
+.card .ppic { position: absolute; left: 24px; top: 118px; z-index: 2; transition: top .4s cubic-bezier(.2,.7,.2,1) }
+.ingame .card .ppic { top: 156px }
+.card .ppic .av { width: 104px; height: 104px; box-shadow: 0 0 0 6px var(--bg3) }
+.card .ppic .dot { width: 14px; height: 14px; border-width: 5px; border-color: var(--bg3); right: 4px; bottom: 4px }
+.card .acts { position: absolute; right: 20px; top: 186px; display: flex; gap: 8px; transition: top .4s cubic-bezier(.2,.7,.2,1) }
+.ingame .card .acts { top: 224px }
+.card .cbody { padding: 66px 24px 20px }
+.bigscore { position: absolute; right: 22px; top: 18px; z-index: 1; text-align: right; color: #fff; display: none }
+.ingame .bigscore { display: block }
+.bigscore .s { font-size: 40px; font-weight: 650; font-variant-numeric: tabular-nums; font-variation-settings: var(--title); line-height: 1; text-shadow: 0 2px 20px rgb(0 0 0 / .4) }
+.bigscore .m { font-size: 13px; opacity: .85 }
+.bigscore .rounds { justify-content: flex-end }
+.bigscore .rounds i { border-color: rgb(255 255 255 / .35) } .bigscore .rounds i.l { background: rgb(255 255 255 / .25) }
+.card .gline { left: 140px }
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); margin: 16px 0 14px }
+.tabs button { font: inherit; font-weight: 600; font-size: 13.5px; background: none; border: 0; color: var(--t3); padding: 8px 12px; cursor: pointer; position: relative }
+.tabs button[aria-selected='true'] { color: var(--t1) }
+.tabs button[aria-selected='true']::after { content: ''; position: absolute; left: 10px; right: 10px; bottom: -1px; height: 2px; background: var(--lamp) }
+.tpane { display: none; animation: rise .25s ease-out } .tpane.on { display: block }
+.kv { display: grid; grid-template-columns: 120px 1fr; gap: 6px 14px; font-size: 13px } .kv dt { color: var(--t3) } .kv dd { margin: 0 }
+.games-list .g { display: grid; grid-template-columns: 30px 1fr 120px 60px; gap: 10px; align-items: center; padding: 6px 0; font-size: 13px; border-bottom: 1px solid var(--line) }
+.games-list .cap { width: 30px; height: 20px; border-radius: 3px }
+.games-list .bar { height: 4px; background: var(--line); border-radius: 2px; overflow: hidden } .games-list .bar i { display: block; height: 100%; background: var(--lamp); transform-origin: left; animation: grow .8s cubic-bezier(.2,.7,.2,1) both }
+@keyframes grow { from { transform: scaleX(0) } }
+.games-list .h { color: var(--t3); text-align: right; font-variant-numeric: tabular-nums }
+.keybox { display: flex; gap: 12px; align-items: center; margin-top: 16px; padding: 12px; border: 1px dashed var(--line2); border-radius: 8px }
+.keybox code { font: 12.5px ui-monospace, Consolas, monospace; color: var(--t1); letter-spacing: .05em } .keybox small { display: block; color: var(--t3); font-size: 12px; margin-top: 2px }
+.shared-note { display: flex; gap: 6px; align-items: center; color: var(--t3); font-size: 12px; margin-top: 8px } .shared-note svg { width: 13px; height: 13px; color: var(--on) }
+
+/* ---------- Settings ---------- */
+.settings, .ssettings { display: grid; grid-template-columns: 220px 1fr 360px; height: 100%; position: relative }
+.snav { background: var(--bg1); border-right: 1px solid var(--line); padding: 28px 10px }
+.srow { display: block; width: 100%; text-align: left; font: inherit; font-size: 14px; background: none; border: 0; color: var(--t2); padding: 7px 10px; border-radius: 5px; cursor: pointer; position: relative }
+.srow:hover { background: var(--bg3); color: var(--t1) } .srow.on { background: var(--bg4); color: var(--t1) }
+.srow.on::after { content: ''; position: absolute; left: 0; top: 8px; bottom: 8px; width: 2px; background: var(--lamp) }
+.spane { display: none; padding: 32px 36px; overflow: hidden; animation: rise .25s ease-out } .spane.on { display: block }
+.spane h3 { font-size: 22px; font-weight: 650; font-variation-settings: var(--title); margin-bottom: 18px }
+.fld { display: block; margin-bottom: 18px } .fld > span { display: block; font-size: 12.5px; font-weight: 600; color: var(--t3); margin-bottom: 6px }
+.fld input:not([type]), .fld input[type=text] { width: 100%; max-width: 420px; font: inherit; background: var(--bg1); border: 1px solid var(--line2); color: var(--t1); height: 38px; padding: 0 12px; border-radius: 6px; outline: none }
+.fld input:focus { border-color: var(--voice); box-shadow: 0 2px 0 -0px var(--voice) }
+.pic-row { display: flex; align-items: center; gap: 12px; max-width: 460px } .pic-row b { display: block; font-size: 13.5px } .pic-row small { color: var(--t3); font-size: 12px; line-height: 1.35; display: block } .pic-row .btn { margin-left: auto }
+.kinds { display: grid; grid-template-columns: repeat(5, 74px); gap: 8px; margin-bottom: 10px }
+.kind { height: 92px; border-radius: 7px; overflow: hidden; position: relative; cursor: pointer; border: 2px solid transparent; background: var(--bg1) }
+.kind .weave { position: absolute; inset: 0 }
+.kind span { position: absolute; left: 0; right: 0; bottom: 0; font-size: 11px; font-weight: 600; color: #fff; padding: 12px 6px 5px; background: linear-gradient(transparent, rgb(0 0 0 / .6)) }
+.kind.on { border-color: var(--lamp) }
+.kind.up { display: grid; place-items: center; border: 1px dashed var(--line2); color: var(--t3); font-size: 12px; text-align: center }
+.slider-row { display: flex; align-items: center; gap: 10px; max-width: 420px; margin: 6px 0 10px } .slider-row small { width: 64px; color: var(--t3); font-size: 12px } .slider-row input { flex: 1 }
+input[type=range] { accent-color: var(--lamp) }
+.switch { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; margin: 10px 0; max-width: 480px }
+.switch input { position: absolute; opacity: 0 }
+.switch i { flex: none; width: 34px; height: 20px; border-radius: 10px; background: var(--line2); position: relative; transition: background .2s; margin-top: 1px }
+.switch i::after { content: ''; position: absolute; left: 3px; top: 3px; width: 14px; height: 14px; border-radius: 50%; background: var(--t1); transition: transform .2s }
+.switch input:checked + i { background: var(--lamp) } .switch input:checked + i::after { transform: translateX(14px); background: var(--on-lamp) }
+.switch input:focus-visible + i { outline: 2px solid var(--voice); outline-offset: 2px }
+.switch span { font-size: 13.5px } .switch small { display: block; color: var(--t3); font-size: 12px }
+.switch.big span b { display: block; font-size: 14.5px }
+.act-list { padding-left: 46px; transition: opacity .25s } .act-list.off { opacity: .4; pointer-events: none }
+.themes { display: flex; gap: 12px; margin-bottom: 22px }
+.theme-card { font: inherit; background: var(--bg1); border: 2px solid var(--line); border-radius: 10px; padding: 10px; width: 150px; text-align: left; cursor: pointer; color: var(--t1) }
+.theme-card.on { border-color: var(--lamp) } .theme-card b { display: block; margin-top: 8px; font-size: 13.5px } .theme-card small { color: var(--t3); font-size: 12px }
+.tc { display: grid; grid-template-columns: 14px 30px 1fr; height: 66px; border-radius: 6px; overflow: hidden; gap: 0 }
+.tc.ink i:nth-child(1) { background: #0b0d11 } .tc.ink i:nth-child(2) { background: #101318 } .tc.ink i:nth-child(3) { background: linear-gradient(#14181e 60%, #d8b878 60% 66%, #14181e 66%) }
+.tc.ivory i:nth-child(1) { background: #ddd5c4 } .tc.ivory i:nth-child(2) { background: #e7e0d1 } .tc.ivory i:nth-child(3) { background: linear-gradient(#efe9dd 60%, #8b692b 60% 66%, #efe9dd 66%) }
+.tc.system { background: linear-gradient(115deg, #0b0d11 50%, #e7e0d1 50%) } .tc.system i { display: none }
+.fake-select { max-width: 420px; height: 38px; display: flex; align-items: center; padding: 0 12px; background: var(--bg1); border: 1px solid var(--line2); border-radius: 6px; font-size: 13.5px }
+.fake-select svg { margin-left: auto; color: var(--t3) }
+.meter { position: relative; max-width: 420px; height: 10px; border-radius: 5px; background: var(--bg1); border: 1px solid var(--line2); overflow: hidden; margin-bottom: 8px }
+.meter .lvl { position: absolute; left: 0; top: 0; bottom: 0; width: var(--l, 0%); background: linear-gradient(90deg, var(--t3), var(--t2)); transition: width .08s linear }
+.meter.hot .lvl { background: linear-gradient(90deg, color-mix(in srgb, var(--lamp) 60%, var(--t3)), var(--lamp-2)) }
+.meter .thr { position: absolute; top: -2px; bottom: -2px; width: 2px; left: var(--t, 38%); background: var(--t1) }
+#sens { width: 100%; max-width: 420px }
+.hint { display: block; color: var(--t3); font-size: 12px; margin-top: 4px }
+.spreview { background: var(--bg1); border-left: 1px solid var(--line); padding: 28px 24px }
+.spreview h5 { font-size: 12.5px; font-weight: 600; color: var(--t3); margin-bottom: 10px }
+.spreview .mini { width: 100% }
+.spreview .voice-banner { display: flex; justify-content: center; padding: 10px 0 }
+.spreview .voice-banner .bn { width: 160px; height: 300px; flex: none }
+.compact .msg { padding-top: 0; padding-bottom: 0 }
+
+/* ---------- Server banner ---------- */
+.ssettings .two { display: grid; grid-template-columns: 1fr 200px; gap: 16px; max-width: 560px }
+.sv-pic { width: 48px; height: 48px; border-radius: 14px; overflow: hidden; display: block } .sv-pic svg { width: 100%; height: 100%; display: block }
+.sv-pic.s { width: 40px; height: 40px; border-radius: 12px; flex: none }
+.ssettings .seg { margin-bottom: 12px }
+.src-pane { display: none; animation: rise .25s ease-out } .src-pane.on { display: block }
+.drop { max-width: 420px; height: 70px; border: 1px dashed var(--line2); border-radius: 8px; display: flex; flex-direction: column; align-items: center; justify-content: center; color: var(--t2); font-size: 13px; margin-bottom: 6px }
+.drop small { color: var(--t3); font-size: 12px }
+.games { display: grid; grid-template-columns: repeat(3, 130px); gap: 8px; margin-bottom: 6px }
+.games button { font: inherit; height: 74px; border-radius: 7px; border: 2px solid transparent; cursor: pointer; color: #fff; font-size: 12px; font-weight: 600; text-align: left; padding: 6px 8px; display: flex; align-items: flex-end; position: relative; overflow: hidden }
+.games button.on { border-color: var(--lamp) }
+.sb-col { width: 240px; background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; padding-bottom: 8px }
+.sb-col .side-head { cursor: grab } .sb-col .side-head:active { cursor: grabbing }
+.side-head.banner .weave, .ib-ban .weave { background-repeat: no-repeat }
+.side-head.banner::after { background: linear-gradient(180deg, rgb(10 12 16 / calc(var(--dark, 45) * .006)), rgb(10 12 16 / calc(.35 + var(--dark, 45) * .008))) }
+.inv-prev { width: 312px; background: var(--bg2); border: 1px solid var(--line); border-radius: 10px; overflow: hidden }
+.ib-ban { height: 84px; position: relative; overflow: hidden } .ib-ban .weave { position: absolute; inset: 0 }
+.ib-ban::after { content: ''; position: absolute; inset: 0; background: rgb(10 12 16 / calc(var(--dark, 45) * .007)) }
+.inv-body { display: flex; align-items: center; gap: 10px; padding: 12px } .inv-body b { display: block } .inv-body small { color: var(--t3); font-size: 12px } .inv-body .btn { margin-left: auto }
+.unsaved { position: absolute; left: 50%; bottom: 20px; translate: -50% 140%; display: flex; gap: 10px; align-items: center; background: var(--bg0); border: 1px solid var(--line2);
+  border-radius: 8px; padding: 8px 8px 8px 16px; box-shadow: var(--shadow); transition: translate .35s cubic-bezier(.2,.7,.2,1); width: 560px }
+.unsaved span { flex: 1; font-weight: 600 } .unsaved.show { translate: -50% 0 }
+.unsaved.nudge { animation: nudge .4s }
+@keyframes nudge { 25% { transform: translateX(-6px) } 75% { transform: translateX(6px) } }
+
+/* Reduce motion (Settings, or the system's): every seam, ring and slide stills */
+body.calm *, body.calm *::before, body.calm *::after { animation: none !important; transition: none !important }
+body.calm .floor .ripple { display: none }
+@media (prefers-reduced-motion: reduce) { .floor .ripple { display: none } }
+
+.ingame.keepban .pban .art { opacity: 0 } .ingame.keepban .pban .weave { opacity: 1 }
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 14px }
+.tiles div { background: var(--bg2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px }
+.tiles b { display: block; font-size: 24px; font-weight: 650; font-variant-numeric: tabular-nums; font-variation-settings: var(--title) } .tiles span { color: var(--t3); font-size: 12px }
+.timeline { display: flex; gap: 18px } .timeline small { color: var(--t3); font-size: 12px }
+.rounds.big i { width: 14px; height: 22px; border-radius: 7px 7px 2px 2px }
+/* Pieces */
+.pieces { grid-column: 1 / -1; grid-row: 1 / -1; padding: 28px 32px; display: grid; grid-template-columns: 1.1fr 1fr; gap: 28px 40px; align-content: start; background: var(--fog), var(--bg2); overflow: hidden }
+.pieces h5 { font-size: 13px; font-weight: 600; color: var(--t3); margin-bottom: 10px }
+.maker { display: flex; gap: 14px; align-items: center }
+.maker input { font: inherit; background: var(--bg3); border: 1px solid var(--line2); color: var(--t1); height: 34px; padding: 0 10px; border-radius: 5px; width: 190px }
+.maker .ban { width: 220px; height: 64px; border-radius: 6px; overflow: hidden; position: relative }
+.swatches { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px }
+.sw { height: 52px; border-radius: 5px; padding: 5px 7px; font-size: 11px; display: flex; align-items: flex-end; border: 1px solid var(--line) }
+.type .t1 { font-size: 30px; font-weight: 650; font-variation-settings: var(--title); line-height: 1.1 }
+.type .t2 { font-size: 17px; font-weight: 600; font-variation-settings: var(--title); margin: 6px 0 }
+.type .t3 { color: var(--t2); max-width: 52ch }
+.type .t4 { color: var(--t3); font-size: 12.5px; margin-top: 6px }
+.from { width: 100%; border-collapse: collapse; font-size: 13px }
+.from th { text-align: left; color: var(--t3); font-weight: 600; padding: 6px 8px; border-bottom: 1px solid var(--line2) }
+.from td { padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; color: var(--t2) }
+.from td:first-child { color: var(--t1); font-weight: 550 }
+.presence { display: flex; gap: 22px; flex-wrap: wrap }
+.presence > div { display: flex; gap: 10px; align-items: center; color: var(--t2); font-size: 13px }
+.presence .dot { border-color: var(--bg2) }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-fwd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-min" viewBox="0 0 12 12" fill="none" stroke="currentColor"><path d="M1 6h10"/></symbol>
+  <symbol id="i-max" viewBox="0 0 12 12" fill="none" stroke="currentColor"><rect x="1.5" y="1.5" width="9" height="9"/></symbol>
+  <symbol id="i-x" viewBox="0 0 12 12" fill="none" stroke="currentColor"><path d="m1.5 1.5 9 9m0-9-9 9"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
+  <symbol id="i-head" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/></symbol>
+  <symbol id="i-msg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-hash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></symbol>
+  <symbol id="i-vol" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></symbol>
+  <symbol id="i-cam" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m23 7-7 5 7 5z"/><rect x="1" y="5" width="15" height="14" rx="2"/></symbol>
+  <symbol id="i-screen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+  <symbol id="i-leave" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M10.7 13.3a16 16 0 0 0 3.4 2.6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 3.1 4.2 2 2 0 0 1 5.1 2h3a2 2 0 0 1 2 1.7M22 2 2 22"/></symbol>
+  <symbol id="i-wave" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 10v4M6 6v12M10 3v18M14 8v8M18 5v14M22 10v4"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12.6a10 10 0 0 1 14 0M8.5 16.1a5 5 0 0 1 7 0M2 8.8a15 15 0 0 1 20 0M12 20h.01"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4zM22 2 11 13"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4zM23 9l-6 6M17 9l6 6"/></symbol>
+  <symbol id="i-novid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.7 0H14a2 2 0 0 1 2 2v3.3l1 1L23 7v10M1 1l22 22"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.9 17.9A10 10 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.1-5.9M9.9 4.2A9 9 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2M1 1l22 22"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></symbol>
+  <symbol id="i-unfriend" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M17 11h6"/></symbol>
+  <symbol id="i-gamepad" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 12h4M8 10v4M15 13h.01M18 11h.01"/><rect x="2" y="6" width="20" height="12" rx="6"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-seal" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M16 4a4 4 0 0 1 0 8M22 21a7 7 0 0 0-4-6.3"/></symbol>
+</svg>
+
+<header class="page-head">
+  <div>
+    <h1>The hall</h1>
+    <p>The Steam and Discord layout, with the court let back in where it can move: a call is a row of tall banners, lit where someone talks; profiles change when someone is playing; settings answer every change live; a server's banner can be woven,
+    pictured or taken from a game. Almost everything here can be clicked, hovered, scrolled or typed into. Ink by night, muted ivory by day.</p>
+  </div>
+  <div class="switch-theme" role="group" aria-label="Theme">
+    <button data-t="ink" aria-pressed="true">Ink</button><button data-t="ivory" aria-pressed="false">Ivory</button>
+  </div>
+</header>
+
+<!-- ===================== A. Home ===================== -->
+<section class="mock">
+  <h2>A. Home</h2>
+  <p><b>From the first mockup:</b> friends in game first, with the live match and a button, then live calls, then everyone online; the game as each row's second line.
+  <b>From the app:</b> the rail, the column and the two bars under both. <b>From the court:</b> pictures built from each key (hover the rail),
+  the selected server lit by a slit of light, the cards' frame stepping in like a portal on hover, the main button's cut corner.</p>
+  <div class="app" data-frame>
+    <div class="tbar"><div class="nav"><span><svg class="i"><use href="#i-back"/></svg></span><span><svg class="i"><use href="#i-fwd"/></svg></span></div>
+      <div class="search"><svg class="i" style="width:14px"><use href="#i-search"/></svg>Find a friend, group, server or channel<kbd>Ctrl K</kbd></div>
+      <div class="win"><span><svg><use href="#i-min"/></svg></span><span><svg><use href="#i-max"/></svg></span><span><svg><use href="#i-x"/></svg></span></div></div>
+    <nav class="rail">
+      <div class="tile emblem on"><img src="../../src/renderer/assets/emblem.png" alt=""><span class="tip">Home</span></div>
+      <hr>
+      <div class="tile unread"><svg class="pic" data-server="Night Owls"></svg><span class="badge">3</span><span class="tip">Night Owls</span></div>
+      <div class="tile"><svg class="pic" data-server="Friday Raid"></svg><span class="tip">Friday Raid</span></div>
+      <div class="tile"><svg class="pic" data-server="The Trio"></svg><span class="tip">The Trio</span></div>
+      <hr>
+      <div class="tile add"><svg class="i"><use href="#i-plus"/></svg><span class="tip">Create or join</span></div>
+    </nav>
+    <aside class="side">
+      <div class="side-head">Home</div>
+      <div class="side-body">
+        <div class="row on"><svg class="i"><use href="#i-users"/></svg><span class="nm">Friends</span></div>
+        <div class="cat">Direct messages<svg><use href="#i-plus"/></svg></div>
+        <div class="row unread"><span class="av"><svg data-av="Mira"></svg><i class="dot game"></i></span><div><div class="nm">Mira</div><div class="sub game"><i class="cap" style="background:linear-gradient(90deg,#c58a3d,#384c63)"></i>Counter-Strike 2</div></div><span class="count">2</span></div>
+        <div class="row"><span class="av"><svg data-av="Dov"></svg><i class="dot voice"></i></span><div><div class="nm">Dov</div><div class="sub voice">In voice: Lounge</div></div></div>
+        <div class="row"><span class="av"><svg data-av="Kai"></svg><i class="dot online"></i></span><div><div class="nm">Kai</div><div class="sub">Online</div></div></div>
+        <div class="row"><span class="av"><svg data-av="Sol"></svg><i class="dot game"></i></span><div><div class="nm">Sol</div><div class="sub game"><i class="cap" style="background:linear-gradient(90deg,#8ea6c4,#2b3346)"></i>Destiny 2</div></div></div>
+        <div class="cat">Groups</div>
+        <div class="row"><span class="av"><svg data-av="The Trio"></svg></span><div><div class="nm">The Trio</div><div class="sub">3 online</div></div></div>
+      </div>
+    </aside>
+    <div class="bars">
+      <div class="ubar"><span class="av"><svg data-av="Ann"></svg><i class="dot online" style="border-color:var(--bg0)"></i></span><div class="who"><b>Ann</b><small>ann#7095</small></div>
+        <div class="tools"><span class="ib"><svg class="i"><use href="#i-mic"/></svg></span><span class="ib"><svg class="i"><use href="#i-head"/></svg></span><span class="ib"><svg class="i"><use href="#i-gear"/></svg></span></div></div>
+    </div>
+    <main class="main">
+      <div class="main-head"><h3>Friends</h3><span class="meta">6 online, 3 in game</span><div class="right"><span class="btn primary"><svg><use href="#i-plus"/></svg>Add friend</span></div></div>
+      <div class="scroll">
+        <h4 class="shelf">Playing now <span class="n">3</span></h4>
+        <div class="shelf-row">
+          <div class="gcard"><div class="art" style="background:radial-gradient(60% 80% at 70% 30%,#e0a24f,transparent 60%),linear-gradient(160deg,#3f5671,#1d2531 60%,#2b1c12)"></div>
+            <div class="top"><span class="g">Counter-Strike 2</span><span class="lv">Live</span></div>
+            <div class="bot"><div class="score">Mirage, 9 to 7</div><div class="line">Premier, round 17 · 21 kills</div>
+              <div class="foot"><span class="av s"><svg data-av="Mira"></svg></span>Mira<span class="btn">Message</span></div></div></div>
+          <div class="gcard"><div class="art" style="background:radial-gradient(50% 60% at 60% 25%,#c9d9ec,transparent 60%),linear-gradient(170deg,#56708f,#1b2230 70%)"></div>
+            <div class="top"><span class="g">Destiny 2</span></div>
+            <div class="bot"><div class="score">Salvation's Edge</div><div class="line">Raid, <span class="clock" data-since="4320">1 h 12 min</span> · fireteam of 6</div>
+              <div class="foot"><span class="av s"><svg data-av="Sol"></svg></span>Sol<span class="btn">Message</span></div></div></div>
+          <div class="gcard"><div class="art" style="background:radial-gradient(60% 70% at 40% 30%,#d6533c,transparent 60%),linear-gradient(160deg,#5b2219,#1a0f0d 70%)"></div>
+            <div class="top"><span class="g">Dota 2</span><span class="lv">Live</span></div>
+            <div class="bot"><div class="score">Anti-Mage, 14 to 21</div><div class="line"><span class="clock" data-since="2050">34:10</span>, night · 8/2/5</div>
+              <div class="foot"><span class="av s"><svg data-av="Dov"></svg></span>Dov<span class="btn">Join call</span></div></div></div>
+        </div>
+        <h4 class="shelf">Live calls <span class="n">2</span></h4>
+        <div class="calls">
+          <div class="ccard"><div class="stack"><span class="av"><svg data-av="Dov"></svg></span><span class="av"><svg data-av="Rae"></svg></span><span class="av"><svg data-av="Pim"></svg></span></div>
+            <div class="what"><b>Lounge, Night Owls</b><small><span class="wave"><i></i><i></i><i></i></span>Dov, Rae and Pim · Rae is sharing</small></div><span class="btn primary">Join</span></div>
+          <div class="ccard"><div class="stack"><span class="av"><svg data-av="Mira"></svg></span><span class="av"><svg data-av="Kai"></svg></span></div>
+            <div class="what"><b>The Trio</b><small>Mira and Kai</small></div><span class="btn voice">Join</span></div>
+        </div>
+        <h4 class="shelf">Online <span class="n">6</span></h4>
+        <div class="people">
+          <div class="row"><span class="av"><svg data-av="Kai"></svg><i class="dot online"></i></span><div><div class="nm">Kai</div><div class="sub">Online</div></div>
+            <div class="acts"><span class="ib"><svg class="i"><use href="#i-msg"/></svg></span><span class="ib"><svg class="i"><use href="#i-phone"/></svg></span></div></div>
+          <div class="row"><span class="av"><svg data-av="Rae"></svg><i class="dot voice"></i></span><div><div class="nm">Rae</div><div class="sub voice">In voice: Lounge, sharing her screen</div></div>
+            <div class="acts"><span class="ib"><svg class="i"><use href="#i-msg"/></svg></span><span class="ib"><svg class="i"><use href="#i-phone"/></svg></span></div></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</section>
+
+<!-- ===================== B. Server ===================== -->
+<section class="mock">
+  <h2>B. A server's text channel</h2>
+  <p><b>Discord's shape, as the app has it now:</b> channels, chat, members by role. <b>From the court, quietly:</b> a server without a picture gets a banner woven from its key,
+  darkened so the name reads. Hover a message for its seal; click it to see what it proves. Type and press Enter: the message lands and its seal presses once.</p>
+  <div class="app server" data-frame>
+    <div class="tbar"><div class="nav"><span><svg class="i"><use href="#i-back"/></svg></span><span><svg class="i"><use href="#i-fwd"/></svg></span></div>
+      <div class="search"><svg class="i" style="width:14px"><use href="#i-search"/></svg>Find a friend, group, server or channel<kbd>Ctrl K</kbd></div>
+      <div class="win"><span><svg><use href="#i-min"/></svg></span><span><svg><use href="#i-max"/></svg></span><span><svg><use href="#i-x"/></svg></span></div></div>
+    <nav class="rail">
+      <div class="tile emblem"><img src="../../src/renderer/assets/emblem.png" alt=""><span class="tip">Home</span></div>
+      <hr>
+      <div class="tile on"><svg class="pic" data-server="Night Owls"></svg><span class="tip">Night Owls</span></div>
+      <div class="tile"><svg class="pic" data-server="Friday Raid"></svg><span class="tip">Friday Raid</span></div>
+      <div class="tile"><svg class="pic" data-server="The Trio"></svg><span class="tip">The Trio</span></div>
+      <hr>
+      <div class="tile add"><svg class="i"><use href="#i-plus"/></svg><span class="tip">Create or join</span></div>
+    </nav>
+    <aside class="side">
+      <div class="side-head banner"><div class="weave" data-weave="Night Owls"></div><b>Night Owls</b><small>24 members</small></div>
+      <div class="side-body">
+        <div class="cat">Text channels<svg><use href="#i-plus"/></svg></div>
+        <div class="row"><svg class="chan"><use href="#i-hash"/></svg><span class="nm">general</span></div>
+        <div class="row on"><svg class="chan"><use href="#i-hash"/></svg><span class="nm">plans</span></div>
+        <div class="row unread"><svg class="chan"><use href="#i-hash"/></svg><span class="nm">clips</span><span class="count">4</span></div>
+        <div class="cat">Voice channels<svg><use href="#i-plus"/></svg></div>
+        <div class="row"><svg class="chan"><use href="#i-vol"/></svg><span class="nm">Lounge</span></div>
+        <div class="voice-people">
+          <div class="row speaking" data-talk><span class="av s"><svg data-av="Dov"></svg></span><span class="nm">Dov</span></div>
+          <div class="row" data-talk><span class="av s"><svg data-av="Rae"></svg></span><span class="nm">Rae</span><span class="live-pill">Live</span></div>
+          <div class="row" data-talk><span class="av s"><svg data-av="Pim"></svg></span><span class="nm">Pim</span></div>
+        </div>
+        <div class="row"><svg class="chan"><use href="#i-vol"/></svg><span class="nm">Squad</span></div>
+      </div>
+    </aside>
+    <div class="bars">
+      <div class="ubar"><span class="av"><svg data-av="Ann"></svg><i class="dot online" style="border-color:var(--bg0)"></i></span><div class="who"><b>Ann</b><small>ann#7095</small></div>
+        <div class="tools"><span class="ib"><svg class="i"><use href="#i-mic"/></svg></span><span class="ib"><svg class="i"><use href="#i-head"/></svg></span><span class="ib"><svg class="i"><use href="#i-gear"/></svg></span></div></div>
+    </div>
+    <main class="main">
+      <div class="main-head"><svg class="i" style="color:var(--t3)"><use href="#i-hash"/></svg><h3>plans</h3><span class="meta">Friday's raid and who brings what</span>
+        <div class="right"><span class="ib"><svg class="i"><use href="#i-users"/></svg></span></div></div>
+      <div class="chat" id="chat-b">
+        <div class="day">Today</div>
+        <div class="msg"><span class="av l"><svg data-av="Dov"></svg></span><div class="h"><b class="role" style="color:#d9a35a">Dov</b><time>20:12</time></div><p>raid Friday at nine, who's in?</p><span class="seal" data-who="Dov"><svg><use href="#i-seal"/></svg></span></div>
+        <div class="msg cont"><span class="av l"></span><p>bring your own snacks this time</p><span class="seal" data-who="Dov"><svg><use href="#i-seal"/></svg></span></div>
+        <div class="msg hover"><span class="av l"><svg data-av="Rae"></svg></span><div class="h"><b class="role" style="color:#8fb2d8">Rae</b><time>20:15</time></div><p>in. I'll invite Lux, she cleared it last week</p><span class="seal" data-who="Rae"><svg><use href="#i-seal"/></svg></span>
+          <div class="invite"><span class="sv"><svg data-server="Friday Raid"></svg></span><div><b>Friday Raid</b><small>You're invited · 6 members</small></div><span class="btn primary">Join</span></div></div>
+        <div class="msg"><span class="av l"><svg data-av="Ann"></svg></span><div class="h"><b>Ann</b><time>20:18</time></div><p>count me in</p><span class="seal" data-who="Ann"><svg><use href="#i-seal"/></svg></span></div>
+      </div>
+      <div class="composer"><svg class="i" style="color:var(--t3)"><use href="#i-clip"/></svg><input class="draft" placeholder="Message #plans" aria-label="Message #plans"></div>
+      <div class="pop seal-pop"><h6><svg class="i" style="color:var(--live)"><use href="#i-seal"/></svg><span>Signed by Dov</span></h6><small>This message is exactly what they wrote.</small>
+        <div class="facts" style="margin-top:10px"><div><b>Their key signed it</b><span>Nobody passing it on, or holding a copy, could have changed a word.</span></div><div><b>Only for this server's members</b><span>It travels from member to member, not through a company's computer.</span></div></div></div>
+    </main>
+    <aside class="members">
+      <div class="cat">Officers <span class="n">2</span></div>
+      <div class="row"><span class="av"><svg data-av="Dov"></svg><i class="dot voice"></i></span><div><div class="nm" style="color:#d9a35a">Dov</div><div class="sub voice">In voice: Lounge</div></div></div>
+      <div class="row"><span class="av"><svg data-av="Rae"></svg><i class="dot voice"></i></span><div><div class="nm" style="color:#8fb2d8">Rae</div><div class="sub voice">Sharing in Lounge</div></div></div>
+      <div class="cat">Online <span class="n">4</span></div>
+      <div class="row"><span class="av"><svg data-av="Ann"></svg><i class="dot online"></i></span><div><div class="nm">Ann</div><div class="sub">Online</div></div></div>
+      <div class="row"><span class="av"><svg data-av="Mira"></svg><i class="dot game"></i></span><div><div class="nm">Mira</div><div class="sub game">Counter-Strike 2</div></div></div>
+      <div class="row"><span class="av"><svg data-av="Pim"></svg><i class="dot voice"></i></span><div><div class="nm">Pim</div><div class="sub voice">In voice: Lounge</div></div></div>
+      <div class="row"><span class="av"><svg data-av="Lux"></svg><i class="dot game"></i></span><div><div class="nm">Lux</div><div class="sub game">Destiny 2</div></div></div>
+      <div class="cat">Offline <span class="n">18</span></div>
+      <div class="row" style="opacity:.5"><span class="av"><svg data-av="Theo"></svg></span><div><div class="nm">Theo</div></div></div>
+      <div class="row" style="opacity:.5"><span class="av"><svg data-av="Quill"></svg></span><div><div class="nm">Quill</div></div></div>
+    </aside>
+  </div>
+</section>
+
+<!-- ===================== C. DM and the keep ===================== -->
+<section class="mock">
+  <h2>C. A direct message, and why it is private</h2>
+  <p><b>The keep, made small:</b> the court's castle plan is now a green chip in the header, the way a browser shows its lock. It says the one thing that matters
+  (private, and how the messages travel); click it for the walls and three plain facts, and hover a fact to light its wall. The rest is a normal DM.</p>
+  <div class="app" data-frame>
+    <div class="tbar"><div class="nav"><span><svg class="i"><use href="#i-back"/></svg></span><span><svg class="i"><use href="#i-fwd"/></svg></span></div>
+      <div class="search"><svg class="i" style="width:14px"><use href="#i-search"/></svg>Find a friend, group, server or channel<kbd>Ctrl K</kbd></div>
+      <div class="win"><span><svg><use href="#i-min"/></svg></span><span><svg><use href="#i-max"/></svg></span><span><svg><use href="#i-x"/></svg></span></div></div>
+    <nav class="rail">
+      <div class="tile emblem on"><img src="../../src/renderer/assets/emblem.png" alt=""><span class="tip">Home</span></div>
+      <hr>
+      <div class="tile"><svg class="pic" data-server="Night Owls"></svg><span class="tip">Night Owls</span></div>
+      <div class="tile"><svg class="pic" data-server="Friday Raid"></svg><span class="tip">Friday Raid</span></div>
+      <div class="tile"><svg class="pic" data-server="The Trio"></svg><span class="tip">The Trio</span></div>
+      <hr>
+      <div class="tile add"><svg class="i"><use href="#i-plus"/></svg><span class="tip">Create or join</span></div>
+    </nav>
+    <aside class="side">
+      <div class="side-head">Home</div>
+      <div class="side-body">
+        <div class="row"><svg class="i"><use href="#i-users"/></svg><span class="nm">Friends</span></div>
+        <div class="cat">Direct messages<svg><use href="#i-plus"/></svg></div>
+        <div class="row on"><span class="av"><svg data-av="Mira"></svg><i class="dot game"></i></span><div><div class="nm">Mira</div><div class="sub game"><i class="cap" style="background:linear-gradient(90deg,#c58a3d,#384c63)"></i>Counter-Strike 2</div></div></div>
+        <div class="row"><span class="av"><svg data-av="Dov"></svg><i class="dot voice"></i></span><div><div class="nm">Dov</div><div class="sub voice">In voice: Lounge</div></div></div>
+        <div class="row"><span class="av"><svg data-av="Kai"></svg><i class="dot online"></i></span><div><div class="nm">Kai</div><div class="sub">Online</div></div></div>
+      </div>
+    </aside>
+    <div class="bars">
+      <div class="ubar"><span class="av"><svg data-av="Ann"></svg><i class="dot online" style="border-color:var(--bg0)"></i></span><div class="who"><b>Ann</b><small>ann#7095</small></div>
+        <div class="tools"><span class="ib"><svg class="i"><use href="#i-mic"/></svg></span><span class="ib"><svg class="i"><use href="#i-head"/></svg></span><span class="ib"><svg class="i"><use href="#i-gear"/></svg></span></div></div>
+    </div>
+    <main class="main">
+      <div class="main-head"><span class="av"><svg data-av="Mira"></svg><i class="dot game" style="border-color:var(--bg2)"></i></span><h3>Mira</h3><span class="meta">Counter-Strike 2 · Mirage, 9 to 7</span>
+        <div class="right"><span class="chip keep-chip"><svg><use href="#i-shield"/></svg>Private · direct</span><span class="ib"><svg class="i"><use href="#i-phone"/></svg></span><span class="ib"><svg class="i"><use href="#i-cam"/></svg></span></div></div>
+      <div class="chat" id="chat-c">
+        <div class="day">Today</div>
+        <div class="msg"><span class="av l"><svg data-av="Mira"></svg></span><div class="h"><b>Mira</b><time>21:38</time></div><p>one more round then I'm on</p><span class="seal" data-who="Mira"><svg><use href="#i-seal"/></svg></span></div>
+        <div class="msg"><span class="av l"><svg data-av="Ann"></svg></span><div class="h"><b>Ann</b><time>21:40</time></div><p>take your time, Dov's already in the Lounge</p><span class="seal" data-who="Ann"><svg><use href="#i-seal"/></svg></span></div>
+        <div class="msg hover"><span class="av l"><svg data-av="Mira"></svg></span><div class="h"><b>Mira</b><time>21:41</time></div><p>9 to 7, we're winning for once</p><span class="seal" data-who="Mira"><svg><use href="#i-seal"/></svg></span></div>
+        <div class="msg cont"><span class="av l"></span><p>save me a seat</p><span class="seal" data-who="Mira"><svg><use href="#i-seal"/></svg></span></div>
+      </div>
+      <div class="composer"><svg class="i" style="color:var(--t3)"><use href="#i-clip"/></svg><input class="draft" placeholder="Message Mira" aria-label="Message Mira"><span class="priv"><svg><use href="#i-shield"/></svg>Only Mira can read this</span></div>
+      <div class="pop keep-pop" style="right:20px;top:46px">
+        <h6><svg class="i" style="color:var(--on)"><use href="#i-shield"/></svg>Private, and direct</h6><small>Why nobody else can read this conversation</small>
+        <div class="keep"><svg class="walls" viewBox="-60 -60 120 120"></svg>
+          <div class="facts"><div data-w="0"><b>Only the two of you</b><span>Sealed with Mira's key and yours.</span></div>
+            <div data-w="1"><b>Straight to her</b><span>No relay in between right now.</span></div>
+            <div data-w="2"><b>Kept on your computers</b><span>No copy lives anywhere else.</span></div></div></div>
+        <div class="keyline">Mira's key <code>7f3a 91c2 0be4 d815</code></div>
+      </div>
+      <div class="pop seal-pop"><h6><svg class="i" style="color:var(--live)"><use href="#i-seal"/></svg><span>Signed by Mira</span></h6><small>This message is exactly what they wrote.</small>
+        <div class="facts" style="margin-top:10px"><div><b>Their key signed it</b><span>Nobody passing it on could have changed a word.</span></div></div></div>
+    </main>
+  </div>
+</section>
+
+<!-- ===================== D. Call ===================== -->
+<section class="mock">
+  <h2>D. A voice channel call, as banners</h2>
+  <p><b>The court's call, made quieter:</b> everyone stands as a tall banner made from their key, side by side like an arcade. Whoever talks has their banner brighten
+  and their outline lit, and a thin seam of light runs down from the banner's top, longer as they talk louder (here a stand-in voice). When someone shares, click
+  <b>Watch</b> on their banner: the stream takes the stage and the banners step down into a row beneath it, still lighting up.</p>
+  <div class="app server" data-frame style="grid-template-columns:72px 240px 1fr">
+    <div class="tbar"><div class="nav"><span><svg class="i"><use href="#i-back"/></svg></span><span><svg class="i"><use href="#i-fwd"/></svg></span></div>
+      <div class="search"><svg class="i" style="width:14px"><use href="#i-search"/></svg>Find a friend, group, server or channel<kbd>Ctrl K</kbd></div>
+      <div class="win"><span><svg><use href="#i-min"/></svg></span><span><svg><use href="#i-max"/></svg></span><span><svg><use href="#i-x"/></svg></span></div></div>
+    <nav class="rail">
+      <div class="tile emblem"><img src="../../src/renderer/assets/emblem.png" alt=""><span class="tip">Home</span></div>
+      <hr>
+      <div class="tile on"><svg class="pic" data-server="Night Owls"></svg><span class="tip">Night Owls</span></div>
+      <div class="tile"><svg class="pic" data-server="Friday Raid"></svg><span class="tip">Friday Raid</span></div>
+      <div class="tile"><svg class="pic" data-server="The Trio"></svg><span class="tip">The Trio</span></div>
+      <hr>
+      <div class="tile add"><svg class="i"><use href="#i-plus"/></svg><span class="tip">Create or join</span></div>
+    </nav>
+    <aside class="side">
+      <div class="side-head banner"><div class="weave" data-weave="Night Owls"></div><b>Night Owls</b><small>24 members</small></div>
+      <div class="side-body">
+        <div class="cat">Text channels</div>
+        <div class="row"><svg class="chan"><use href="#i-hash"/></svg><span class="nm">general</span></div>
+        <div class="row"><svg class="chan"><use href="#i-hash"/></svg><span class="nm">plans</span></div>
+        <div class="cat">Voice channels</div>
+        <div class="row on"><svg class="chan"><use href="#i-vol"/></svg><span class="nm">Lounge</span></div>
+        <div class="voice-people" id="vp-d">
+          <div class="row" data-talk="0"><span class="av s"><svg data-av="Rae"></svg></span><span class="nm">Rae</span><span class="live-pill">Live</span></div>
+          <div class="row" data-talk="1"><span class="av s"><svg data-av="Dov"></svg></span><span class="nm">Dov</span></div>
+          <div class="row" data-talk="2"><span class="av s"><svg data-av="Pim"></svg></span><span class="nm">Pim</span></div>
+          <div class="row" data-talk="3"><span class="av s"><svg data-av="Lux"></svg></span><span class="nm">Lux</span></div>
+          <div class="row" data-talk="4"><span class="av s"><svg data-av="Ann"></svg></span><span class="nm">Ann</span></div>
+        </div>
+        <div class="row"><svg class="chan"><use href="#i-vol"/></svg><span class="nm">Squad</span></div>
+      </div>
+    </aside>
+    <div class="bars">
+      <div class="vbar"><div><div class="st"><svg class="i" style="width:15px"><use href="#i-wifi"/></svg>Voice connected</div><div class="where">Lounge, Night Owls · 24 ms</div></div>
+        <span class="ib"><svg class="i"><use href="#i-cam"/></svg></span><span class="ib"><svg class="i"><use href="#i-screen"/></svg></span><span class="ib off"><svg class="i"><use href="#i-leave"/></svg></span></div>
+      <div class="ubar"><span class="av"><svg data-av="Ann"></svg><i class="dot voice" style="border-color:var(--bg0)"></i></span><div class="who"><b>Ann</b><small>In voice: Lounge</small></div>
+        <div class="tools"><span class="ib"><svg class="i"><use href="#i-mic"/></svg></span><span class="ib"><svg class="i"><use href="#i-head"/></svg></span><span class="ib"><svg class="i"><use href="#i-gear"/></svg></span></div></div>
+    </div>
+    <main class="main">
+      <div class="main-head"><svg class="i" style="color:var(--t3)"><use href="#i-vol"/></svg><h3>Lounge</h3><span class="meta">5 in the call</span>
+        <div class="right"><span class="chip"><svg><use href="#i-shield"/></svg>Private · direct to all 4</span></div></div>
+      <div class="hall" id="hall">
+        <div class="stream"><div class="shot"></div><span class="live">Live</span><span class="watch">3 watching</span><div class="tag"><b>Rae</b><span>Counter-Strike 2</span></div>
+          <button class="btn back" data-mode="banners">Back to everyone</button></div>
+        <div class="banners">
+          <div class="bn" data-talk="0"><div class="weave" data-weave="Rae"></div><span class="seam"></span><span class="av xl"><svg data-av="Rae"></svg></span><div class="nm">Rae</div><div class="sub">Sharing her screen</div><button class="btn watch-btn" data-mode="stream">Watch</button></div>
+          <div class="bn" data-talk="1"><div class="weave" data-weave="Dov"></div><span class="seam"></span><span class="av xl"><svg data-av="Dov"></svg></span><div class="nm">Dov</div><div class="sub game">Dota 2 · Anti-Mage</div></div>
+          <div class="bn" data-talk="2"><div class="weave" data-weave="Pim"></div><span class="seam"></span><span class="av xl"><svg data-av="Pim"></svg></span><div class="nm">Pim</div><div class="sub">&nbsp;</div></div>
+          <div class="bn" data-talk="3"><div class="weave" data-weave="Lux"></div><span class="seam"></span><span class="av xl"><svg data-av="Lux"></svg></span><div class="nm">Lux</div><div class="sub game">Destiny 2 · In orbit</div></div>
+          <div class="bn muted" data-talk="4"><div class="weave" data-weave="Ann"></div><span class="seam"></span><span class="av xl"><svg data-av="Ann"></svg></span><div class="nm">Ann</div><div class="sub">You · muted</div></div>
+        </div>
+      </div>
+      <div class="callbar">
+        <span class="ib"><svg class="i"><use href="#i-mic"/></svg></span><span class="ib"><svg class="i"><use href="#i-head"/></svg></span>
+        <span class="btn">Camera</span><span class="btn">Share screen</span>
+        <span class="btn danger">Disconnect</span>
+      </div>
+    </main>
+  </div>
+</section>
+
+<!-- ===================== E. Profiles ===================== -->
+<section class="mock">
+  <h2>E. Profiles, small and full, playing or not</h2>
+  <p><b>The small one</b> opens beside a name (here from the member list); <b>the full one</b> from it or a picture. Switch Mira between <b>Not playing</b> and <b>In game</b>:
+  her banner gives way to the game's art, the match comes first, each round is a small arch (lit when her side won, the current one breathing) and the clock runs.
+  The full card's tabs work, and <b>Their key</b> says how to be sure it is really her.</p>
+  <div class="app plain" data-frame>
+    <div class="profile-stage">
+      <div class="seg" id="mira-state" role="group" aria-label="Mira"><button data-g="0" aria-pressed="true">Not playing</button><button data-g="1" aria-pressed="false">In game</button></div>
+      <aside class="members fake">
+        <div class="cat">Online <span class="n">4</span></div>
+        <div class="row"><span class="av"><svg data-av="Ann"></svg><i class="dot online"></i></span><div><div class="nm">Ann</div><div class="sub">Online</div></div></div>
+        <div class="row on" id="mira-row"><span class="av"><svg data-av="Mira"></svg><i class="dot online" id="mira-dot"></i></span><div><div class="nm">Mira</div><div class="sub" id="mira-sub">Online</div></div></div>
+        <div class="row"><span class="av"><svg data-av="Pim"></svg><i class="dot voice"></i></span><div><div class="nm">Pim</div><div class="sub voice">In voice: Lounge</div></div></div>
+        <div class="row"><span class="av"><svg data-av="Lux"></svg><i class="dot game"></i></span><div><div class="nm">Lux</div><div class="sub game">Destiny 2</div></div></div>
+      </aside>
+      <div class="mini-slot" id="mini-slot"></div>
+      <div class="full-slot" id="full-slot"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== F. Settings ===================== -->
+<section class="mock">
+  <h2>F. Settings</h2>
+  <p>Discord's settings shape with a live preview that answers every change. <b>My profile:</b> type a name or an about line, choose how your banner is woven from your key
+  (or upload one, or let the game's art take over while you play) and shift its tones; the preview, and your banner in the call above, follow. <b>Appearance:</b> the theme
+  cards switch the whole page, and Reduce motion stills every seam. <b>Voice:</b> talk (a stand-in voice) and watch your banner light up past the sensitivity you set.
+  <b>Activity:</b> each switch takes a detail off what friends see.</p>
+  <div class="app plain" data-frame>
+    <div class="settings" id="settings">
+      <nav class="snav">
+        <div class="cat">You</div>
+        <button class="srow on" data-pane="profile">My profile</button>
+        <button class="srow" data-pane="activity">Activity</button>
+        <button class="srow" data-pane="privacy">Privacy</button>
+        <div class="cat">App</div>
+        <button class="srow" data-pane="appearance">Appearance</button>
+        <button class="srow" data-pane="voice">Voice and video</button>
+        <button class="srow" data-pane="notify">Notifications</button>
+        <button class="srow" data-pane="hotkeys">Hotkeys</button>
+      </nav>
+      <div class="spane on" data-pane="profile">
+        <h3>My profile</h3>
+        <label class="fld"><span>Name</span><input id="p-name" value="Ann"></label>
+        <label class="fld"><span>About</span><input id="p-about" value="Support main. Here most nights after nine."></label>
+        <div class="fld"><span>Picture</span><div class="pic-row"><span class="av l"><svg data-av="Ann"></svg></span><div><b>Drawn from your key</b><small>Everyone sees the same picture, and nobody else's key draws it. Upload one to replace it.</small></div><span class="btn ghost">Upload</span></div></div>
+        <div class="fld"><span>Banner</span>
+          <div class="kinds" id="p-kinds"></div>
+          <div class="slider-row"><small>Tones</small><input type="range" id="p-shift" min="0" max="359" value="0"><button class="btn ghost" id="p-shuffle">Shuffle</button></div>
+          <label class="switch"><input type="checkbox" id="p-gameart" checked><i></i><span>While I play, show the game's art instead</span></label>
+        </div>
+      </div>
+      <div class="spane" data-pane="activity">
+        <h3>Activity</h3>
+        <label class="switch big"><input type="checkbox" class="act" data-a="share" checked><i></i><span><b>Share what I play</b><small>With friends and people in my servers and groups</small></span></label>
+        <div class="act-list">
+          <label class="switch"><input type="checkbox" class="act" data-a="match" checked><i></i><span>Map, mode and score</span></label>
+          <label class="switch"><input type="checkbox" class="act" data-a="rounds" checked><i></i><span>Round by round</span></label>
+          <label class="switch"><input type="checkbox" class="act" data-a="stats" checked><i></i><span>My kills, deaths and assists</span></label>
+          <label class="switch"><input type="checkbox" class="act" data-a="hp"><i></i><span>Health, money and weapon <small>Off: it would help an opponent</small></span></label>
+          <label class="switch"><input type="checkbox" class="act" data-a="time" checked><i></i><span>How long I have been playing</span></label>
+        </div>
+      </div>
+      <div class="spane" data-pane="appearance">
+        <h3>Appearance</h3>
+        <div class="themes">
+          <button class="theme-card" data-t="ink"><span class="tc ink"><i></i><i></i><i></i></span><b>Ink</b><small>By night</small></button>
+          <button class="theme-card" data-t="ivory"><span class="tc ivory"><i></i><i></i><i></i></span><b>Ivory</b><small>By day</small></button>
+          <button class="theme-card" data-t="system"><span class="tc system"><i></i><i></i><i></i></span><b>Match Windows</b><small>Follows your PC</small></button>
+        </div>
+        <div class="fld"><span>Messages</span><div class="seg small" id="density"><button data-d="0" aria-pressed="true">Comfortable</button><button data-d="1" aria-pressed="false">Compact</button></div></div>
+        <label class="switch"><input type="checkbox" id="calm"><i></i><span>Reduce motion <small>Seams and rings stay still; nothing slides</small></span></label>
+      </div>
+      <div class="spane" data-pane="voice">
+        <h3>Voice and video</h3>
+        <div class="fld"><span>Microphone</span><div class="fake-select">Headset microphone (USB)<svg class="i"><use href="#i-chev"/></svg></div></div>
+        <div class="fld"><span>Sensitivity</span>
+          <div class="meter" id="meter"><i class="lvl"></i><i class="thr" id="thr"></i></div>
+          <input type="range" id="sens" min="5" max="95" value="38" aria-label="Sensitivity">
+          <small class="hint" id="sens-hint">Talk: your banner lights once your voice passes the line.</small></div>
+        <label class="switch"><input type="checkbox" checked><i></i><span>Noise suppression <small>Keyboards and fans stay out of the call</small></span></label>
+      </div>
+      <div class="spane" data-pane="privacy"><h3>Privacy</h3><label class="switch"><input type="checkbox" checked><i></i><span>Friend requests from people in my servers</span></label><label class="switch"><input type="checkbox"><i></i><span>Suggest my name while people type it</span></label><label class="switch"><input type="checkbox" checked><i></i><span>Share problem logs with the developers when they ask</span></label></div>
+      <div class="spane" data-pane="notify"><h3>Notifications</h3><label class="switch"><input type="checkbox" checked><i></i><span>Desktop notifications while the window is in the background</span></label><label class="switch"><input type="checkbox" checked><i></i><span>Sounds for joins, leaves and pokes</span></label></div>
+      <div class="spane" data-pane="hotkeys"><h3>Hotkeys</h3><div class="fld"><span>Mute</span><div class="fake-select">Ctrl Shift M</div></div><div class="fld"><span>Push to talk</span><div class="fake-select">Mouse 4</div></div></div>
+      <aside class="spreview">
+        <h5 id="prev-title">What others see</h5>
+        <div id="prev-slot"></div>
+        <label class="switch" id="prev-game-sw"><input type="checkbox" id="prev-game"><i></i><span>Preview while I play</span></label>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== G. Server banner ===================== -->
+<section class="mock">
+  <h2>G. A server's banner</h2>
+  <p>Server settings, Overview. The banner can be <b>woven from the server's key</b> (four ways, tones you can shift or shuffle), <b>a picture</b> (drag it to frame it,
+  zoom it), or <b>a game's art</b>. A darkness slider keeps the name readable. Previews show the channel column and an invite; <b>Save changes</b> puts it on Night Owls everywhere
+  on this page, the call included, and Reset takes it back.</p>
+  <div class="app plain" data-frame>
+    <div class="ssettings">
+      <nav class="snav">
+        <div class="cat">Night Owls</div>
+        <button class="srow on">Overview</button><button class="srow">Roles</button><button class="srow">Members</button><button class="srow">Channels</button><button class="srow">Invites</button><button class="srow">Bans</button><button class="srow">Audit log</button>
+      </nav>
+      <div class="spane on">
+        <h3>Overview</h3>
+        <div class="two"><label class="fld"><span>Server name</span><input id="s-name" value="Night Owls"></label>
+          <div class="fld"><span>Picture</span><div class="pic-row"><span class="sv-pic"><svg data-server="Night Owls"></svg></span><span class="btn ghost">Change</span></div></div></div>
+        <div class="fld"><span>Banner</span>
+          <div class="seg" id="s-src"><button data-s="key" aria-pressed="true">From the server's key</button><button data-s="pic" aria-pressed="false">A picture</button><button data-s="game" aria-pressed="false">A game's art</button></div>
+          <div class="src-pane on" data-s="key"><div class="kinds" id="s-kinds"></div><div class="slider-row"><small>Tones</small><input type="range" id="s-shift" min="0" max="359" value="0"><button class="btn ghost" id="s-shuffle">Shuffle</button></div></div>
+          <div class="src-pane" data-s="pic"><div class="drop"><b>raid-night.jpg</b><small>Drag the preview to frame it</small></div><div class="slider-row"><small>Zoom</small><input type="range" id="s-zoom" min="100" max="220" value="130"></div></div>
+          <div class="src-pane" data-s="game"><div class="games" id="s-games"></div></div>
+          <div class="slider-row"><small>Darkness</small><input type="range" id="s-dark" min="0" max="90" value="45"></div>
+        </div>
+      </div>
+      <aside class="spreview">
+        <h5>Channel column</h5>
+        <div class="sb-col"><div class="side-head banner sb" id="sb-prev"><div class="weave"></div><b id="sb-name">Night Owls</b><small>24 members</small></div>
+          <div class="cat">Text channels</div><div class="row"><svg class="chan"><use href="#i-hash"/></svg><span class="nm">general</span></div></div>
+        <h5 style="margin-top:18px">An invite</h5>
+        <div class="inv-prev"><div class="ib-ban" id="sb-inv"><div class="weave"></div></div><div class="inv-body"><span class="sv-pic s"><svg data-server="Night Owls"></svg></span><div><b id="sb-name2">Night Owls</b><small>24 members · 6 online</small></div><span class="btn primary">Join</span></div></div>
+      </aside>
+      <div class="unsaved" id="unsaved"><span>You have unsaved changes</span><button class="btn ghost" id="s-reset">Reset</button><button class="btn primary" id="s-save">Save changes</button></div>
+    </div>
+  </div>
+</section>
+
+<!-- ===================== E. Pieces ===================== -->
+<section class="mock">
+  <h2>H. The pieces, and where each came from</h2>
+  <p>Type any name to see the picture and banner its key would get. The table says what each part of this pass keeps from the app as it is, the first mockup and the court.</p>
+  <div class="app" data-frame style="height:auto;min-height:760px">
+    <div class="pieces">
+      <div>
+        <h5>A picture and banner from a key</h5>
+        <div class="maker"><span class="av xl"><svg id="mk-av"></svg></span><input id="maker" value="Mira" aria-label="Name"><div class="ban"><div class="weave" id="mk-weave" style="position:absolute;inset:0"></div></div></div>
+        <h5 style="margin-top:24px">Sixteen new users, sixteen keys</h5>
+        <div class="gallery"><div><span class="av"><svg data-av="Ann"></svg></span>Ann</div><div><span class="av"><svg data-av="Bob"></svg></span>Bob</div><div><span class="av"><svg data-av="Cy"></svg></span>Cy</div><div><span class="av"><svg data-av="Dee"></svg></span>Dee</div><div><span class="av"><svg data-av="Eve"></svg></span>Eve</div><div><span class="av"><svg data-av="Fen"></svg></span>Fen</div><div><span class="av"><svg data-av="Gus"></svg></span>Gus</div><div><span class="av"><svg data-av="Hal"></svg></span>Hal</div><div><span class="av"><svg data-av="Ivy"></svg></span>Ivy</div><div><span class="av"><svg data-av="Jo"></svg></span>Jo</div><div><span class="av"><svg data-av="Kit"></svg></span>Kit</div><div><span class="av"><svg data-av="Lou"></svg></span>Lou</div><div><span class="av"><svg data-av="Max"></svg></span>Max</div><div><span class="av"><svg data-av="Nia"></svg></span>Nia</div><div><span class="av"><svg data-av="Oz"></svg></span>Oz</div><div><span class="av"><svg data-av="Pia"></svg></span>Pia</div></div>
+        <h5 style="margin-top:24px">Presence, by shape as well as colour</h5>
+        <div class="presence">
+          <div><span class="av"><svg data-av="Kai"></svg><i class="dot online"></i></span>Online</div>
+          <div><span class="av"><svg data-av="Sol"></svg><i class="dot game"></i></span>In game</div>
+          <div><span class="av"><svg data-av="Dov"></svg><i class="dot voice"></i></span>In voice</div>
+          <div><span class="av" style="opacity:.5"><svg data-av="Theo"></svg></span>Offline</div>
+        </div>
+        <h5 style="margin-top:24px">Buttons</h5>
+        <div style="display:flex;gap:8px;flex-wrap:wrap"><span class="btn primary"><svg><use href="#i-plus"/></svg>Add friend</span><span class="btn">Message</span><span class="btn voice">Join</span><span class="btn ghost">Cancel</span><span class="btn danger">Disconnect</span><span class="chip"><svg><use href="#i-shield"/></svg>Private · direct</span></div>
+        <h5 style="margin-top:24px">Type: Commissioner, one family</h5>
+        <div class="type"><div class="t1">Salvation's Edge</div><div class="t2">Playing now</div><div class="t3">Titles flare at the ends of their strokes like letters cut in stone; text keeps only a trace of that, so it stays plain at 13 px. One family, not two, and no capitals for labels.</div><div class="t4">1 h 12 min · fireteam of 6 · 9 to 7</div></div>
+        <h5 style="margin-top:24px">Colours</h5>
+        <div class="swatches" id="swatches"></div>
+      </div>
+      <div>
+        <h5>Where each part came from</h5>
+        <table class="from">
+          <tr><th>Part</th><th>Kept from</th><th>Why it is there</th></tr>
+          <tr><td>Rail, column, chat, members</td><td>The app</td><td>People know where things are from Discord</td></tr>
+          <tr><td>User bar and voice bar under both</td><td>The app</td><td>Already built; they widen with the column</td></tr>
+          <tr><td>Lamp gold for selection and the main action</td><td>The app</td><td>Eleusinia's one colour of its own</td></tr>
+          <tr><td>Playing now, live calls, game line</td><td>First mockup</td><td>Steam's library: games are the colour</td></tr>
+          <tr><td>Presence by shape</td><td>First mockup</td><td>Online, in game and in voice told apart without colour</td></tr>
+          <tr><td>Calls as banners, the lit speaker</td><td>The court, quieter</td><td>Who is talking reads from across the room; a stream still takes the stage</td></tr>
+          <tr><td>Muted ivory by day</td><td>The court</td><td>A light mode that is warm, not white</td></tr>
+          <tr><td>Pictures and banners from the key</td><td>New</td><td>Built forms, not pixels or crests; the same key always looks the same, a copy looks different</td></tr>
+          <tr><td>Seal on hover</td><td>The court</td><td>Shows that messages are signed, only when asked</td></tr>
+          <tr><td>Private chip and the keep</td><td>The court</td><td>Says why a conversation is private, in one line</td></tr>
+          <tr><td>Slit of light, seam on the speaker</td><td>The court (Ando)</td><td>What is selected; how loud the speaker is</td></tr>
+          <tr><td>One cut corner</td><td>The court (Pei)</td><td>Marks the one main action on a screen</td></tr>
+          <tr><td>Stepped frame on game cards</td><td>The court (Bofill)</td><td>Answers the hover; the art stays the picture</td></tr>
+          <tr><td>Coloured rail when typing</td><td>The court (Stirling)</td><td>Focus, shown without a glow</td></tr>
+          <tr><td colspan="3" style="color:var(--t3)">Left out from the court: the crests and badge icons, the column rail, the half-circle seating, the castle panel beside every chat, serif titles, "Letters" and "Take a seat", the dot grid.</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+// A stand-in hash of the name (the app would use the real public key)
+function bytes(s) {
+  let h = 2166136261 >>> 0; const out = []
+  for (let i = 0; i < 32; i++) { for (const c of s + i) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; h ^= h >>> 15; h = Math.imul(h, 2246822507) >>> 0; h ^= h >>> 13; out.push(h >>> 24) }
+  return out
+}
+const NS = 'http://www.w3.org/2000/svg'
+const el = (n, a = {}) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); return e }
+// ---------- Banners: woven from the key (four ways, tones shifted), a picture, or a game's art ----------
+const GAME_ART = {
+  cs2: 'radial-gradient(60% 80% at 70% 30%,#e0a24f,transparent 60%),linear-gradient(160deg,#3f5671,#1d2531 60%,#2b1c12)',
+  dota: 'radial-gradient(60% 70% at 40% 30%,#d6533c,transparent 60%),linear-gradient(160deg,#5b2219,#1a0f0d 70%)',
+  d2: 'radial-gradient(50% 60% at 60% 25%,#c9d9ec,transparent 60%),linear-gradient(170deg,#56708f,#1b2230 70%)',
+}
+const GAME_NAME = { cs2: 'Counter-Strike 2', dota: 'Dota 2', d2: 'Destiny 2' }
+// a stand-in for an uploaded photo
+const PHOTO = 'radial-gradient(28% 34% at 30% 42%,#f2c77e,transparent 70%),radial-gradient(22% 30% at 72% 58%,#7ea3d6,transparent 70%),radial-gradient(60% 40% at 50% 100%,#3b2a1a,transparent 70%),linear-gradient(160deg,#2a3550,#151a26 60%,#3a2418)'
+const KINDS = ['Arcade', 'Skyline', 'Bands', 'Lattice']
+const BANNER = {} // name → { src: 'key' | 'pic' | 'game', kind, shift, x, y, zoom, game }
+
+// Colours from the key: three tones a fixed step apart on the wheel, at lightness the palette allows; shift turns the wheel
+function tones(b, shift = 0) {
+  const h = ((b[12] * 360) / 256 + shift) % 360, turn = 35 + (b[13] % 4) * 30
+  return [`oklch(0.42 0.07 ${h})`, `oklch(0.7 0.095 ${(h + turn) % 360})`, `oklch(0.9 0.035 ${(h + 2 * turn) % 360})`]
+}
+
+// A picture from the key: one built form (an arch with a window, a stepped front, a split disc or two quarter circles)
+// and a small accent (a sun, a ring, a bar), turned and placed by the key. Built forms, not pixels or a badge.
+function mark(svg, name) {
+  const b = bytes(name), [c0, c1, c2] = tones(b)
+  svg.setAttribute('viewBox', '0 0 100 100'); svg.innerHTML = ''
+  const g = el('g', { transform: `rotate(${[0, 0, 90, 180, 270, 0][b[14] % 6]} 50 50)` })
+  svg.append(el('rect', { width: 100, height: 100, fill: c0 }))
+  const kind = b[15] % 4, x = 26 + (b[16] % 20), w = 34 + (b[17] % 18)
+  if (kind === 0) {
+    g.append(el('path', { d: `M${x} 100 V${50 - w / 4} a${w / 2} ${w / 2} 0 0 1 ${w} 0 V100 Z`, fill: c1 }))
+    g.append(el('path', { d: `M${x + w / 2 - 6} 100 V64 a6 6 0 0 1 12 0 V100 Z`, fill: c0 })) }
+  if (kind === 1) {
+    const s = 3 + (b[18] % 2), st = 70 / s
+    let d = 'M0 100'
+    for (let i = 0; i < s; i++) d += ` V${100 - st * (i + 1)} H${(i + 1) * (100 / (s + 1))}`
+    g.append(el('path', { d: d + ' V100 Z', fill: c1 })) }
+  if (kind === 2) {
+    g.append(el('path', { d: 'M18 56 a32 32 0 0 1 64 0 Z', fill: c1 }))
+    g.append(el('path', { d: 'M18 56 a32 32 0 0 0 64 0 Z', fill: c2, opacity: 0.9 })) }
+  if (kind === 3) {
+    g.append(el('path', { d: 'M0 100 V30 a70 70 0 0 1 70 70 Z', fill: c1 }))
+    g.append(el('path', { d: 'M100 0 V46 a46 46 0 0 1 -46 -46 Z', fill: c2, opacity: 0.85 })) }
+  const ax = 20 + (b[19] % 60), ay = 18 + (b[20] % 22), acc = b[21] % 3
+  if (acc === 0) g.append(el('circle', { cx: ax, cy: ay, r: 7 + (b[22] % 5), fill: c2 }))
+  if (acc === 1) g.append(el('circle', { cx: ax, cy: ay, r: 8, fill: 'none', stroke: c2, 'stroke-width': 3 }))
+  if (acc === 2) g.append(el('rect', { x: ax - 12, y: ay, width: 24, height: 4, rx: 2, fill: c2 }))
+  svg.append(g)
+}
+
+function weave(box, name, opt = BANNER[name] || {}) {
+  if (opt.src === 'pic' || opt.src === 'game') {
+    box.innerHTML = ''
+    box.style.background = opt.src === 'pic' ? PHOTO : GAME_ART[opt.game || 'd2']
+    box.style.backgroundSize = opt.src === 'pic' ? `${opt.zoom || 130}% auto` : 'cover'
+    box.style.backgroundPosition = `${opt.x ?? 50}% ${opt.y ?? 50}%`
+    return
+  }
+  box.style.background = ''
+  const wide = box.clientWidth > box.clientHeight * 1.3, b = bytes(name), [c0, c1, c2] = tones(b, opt.shift || 0), w = wide ? 600 : 200, h = wide ? 220 : 700
+  const kind = opt.kind ?? b[23] % 4
+  const svg = el('svg', { viewBox: `0 0 ${w} ${h}`, preserveAspectRatio: 'xMidYMid slice', width: '100%', height: '100%' })
+  svg.append(el('rect', { width: w, height: h, fill: c0 }))
+  if (kind === 0) { const n = (3 + (b[24] % 2)) * (wide ? 3 : 1), aw = w / n, rh = aw * 1.6
+    for (let r = 0; r * rh < h; r++) for (let i = 0; i < n; i++) { const x = i * aw + aw * 0.18, ww = aw * 0.64, top = r * rh + aw * 0.2
+      svg.append(el('path', { d: `M${x} ${top + rh * 0.8} V${top + ww / 2} a${ww / 2} ${ww / 2} 0 0 1 ${ww} 0 V${top + rh * 0.8} Z`, fill: (r + i) % 5 ? c1 : c2, opacity: 0.32 })) } }
+  if (kind === 1) { const s = 6 + (b[25] % 4)
+    for (let i = 0; i < s * (wide ? 3 : 1); i++) { const hh = h * (0.23 + ((b[(i % 20) + 4] * 5) % 360) / 700)
+      svg.append(el('rect', { x: (i * w) / (s * (wide ? 3 : 1)), y: h - hh, width: w / (s * (wide ? 3 : 1)) - 3, height: hh, fill: i % 3 ? c1 : c2, opacity: 0.3 })) } }
+  if (kind === 2) { for (let y = 0; y < h; y += 26) svg.append(el('rect', { y, width: w, height: 7, fill: c1, opacity: 0.28 }))
+    for (let i = 0; i < 3; i++) svg.append(el('circle', { cx: 40 + ((b[26 + i] * 3) % (w - 80)), cy: wide ? 40 + i * 70 : 90 + i * 170, r: 20 + (b[27 + i] % 4) * 4, fill: c2, opacity: 0.35 })) }
+  if (kind === 3) { const s = 34 + (b[25] % 3) * 8 // a lattice, like a shoji screen, with a few panes filled
+    for (let x = -h; x < w + h; x += s) { svg.append(el('line', { x1: x, y1: 0, x2: x + h, y2: h, stroke: c1, 'stroke-width': 1.4, opacity: 0.26 }))
+      svg.append(el('line', { x1: x + h, y1: 0, x2: x, y2: h, stroke: c1, 'stroke-width': 1.4, opacity: 0.26 })) }
+    for (let i = 0; i < 7; i++) { const cx = (b[i + 4] * 7) % w, cy = (b[i + 11] * 11) % h
+      svg.append(el('rect', { x: cx - 9, y: cy - 9, width: 18, height: 18, fill: c2, opacity: 0.24, transform: `rotate(45 ${cx} ${cy})` })) } }
+  box.innerHTML = ''; box.append(svg)
+}
+const repaintBanner = (name) => document.querySelectorAll(`[data-weave="${name}"]`).forEach((b) => weave(b, name))
+
+function paint(root = document) {
+  root.querySelectorAll('svg[data-av]').forEach((s) => mark(s, s.dataset.av))
+  root.querySelectorAll('svg[data-server]').forEach((s) => mark(s, s.dataset.server, true))
+  root.querySelectorAll('[data-weave]').forEach((b) => weave(b, b.dataset.weave))
+}
+paint()
+
+// The keep's walls: three stepped rings (an Edo castle's baileys), the hovered fact lights its wall
+document.querySelectorAll('svg.walls').forEach((svg) => {
+  const wall = (r) => { const c = 6, n = 5, st = (2 * r) / (n * 2); let d = `M ${-r} ${-r + c}`
+    for (let i = 0; i < n * 2; i++) { const x = -r + i * st; d += i % 2 ? ` L ${x} ${-r - 4} L ${x + st} ${-r - 4}` : ` L ${x} ${-r} L ${x + st} ${-r}` }
+    return d + ` L ${r} ${-r + c} L ${r} ${r - c} L ${r - c} ${r} L ${-r + c} ${r} L ${-r} ${r - c} Z` }
+  ;[52, 36, 20].forEach((r, i) => svg.append(el('path', { d: wall(r), class: 'w' + (i === 2 ? ' lit' : ''), 'data-w': 2 - i })))
+  const a = el('svg', { x: -16, y: -7, width: 14, height: 14 }); mark(a, 'Ann'); svg.append(a)
+  const m = el('svg', { x: 2, y: -7, width: 14, height: 14 }); mark(m, 'Mira'); svg.append(m)
+  const pop = svg.closest('.pop')
+  pop.querySelectorAll('.facts [data-w]').forEach((f) => f.addEventListener('mouseenter', () =>
+    svg.querySelectorAll('.w').forEach((w) => w.classList.toggle('lit', w.dataset.w === f.dataset.w))))
+})
+
+// Popovers: the keep from the chip, a seal from a message
+document.addEventListener('click', (e) => {
+  const main = e.target.closest('.main')
+  const chip = e.target.closest('.keep-chip'), seal = e.target.closest('.seal')
+  if (chip) { main.querySelector('.keep-pop').classList.toggle('open'); return }
+  if (seal) { const pop = main.querySelector('.seal-pop'), r = seal.getBoundingClientRect(), f = main.getBoundingClientRect()
+    pop.querySelector('h6 span').textContent = `Signed by ${seal.dataset.who}`
+    pop.style.left = (r.left - f.left - 330) + 'px'; pop.style.top = Math.max(60, r.top - f.top - 40) + 'px'; pop.classList.add('open'); return }
+  if (!e.target.closest('.pop')) document.querySelectorAll('.pop').forEach((p) => p.classList.remove('open'))
+})
+
+// Enter sends: the message lands and its seal presses once
+document.querySelectorAll('.draft').forEach((d) => d.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || !d.value.trim()) return
+  const chat = d.closest('.main').querySelector('.chat'), m = document.createElement('div'), t = new Date()
+  m.className = 'msg new'
+  m.innerHTML = `<span class="av l"><svg data-av="Ann"></svg></span><div class="h"><b>Ann</b><time>${String(t.getHours()).padStart(2, '0')}:${String(t.getMinutes()).padStart(2, '0')}</time></div><p></p><span class="seal" data-who="Ann"><svg><use href="#i-seal"/></svg></span>`
+  m.querySelector('p').textContent = d.value; chat.append(m); paint(m); d.value = ''
+  while (chat.scrollHeight > chat.clientHeight + 2 && chat.children.length > 3) chat.children[1].remove()
+}))
+
+// Game clocks tick
+document.querySelectorAll('.clock').forEach((c) => {
+  let s = +c.dataset.since
+  setInterval(() => { s++; c.textContent = c.textContent.includes('h') ? `${Math.floor(s / 3600)} h ${Math.floor(s / 60) % 60} min` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}` }, 1000)
+})
+
+// Name to picture
+const mk = document.getElementById('maker')
+const make = () => { mark(document.getElementById('mk-av'), mk.value || '?'); weave(document.getElementById('mk-weave'), mk.value || '?') }
+mk.addEventListener('input', make); make()
+document.getElementById('swatches').innerHTML = ['bg0', 'bg1', 'bg2', 'bg3', 'line2', 't1', 't2', 'lamp', 'voice', 'live', 'on'].map((t) =>
+  `<div class="sw" style="background:var(--${t});color:${['t1', 't2', 'lamp', 'voice', 'live', 'on'].includes(t) ? 'var(--bg2)' : 'var(--t2)'}">${t}</div>`).join('')
+
+// ---------- Shared bits ----------
+const $ = (s, r = document) => r.querySelector(s), $$ = (s, r = document) => [...r.querySelectorAll(s)]
+const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+const calm = () => document.body.classList.contains('calm') || matchMedia('(prefers-reduced-motion: reduce)').matches
+const minsSince = (t) => Math.max(1, Math.round((Date.now() - t) / 60000))
+setInterval(() => $$('.since').forEach((s) => { s.textContent = `${minsSince(+s.dataset.start)} min` }), 5000)
+
+// People, as the profile shows them
+const PEOPLE = {
+  Mira: { n: 'Mira', handle: 'mira#2210', about: 'Entry fragger. Mirage or nothing.', since: 'March 2026', mutual: ['Dov', 'Kai', 'Rae'], servers: ['Night Owls', 'Friday Raid'],
+    key: '7f3a 91c2 0be4 d815 5c07 a9e1 33d0 6b2f', last: 'Counter-Strike 2, 2 hours ago', games: [['cs2', 412], ['d2', 1204], ['dota', 88]],
+    game: { id: 'cs2', mode: 'Premier', map: 'Mirage', score: [9, 7], rounds: 'WWLWLWWLWLLWWLWL', k: 21, d: 12, a: 4, hp: 84, money: '$3,150', gun: 'AK-47', start: Date.now() - 42 * 60000 } },
+  Ann: { n: 'Ann', handle: 'ann#7095', about: 'Support main. Here most nights after nine.', since: 'January 2026', mutual: ['Mira', 'Dov'], servers: ['Night Owls'],
+    key: '1c9e 44a0 b7d2 08f1 e6a3 5d19 c2b8 7a04', last: 'Dota 2, yesterday', games: [['dota', 931], ['cs2', 140]],
+    game: { id: 'cs2', mode: 'Premier', map: 'Ancient', score: [4, 6], rounds: 'LWLLWWLWLL', k: 9, d: 8, a: 6, hp: 100, money: '$4,800', gun: 'M4A1-S', start: Date.now() - 18 * 60000 } },
+}
+const person = (n) => PEOPLE[n] || { n, handle: `${n.toLowerCase()}#${1000 + (bytes(n)[3] * 37) % 9000}`, about: '', since: 'this year', mutual: ['Ann'], servers: ['Night Owls'], last: 'a while ago', games: [], game: null }
+const ACT = { share: true, match: true, rounds: true, stats: true, hp: false, time: true }
+const ALL = { share: true, match: true, rounds: true, stats: true, hp: false, time: true }
+const roundsHTML = (g) => g.rounds.split('').map((c) => `<i class="${c === 'W' ? 'w' : 'l'}" title="Round ${'x'}"></i>`).join('') + '<i class="cur" title="This round"></i>'
+const stack = (names) => `<span class="stack">${names.map((m) => `<span class="av"><svg data-av="${m}"></svg></span>`).join('')}</span>`
+
+function nowHTML(p, a = ALL) {
+  const g = p.game
+  return `<div class="now"><div class="bg" style="background:${GAME_ART[g.id]}"></div>
+    <div class="k">Playing ${GAME_NAME[g.id]}${a.time ? ` · <span class="since" data-start="${g.start}">${minsSince(g.start)} min</span>` : ''}</div>
+    ${a.match ? `<div class="score">${g.map}, ${g.score[0]} to ${g.score[1]}</div><div class="meta">${g.mode}, round ${g.score[0] + g.score[1] + 1}</div>` : ''}
+    ${a.rounds ? `<div class="rounds">${roundsHTML(g)}</div>` : ''}
+    ${a.stats ? `<div class="stats"><span><b>${g.k}</b> kills</span><span><b>${g.d}</b> deaths</span><span><b>${g.a}</b> assists</span></div>` : ''}
+    ${a.hp ? `<div class="stats" style="margin-top:4px"><span><b>${g.hp}</b> health</span><span><b>${g.money}</b></span><span>${g.gun}</span></div>` : ''}</div>`
+}
+
+// The small profile; inGame swaps the banner for the game's art and puts the match first
+function miniHTML(p, inGame, o = {}) {
+  const a = o.act || ALL, playing = inGame && p.game && a.share
+  return `<div class="mini ${playing ? 'ingame' : ''} ${o.keepBanner ? 'keepban' : ''}">
+    <div class="pban"><div class="weave" data-weave="${p.n}"></div>${p.game ? `<div class="art" style="background:${GAME_ART[p.game.id]}"></div>` : ''}
+      ${playing ? `<div class="gline"><span class="lv">Live</span>${GAME_NAME[p.game.id]}</div>` : ''}</div>
+    <div class="ppic"><span class="av"><svg data-av="${p.n}"></svg><i class="dot ${playing ? 'game' : 'online'}"></i></span></div>
+    <div class="pbody"><div class="pname">${esc(o.display || p.n)}</div><div class="phandle">${p.handle}</div>
+      ${(o.about ?? p.about) ? `<div class="pabout">${esc(o.about ?? p.about)}</div>` : '<div style="height:8px"></div>'}
+      ${playing ? nowHTML(p, a) : `<div class="pmutual">Last played ${p.last}</div>`}
+      <div class="pmutual">${stack(p.mutual)}${p.mutual.length} friends in common · ${p.servers[0]}</div>
+      <div class="pmsg"><input placeholder="Message @${p.n}" aria-label="Message ${p.n}"><span class="btn ${playing ? 'primary' : ''}">${playing ? 'Ask to join' : 'Send'}</span></div>
+      <div class="sent-note"></div></div></div>`
+}
+
+function fullNow(p) {
+  const g = p.game, half = 12, r = g.rounds.split(''), w = (a) => a.filter((c) => c === 'W').length
+  const cell = (c) => `<i class="${c === 'W' ? 'w' : 'l'}"></i>`
+  return `<div class="tiles"><div><b>${g.k}</b><span>kills</span></div><div><b>${g.d}</b><span>deaths</span></div><div><b>${g.a}</b><span>assists</span></div><div><b>${(g.k / g.d).toFixed(2)}</b><span>kills per death</span></div></div>
+    <div class="timeline"><div class="half"><small>First half · ${w(r.slice(0, half))} to ${half - w(r.slice(0, half))}</small><div class="rounds big">${r.slice(0, half).map(cell).join('')}</div></div>
+    <div class="half"><small>Second half · ${w(r.slice(half))} to ${r.length - half - w(r.slice(half))}</small><div class="rounds big">${r.slice(half).map(cell).join('')}<i class="cur"></i></div></div></div>
+    <div class="pmutual" style="margin-top:12px">${g.mode} on ${g.map}, started <span class="since" data-start="${g.start}">${minsSince(g.start)} min</span> ago</div>`
+}
+function fullHTML(p, inGame) {
+  const g = p.game, total = Math.max(...p.games.map((x) => x[1]), 1)
+  return `<div class="card ${inGame ? 'ingame' : ''}">
+    <div class="pban"><div class="weave" data-weave="${p.n}"></div><div class="art" style="background:${GAME_ART[g.id]}"></div>
+      <div class="gline"><span class="lv">Live</span>${GAME_NAME[g.id]} · <span class="since" data-start="${g.start}">${minsSince(g.start)} min</span></div>
+      <div class="bigscore"><div class="s">${g.score[0]} – ${g.score[1]}</div><div class="m">${g.map} · ${g.mode} · round ${g.score[0] + g.score[1] + 1}</div><div class="rounds">${roundsHTML(g)}</div></div></div>
+    <div class="ppic"><span class="av"><svg data-av="${p.n}"></svg><i class="dot ${inGame ? 'game' : 'online'}"></i></span></div>
+    <div class="acts">${inGame ? '<span class="btn primary">Ask to join</span><span class="btn">Message</span>' : '<span class="btn primary">Message</span>'}<span class="btn">Call</span></div>
+    <div class="cbody"><div class="pname" style="font-size:26px">${p.n}</div><div class="phandle">${p.handle}</div>
+      <div class="tabs" role="tablist">${inGame ? '<button role="tab" data-tab="now">Now</button>' : ''}<button role="tab" data-tab="about">About</button><button role="tab" data-tab="activity">Activity</button><button role="tab" data-tab="common">In common</button></div>
+      ${inGame ? `<div class="tpane" data-tab="now">${fullNow(p)}<div class="shared-note"><svg><use href="#i-shield"/></svg>${p.n} shares the map, the score and her own numbers; never her health, money or weapon.</div></div>` : ''}
+      <div class="tpane" data-tab="about"><dl class="kv"><dt>About</dt><dd>${esc(p.about)}</dd><dt>On Eleusinia since</dt><dd>${p.since}</dd><dt>Last played</dt><dd>${p.last}</dd>
+        <dt>Note</dt><dd><input style="font:inherit;background:var(--bg2);border:1px solid var(--line);color:var(--t1);border-radius:5px;height:30px;padding:0 8px;width:100%" placeholder="Only you can see this"></dd></dl>
+        <div class="keybox"><span class="av l"><svg data-av="${p.n}"></svg></span><div><code>${p.key}</code><small>Their key. Read it out on a call or compare it in person to be sure this is really ${p.n}.</small></div></div></div>
+      <div class="tpane" data-tab="activity"><div class="games-list">${p.games.map(([id, h]) => `<div class="g"><span class="cap" style="background:${GAME_ART[id]}"></span><span>${GAME_NAME[id]}</span><span class="bar"><i style="width:${(h / total) * 100}%"></i></span><span class="h">${h.toLocaleString()} h</span></div>`).join('')}</div></div>
+      <div class="tpane" data-tab="common"><div class="pmutual" style="margin-bottom:12px">${stack(p.mutual)}${p.mutual.join(', ')}</div><div class="pmutual">Servers: ${p.servers.join(', ')}</div></div>
+    </div></div>`
+}
+const pickTab = (card, t) => { $$('.tabs button', card).forEach((b) => b.setAttribute('aria-selected', b.dataset.tab === t)); $$('.tpane', card).forEach((p) => p.classList.toggle('on', p.dataset.tab === t)) }
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('.tabs button'); if (t) pickTab(t.closest('.card'), t.dataset.tab)
+  const send = e.target.closest('.pmsg .btn'); if (send) { const box = send.closest('.pbody'), i = $('input', box)
+    $('.sent-note', box).textContent = send.textContent === 'Ask to join' ? 'Asked. You will hear if there is a seat.' : (i.value.trim() ? 'Sent' : ''); i.value = '' }
+})
+
+// ---------- E. Profiles ----------
+function renderProfiles(inGame) {
+  const p = PEOPLE.Mira
+  $('#mini-slot').innerHTML = miniHTML(p, inGame); $('#full-slot').innerHTML = fullHTML(p, inGame)
+  pickTab($('#full-slot .card'), inGame ? 'now' : 'about'); paint($('#mini-slot')); paint($('#full-slot'))
+  $('#mira-dot').className = `dot ${inGame ? 'game' : 'online'}`
+  $('#mira-sub').className = `sub ${inGame ? 'game' : ''}`; $('#mira-sub').textContent = inGame ? 'Counter-Strike 2' : 'Online'
+  $$('#mira-state button').forEach((b) => b.setAttribute('aria-pressed', +b.dataset.g === +inGame))
+}
+$$('#mira-state button').forEach((b) => b.addEventListener('click', () => renderProfiles(b.dataset.g === '1')))
+$('#mira-row').addEventListener('click', () => { const m = $('#mini-slot .mini'); m.style.animation = 'none'; m.offsetHeight; m.style.animation = 'rise .25s ease-out' })
+
+// The speaker moves between people, lit on the banner and in the channel list; the seam follows a stand-in voice level
+let talk = 1
+const speak = () => {
+  document.querySelectorAll('#hall [data-talk], #vp-d [data-talk]').forEach((n) => n.classList.toggle('speaking', +n.dataset.talk === talk))
+  talk = [0, 1, 2, 3, 1, 3][(Math.random() * 6) | 0]
+}
+speak(); setInterval(speak, 2600)
+let lvl = 30
+setInterval(() => {
+  lvl = Math.max(8, Math.min(90, lvl + (Math.random() - 0.48) * 34))
+  document.querySelectorAll('#hall .bn').forEach((b) => b.style.setProperty('--lvl', (b.classList.contains('speaking') ? lvl : 0) + 'px'))
+}, 90)
+document.querySelectorAll('#hall [data-mode]').forEach((b) => b.addEventListener('click', () => document.getElementById('hall').classList.toggle('watching', b.dataset.mode === 'stream')))
+
+// ---------- F. Settings ----------
+const ME = { display: 'Ann', about: PEOPLE.Ann.about, gameArt: true }
+let pane = 'profile'
+function preview() {
+  const slot = $('#prev-slot'), inGame = pane === 'activity' || $('#prev-game').checked
+  $('#prev-game-sw').style.display = pane === 'profile' || pane === 'appearance' ? '' : 'none'
+  if (pane === 'voice') {
+    $('#prev-title').textContent = 'You, in a call'
+    slot.innerHTML = `<div class="voice-banner"><div class="bn" id="vb"><div class="weave" data-weave="Ann"></div><span class="seam"></span><span class="av xl"><svg data-av="Ann"></svg></span><div class="nm">${esc(ME.display)}</div><div class="sub">Lounge</div></div></div>`
+  } else {
+    $('#prev-title').textContent = pane === 'activity' ? 'What friends see while you play' : 'What others see'
+    slot.innerHTML = miniHTML(PEOPLE.Ann, inGame, { display: ME.display, about: ME.about, act: pane === 'activity' ? ACT : ALL, keepBanner: !ME.gameArt })
+  }
+  paint(slot)
+}
+$$('.snav .srow[data-pane]').forEach((b) => b.addEventListener('click', () => {
+  pane = b.dataset.pane
+  $$('.settings .srow').forEach((x) => x.classList.toggle('on', x === b)); $$('.settings .spane').forEach((p) => p.classList.toggle('on', p.dataset.pane === pane)); preview()
+}))
+$('#p-name').addEventListener('input', (e) => { ME.display = e.target.value || 'Ann'; $$('.ubar .who b').forEach((b) => { b.textContent = ME.display }); preview() })
+$('#p-about').addEventListener('input', (e) => { ME.about = e.target.value; preview() })
+$('#prev-game').addEventListener('change', preview)
+$('#p-gameart').addEventListener('change', (e) => { ME.gameArt = e.target.checked; preview() })
+// Banner choices, for a person or a server: the four weaves (and an upload), tones, shuffle
+function kindTiles(box, name, get, set, upload) {
+  box.innerHTML = KINDS.map((k, i) => `<div class="kind" data-k="${i}"><div class="weave"></div><span>${k}</span></div>`).join('') + (upload ? '<div class="kind up" data-k="up">Upload<br>a picture</div>' : '')
+  const draw = () => $$('.kind', box).forEach((t) => {
+    const k = t.dataset.k, o = get()
+    t.classList.toggle('on', k === 'up' ? o.src === 'pic' : o.src !== 'pic' && +k === (o.kind ?? bytes(name)[23] % 4))
+    if (k !== 'up') weave($('.weave', t), name, { kind: +k, shift: o.shift })
+  })
+  box.addEventListener('click', (e) => { const t = e.target.closest('.kind'); if (!t) return; set(t.dataset.k === 'up' ? { src: 'pic' } : { src: 'key', kind: +t.dataset.k }); draw() })
+  draw(); return draw
+}
+BANNER.Ann = { src: 'key' }
+const annTiles = kindTiles($('#p-kinds'), 'Ann', () => BANNER.Ann, (o) => { Object.assign(BANNER.Ann, o); repaintBanner('Ann') }, true)
+$('#p-shift').addEventListener('input', (e) => { BANNER.Ann.shift = +e.target.value; annTiles(); repaintBanner('Ann') })
+$('#p-shuffle').addEventListener('click', () => { const v = (Math.random() * 360) | 0; $('#p-shift').value = v; BANNER.Ann.shift = v; annTiles(); repaintBanner('Ann') })
+// Activity switches
+$$('.act').forEach((c) => c.addEventListener('change', () => { ACT[c.dataset.a] = c.checked; $('.act-list').classList.toggle('off', !ACT.share); preview() }))
+// Appearance
+const sysTheme = () => (matchMedia('(prefers-color-scheme: light)').matches ? 'ivory' : 'ink')
+$$('.theme-card').forEach((c) => c.addEventListener('click', () => { $$('.theme-card').forEach((x) => x.classList.toggle('on', x === c)); setTheme(c.dataset.t === 'system' ? sysTheme() : c.dataset.t) }))
+$$('#density button').forEach((b) => b.addEventListener('click', () => { $$('#density button').forEach((x) => x.setAttribute('aria-pressed', x === b)); $$('.chat').forEach((c) => c.classList.toggle('compact', b.dataset.d === '1')) }))
+$('#calm').addEventListener('change', (e) => document.body.classList.toggle('calm', e.target.checked))
+// Voice: a stand-in voice against the sensitivity line; past it, your banner lights
+let mic = 10, burst = 0
+setInterval(() => {
+  if (pane !== 'voice') return
+  burst = burst > 0 ? burst - 1 : Math.random() < 0.06 ? 18 + ((Math.random() * 20) | 0) : 0
+  mic = Math.max(3, Math.min(97, mic + (burst ? (Math.random() - 0.35) * 26 : (8 - mic) * 0.3 + (Math.random() - 0.5) * 6)))
+  const thr = +$('#sens').value, hot = mic > thr, vb = $('#vb')
+  $('#meter').style.setProperty('--l', mic + '%'); $('#meter').classList.toggle('hot', hot)
+  if (vb) { vb.classList.toggle('speaking', hot); vb.style.setProperty('--lvl', hot ? mic * 0.9 + 'px' : '0px') }
+}, 90)
+$('#sens').addEventListener('input', (e) => $('#meter').style.setProperty('--t', e.target.value + '%'))
+preview()
+
+// ---------- G. Server banner ----------
+const SB = { src: 'key', kind: bytes('Night Owls')[23] % 4, shift: 0, x: 50, y: 50, zoom: 130, game: 'd2', dark: 45, name: 'Night Owls' }
+let saved = { ...SB }
+function sbDraw() {
+  ;['#sb-prev', '#sb-inv'].forEach((s) => { weave($(`${s} .weave`), 'Night Owls', SB); $(s).style.setProperty('--dark', SB.dark) })
+  $('#sb-name').textContent = SB.name; $('#sb-name2').textContent = SB.name
+  $$('#s-src button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.s === SB.src)); $$('.src-pane').forEach((p) => p.classList.toggle('on', p.dataset.s === SB.src))
+  $$('#s-games button').forEach((b) => b.classList.toggle('on', b.dataset.g === SB.game))
+  $('#s-shift').value = SB.shift; $('#s-zoom').value = SB.zoom; $('#s-dark').value = SB.dark; $('#s-name').value = SB.name
+  sTiles()
+}
+const dirty = () => $('#unsaved').classList.toggle('show', JSON.stringify(SB) !== JSON.stringify(saved))
+const change = (o) => { Object.assign(SB, o); sbDraw(); dirty() }
+const sTiles = kindTiles($('#s-kinds'), 'Night Owls', () => SB, (o) => change({ ...o, src: 'key' }), false)
+$('#s-games').innerHTML = Object.keys(GAME_ART).map((g) => `<button data-g="${g}" style="background:${GAME_ART[g]}">${GAME_NAME[g]}</button>`).join('')
+$('#s-games').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) change({ game: b.dataset.g }) })
+$$('#s-src button').forEach((b) => b.addEventListener('click', () => change({ src: b.dataset.s })))
+$('#s-shift').addEventListener('input', (e) => change({ shift: +e.target.value }))
+$('#s-shuffle').addEventListener('click', () => change({ shift: (Math.random() * 360) | 0 }))
+$('#s-zoom').addEventListener('input', (e) => change({ zoom: +e.target.value }))
+$('#s-dark').addEventListener('input', (e) => change({ dark: +e.target.value }))
+$('#s-name').addEventListener('input', (e) => change({ name: e.target.value || 'Night Owls' }))
+// Drag the picture to frame it
+let drag = null
+$('#sb-prev').addEventListener('pointerdown', (e) => { if (SB.src === 'key') return; drag = { x: e.clientX, y: e.clientY, sx: SB.x, sy: SB.y }; e.currentTarget.setPointerCapture(e.pointerId) })
+$('#sb-prev').addEventListener('pointermove', (e) => { if (!drag) return
+  change({ x: Math.max(0, Math.min(100, drag.sx - (e.clientX - drag.x) / 2)), y: Math.max(0, Math.min(100, drag.sy - (e.clientY - drag.y) / 1)) }) })
+$('#sb-prev').addEventListener('pointerup', () => { drag = null })
+$('#s-save').addEventListener('click', () => {
+  saved = { ...SB }; BANNER['Night Owls'] = { ...SB }; repaintBanner('Night Owls')
+  $$('.side-head.banner').forEach((h) => { h.style.setProperty('--dark', SB.dark); const b = $('b', h); if (b && h.id !== 'sb-prev') b.textContent = SB.name })
+  dirty()
+})
+$('#s-reset').addEventListener('click', () => { Object.assign(SB, saved); sbDraw(); dirty() })
+sbDraw()
+
+// Screenshot switches: ?game=1 (Mira in game), &pane=voice, &staged=1, &sbsrc=game, &pop=mini
+const Q = new URLSearchParams(location.search)
+renderProfiles(Q.get('game') === '1')
+if (Q.get('pane')) $(`.snav .srow[data-pane="${Q.get('pane')}"]`)?.click()
+if (Q.get('prevgame')) { $('#prev-game').checked = true; preview() }
+if (Q.get('staged')) $('#hall').classList.add('watching')
+if (Q.get('sbsrc')) { change({ src: Q.get('sbsrc'), game: 'cs2' }) }
+
+// Theme
+const setTheme = (t) => { document.querySelectorAll('[data-frame]').forEach((f) => f.classList.toggle('light', t === 'ivory'))
+  document.querySelectorAll('.switch-theme button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.t === t)) }
+document.querySelectorAll('.switch-theme button').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.t)))
+// ?s=2&t=ivory: one section, one theme, for screenshots; &pop=keep opens the keep
+const q = new URLSearchParams(location.search)
+if (q.get('t')) setTheme(q.get('t'))
+if (q.get('s')) { document.querySelectorAll('section.mock').forEach((s, i) => { if (i + 1 !== +q.get('s')) s.remove() }); document.querySelector('.page-head p').remove() }
+if (q.get('pop') === 'keep') document.querySelector('.keep-pop')?.classList.add('open')
+</script>
+</body>
+</html>

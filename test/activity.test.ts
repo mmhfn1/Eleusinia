@@ -1,5 +1,5 @@
 import { expect, test } from 'vitest'
-import { type Activity, type Game, artUrl, cleanActivity, shareable } from '../src/shared/activity'
+import { type Activity, type Game, artUrl, cleanActivity, cleanShowcase, cleanWeek, dayKey, shareable, weekOf } from '../src/shared/activity'
 
 const game: Game = {
   name: 'Deadlock',
@@ -69,4 +69,30 @@ test('pictures only ever come from Steam, built from ids', () => {
   expect(artUrl(`eleusinia-art://achievement/730/${'0'.repeat(40)}.jpg`)).toBe(`https://cdn.akamai.steamstatic.com/steamcommunity/public/images/apps/730/${'0'.repeat(40)}.jpg`)
   for (const bad of ['eleusinia-art://steam/730/../../x', 'eleusinia-art://steam/730/anything', 'eleusinia-art://evil.com/730/header', 'eleusinia-art://achievement/730/x.jpg', 'https://evil.com/a.jpg', 'eleusinia-art://steam/abc/header'])
     expect(artUrl(bad)).toBeNull()
+})
+
+test('the week we share: the 3 games played most each day, rounded to 5 minutes, and only what is valid from a friend', () => {
+  const now = new Date(2026, 10, 20, 15).getTime()
+  const played: Record<string, Record<string, number>> = { [dayKey(now)]: { A: 62, B: 3, C: 20, D: 10, E: 40 }, [dayKey(now - 864e5)]: { A: 30 }, [dayKey(now - 9 * 864e5)]: { A: 500 } }
+  expect(weekOf(played, now)).toEqual([
+    { d: 0, g: 'A', m: 60 },
+    { d: 0, g: 'E', m: 40 },
+    { d: 0, g: 'C', m: 20 },
+    { d: 1, g: 'A', m: 30 },
+  ])
+  expect(cleanWeek([{ d: 0, g: 'A', m: 60 }, { d: 7, g: 'B', m: 5 }, { d: 1, g: '', m: 5 }, { d: 2, g: 'C', m: 99999 }, 'x'])).toEqual([{ d: 0, g: 'A', m: 60 }])
+  expect(cleanActivity({ now, week: [{ d: 0, g: 'A', m: 60 }] }, now)).toEqual({ now, week: [{ d: 0, g: 'A', m: 60 }] })
+  // turned off with playtime, kept with a game or without one
+  expect(shareable({ now, week: [{ d: 0, g: 'A', m: 60 }] }, { playtime: false }).week).toBeUndefined()
+  expect(shareable({ now, week: [{ d: 0, g: 'A', m: 60 }] }, undefined).week).toHaveLength(1)
+})
+
+test('a showcase keeps up to 3 games or achievements with a real Steam icon name', () => {
+  const icon = 'a'.repeat(40) + '.jpg'
+  expect(cleanShowcase([{ app: 730, game: 'CS2', hours: 412 }, { app: 730, game: 'CS2', ach: 'Ace', icon }])).toEqual([
+    { app: 730, game: 'CS2', hours: 412 },
+    { app: 730, game: 'CS2', ach: 'Ace', icon },
+  ])
+  expect(cleanShowcase([{ app: 730, game: 'CS2', ach: 'Ace', icon: '../x.jpg' }, { app: 0, game: 'X' }, { app: 1, game: '' }])).toBeUndefined()
+  expect(cleanShowcase(Array.from({ length: 5 }, (_, i) => ({ app: i + 1, game: 'G' })))).toHaveLength(3)
 })

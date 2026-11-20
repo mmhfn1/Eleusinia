@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Eleusinia: the court</title>
+<!-- Design mockup, a pivot after plan-ui-refresh.md: "the court". Static page, not part of the build.
+     Fonts come from Google Fonts here; the app would bundle them (@fontsource, OFL). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..800;1,6..96,400..600&family=Alegreya+Sans:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap" rel="stylesheet">
+<style>
+/* ---------- Two courts: ivory by day, indigo lacquer by night. Only these tokens change. ---------- */
+.court {
+  --ground: #ebe4d4;   /* muted ivory, the precast stone */
+  --paper: #f5f0e5;
+  --plaster: #e0d6c2;
+  --stone: #cbbea6;
+  --reveal: #b9aa8f;   /* the shadow side of a stepped reveal */
+  --ink: #1f1b17;      /* sumi */
+  --ink-2: #4c453c;
+  --ink-3: #7b7264;
+  --shu: #a63a2b;      /* seal vermilion: only seals, unread and danger */
+  --gold: #957434;     /* leaf: selection, in game */
+  --ai: #2d4062;       /* indigo: voice, links */
+  --moss: #5a6845;     /* online */
+  --seam: #fff6dc;     /* the light that comes through a slit */
+  --seam-glow: rgb(255 214 140 / 0.55);
+  --tie: rgb(70 56 36 / 0.16); /* the tie holes */
+  --shade: 0 1px 0 rgb(255 255 255 / 0.6) inset, 0 -1px 0 rgb(80 60 30 / 0.08) inset;
+  --lift: 0 18px 40px -18px rgb(70 50 20 / 0.35);
+  color-scheme: light;
+}
+.court.night {
+  --ground: #0f121a;
+  --paper: #151a24;
+  --plaster: #1c2230;
+  --stone: #2a3142;
+  --reveal: #080a0f;
+  --ink: #ece3d1;      /* ivory text */
+  --ink-2: #b7ae9c;
+  --ink-3: #7f786b;
+  --shu: #d65a43;
+  --gold: #cfae69;
+  --ai: #93a9cf;
+  --moss: #9fb07f;
+  --seam: #ffe7b0;
+  --seam-glow: rgb(255 196 110 / 0.5);
+  --tie: rgb(236 227 209 / 0.07);
+  --shade: 0 1px 0 rgb(255 255 255 / 0.04) inset, 0 -1px 0 rgb(0 0 0 / 0.4) inset;
+  --lift: 0 22px 50px -20px rgb(0 0 0 / 0.8);
+  color-scheme: dark;
+}
+
+/* ---------- Page (not the design) ---------- */
+* { box-sizing: border-box; }
+html { background: #3a3631; }
+body { margin: 0; padding: 32px 0 80px; font: 15px/1.45 'Alegreya Sans', sans-serif; color: #efe9dd; }
+.page { width: 1280px; margin: 0 auto; }
+.page-head { display: flex; align-items: end; gap: 24px; margin-bottom: 28px; }
+.page-head h1 { margin: 0; font: 500 44px/1 'Bodoni Moda', serif; letter-spacing: -0.01em; }
+.page-head p { margin: 0; max-width: 70ch; color: #cfc6b6; }
+.switch-theme { margin-left: auto; display: flex; border: 1px solid #6b6357; }
+.switch-theme button { font: 500 14px 'Alegreya Sans'; background: none; border: 0; color: #cfc6b6; padding: 8px 14px; cursor: pointer; }
+.switch-theme button[aria-pressed='true'] { background: #efe9dd; color: #1f1b17; }
+section.mock { margin: 0 0 64px; }
+section.mock > h2 { margin: 0 0 6px; font: 500 26px 'Bodoni Moda', serif; }
+section.mock > .why { margin: 0 0 16px; max-width: 115ch; color: #cfc6b6; }
+section.mock > .why b { color: #fff; font-weight: 700; }
+
+/* ---------- The frame ---------- */
+.frame {
+  position: relative; width: 1280px; height: 800px; overflow: hidden;
+  background: var(--ground); color: var(--ink);
+  display: grid; grid-template-columns: 76px 268px 1fr; grid-template-rows: 44px 1fr 68px;
+  grid-template-areas: 'title title title' 'rail side main' 'rail bar main';
+  box-shadow: 0 40px 90px rgb(0 0 0 / 0.45);
+  transition: background 400ms, color 400ms;
+}
+/* Ando's tie holes: the grid the layout is set on, faintly visible (24 by 48, a tatami's proportion per cell) */
+.ties { background-image: radial-gradient(circle, var(--tie) 1.3px, transparent 1.6px); background-size: 48px 48px; background-position: 24px 24px; }
+
+/* Title bar: the lintel */
+.title { grid-area: title; display: flex; align-items: center; gap: 14px; padding-left: 16px; border-bottom: 1px solid var(--stone); background: var(--paper); }
+.wordmark { font: 600 19px/1 'Bodoni Moda', serif; letter-spacing: 0.01em; }
+.wordmark i { font-style: italic; font-weight: 400; color: var(--ink-3); }
+.where { color: var(--ink-3); font-size: 14px; }
+.where b { color: var(--ink); font-weight: 500; }
+.find { margin-left: auto; width: 360px; height: 30px; display: flex; align-items: center; gap: 8px; padding: 0 10px; background: var(--ground); border: 1px solid var(--stone); color: var(--ink-3); font-size: 14px; clip-path: polygon(0 0, 100% 0, 100% 100%, 10px 100%, 0 calc(100% - 10px)); }
+.find kbd { margin-left: auto; font: 500 12px 'Alegreya Sans'; color: var(--ink-3); }
+.win { display: flex; margin-left: 12px; }
+.win span { width: 46px; height: 44px; display: grid; place-items: center; color: var(--ink-3); font-size: 13px; }
+
+/* Rail: a colonnade. Each tile is a column: a crest on a shaft, the selected one lit by a seam. */
+.rail { grid-area: rail; grid-row: 2 / 4; display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 14px 0; background: var(--paper); border-right: 1px solid var(--stone);
+  background-image: repeating-linear-gradient(90deg, transparent 0 9px, var(--tie) 9px 10px); }
+.col { position: relative; width: 50px; height: 58px; display: grid; place-items: center; cursor: pointer; }
+.col .shaft { position: absolute; inset: 0 3px; background: var(--ground); box-shadow: var(--shade); border-top: 3px solid var(--stone); transition: transform 220ms cubic-bezier(.2,.8,.2,1), border-color 220ms; }
+.col .shaft::before, .col .shaft::after { content: ''; position: absolute; top: 4px; width: 3px; height: 3px; border-radius: 50%; background: var(--ink-3); opacity: .55; }
+.col .shaft::before { left: 5px; } .col .shaft::after { right: 5px; }
+.col:hover .shaft { transform: translateY(-3px); border-top-color: var(--gold); }
+.col.sel .shaft { border-top-color: var(--gold); }
+.col.sel::before { content: ''; position: absolute; left: -13px; top: 8px; bottom: 8px; width: 2px; background: var(--seam); box-shadow: 0 0 12px 2px var(--seam-glow); }
+.col svg { position: relative; width: 34px; height: 34px; }
+.col .unread { position: absolute; right: 0; top: -2px; width: 16px; height: 16px; background: var(--shu); color: #fff; font: 700 10px/16px 'Alegreya Sans'; text-align: center; border-radius: 50%; }
+.rail .gap { width: 30px; height: 1px; background: var(--stone); margin: 4px 0; }
+.col.add .shaft { background: transparent; border: 1px dashed var(--stone); border-top: 3px solid var(--stone); }
+.col.add span { position: relative; font: 400 24px 'Bodoni Moda'; color: var(--ink-3); }
+
+/* Side column */
+.side { grid-area: side; display: flex; flex-direction: column; min-height: 0; background: color-mix(in srgb, var(--paper) 55%, var(--ground)); border-right: 1px solid var(--stone); }
+.side-head { position: relative; height: 116px; flex: none; display: flex; flex-direction: column; justify-content: flex-end; padding: 0 18px 12px; overflow: hidden; border-bottom: 1px solid var(--stone); }
+.side-head .weave { position: absolute; inset: 0; opacity: 0.9; }
+.side-head .weave::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 20%, color-mix(in srgb, var(--paper) 92%, transparent)); }
+.side-head h3 { position: relative; margin: 0; font: 600 24px/1 'Bodoni Moda', serif; }
+.side-head span { position: relative; font-size: 13.5px; color: var(--ink-3); margin-top: 4px; }
+.side-body { padding: 10px 10px; display: grid; gap: 1px; align-content: start; overflow: hidden; }
+.label { display: flex; align-items: baseline; gap: 6px; padding: 14px 10px 6px; font: italic 400 15px 'Bodoni Moda', serif; color: var(--ink-2); }
+.label .n { font: 500 13px 'Alegreya Sans'; color: var(--ink-3); font-style: normal; }
+.row { position: relative; display: flex; align-items: center; gap: 11px; padding: 7px 10px; color: var(--ink-2); cursor: pointer; transition: background 160ms; }
+.row:hover { background: color-mix(in srgb, var(--plaster) 70%, transparent); }
+.row.sel { background: var(--plaster); color: var(--ink); }
+.row.sel::before { content: ''; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; background: var(--seam); box-shadow: 0 0 10px 1px var(--seam-glow); }
+.row .who { display: grid; min-width: 0; }
+.row .nm { color: var(--ink); font-weight: 500; font-size: 15.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .sub { font-size: 13.5px; color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .sub.game { color: var(--gold); }
+.row .sub.voice { color: var(--ai); }
+.row .seal-n { margin-left: auto; }
+.hash { width: 18px; text-align: center; color: var(--ink-3); font: 400 17px 'Bodoni Moda'; }
+.chan.unread .nm { font-weight: 700; }
+
+/* Crests: a person's or a server's key drawn as a mon. Same key, same crest, everywhere. */
+.crest { position: relative; flex: none; width: 38px; height: 38px; }
+.crest svg { width: 100%; height: 100%; display: block; }
+.crest .pr { position: absolute; right: -3px; bottom: -3px; width: 12px; height: 12px; border: 2.5px solid var(--paper); border-radius: 50%; box-sizing: content-box; }
+.pr.on { background: var(--moss); }
+.pr.game { background: var(--gold); border-radius: 2px; transform: rotate(45deg) scale(.85); }
+.pr.voice { background: var(--paper); box-shadow: inset 0 0 0 3px var(--ai); }
+.crest.s { width: 26px; height: 26px; }
+.crest.s .pr { width: 8px; height: 8px; border-width: 2px; }
+.crest.l { width: 64px; height: 64px; }
+.crest.xl { width: 104px; height: 104px; }
+
+/* User bar */
+.bar { grid-area: bar; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: var(--paper); border-top: 1px solid var(--stone); border-right: 1px solid var(--stone); }
+.bar .who { display: grid; }
+.bar .nm { font-weight: 700; }
+.bar .id { font-size: 13px; color: var(--ink-3); }
+.bar .ctl { margin-left: auto; display: flex; gap: 2px; }
+.ib { width: 32px; height: 32px; display: grid; place-items: center; color: var(--ink-2); cursor: pointer; transition: background 140ms, color 140ms; }
+.ib:hover { background: var(--plaster); color: var(--ink); }
+.ib svg { width: 18px; height: 18px; }
+
+/* Main */
+.main { grid-area: main; grid-row: 2 / 4; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.main-head { height: 60px; flex: none; display: flex; align-items: center; gap: 12px; padding: 0 26px; border-bottom: 1px solid var(--stone); background: color-mix(in srgb, var(--paper) 40%, transparent); }
+.main-head h3 { margin: 0; font: 600 26px/1 'Bodoni Moda', serif; }
+.main-head .meta { color: var(--ink-3); font-size: 14px; }
+.main-head .right { margin-left: auto; display: flex; gap: 8px; align-items: center; }
+.body { flex: 1; min-height: 0; overflow: hidden; padding: 24px 26px; }
+
+/* Buttons: one corner cut on the acute angle, like a knife-edge wall */
+.btn { white-space: nowrap; display: inline-flex; align-items: center; gap: 8px; height: 36px; padding: 0 16px; font: 700 14px 'Alegreya Sans'; letter-spacing: 0.01em; border: 0; cursor: pointer; color: var(--ink); background: var(--plaster);
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%); transition: transform 140ms, filter 140ms; }
+.btn:hover { filter: brightness(1.04); transform: translateY(-1px); }
+.btn:active { transform: translateY(1px); }
+.btn.ink { background: var(--ink); color: var(--paper); }
+.btn.gold { background: var(--gold); color: #1b160e; }
+.btn.danger { background: color-mix(in srgb, var(--shu) 14%, transparent); color: var(--shu); }
+.btn svg { width: 16px; height: 16px; }
+
+/* Portals: game cards framed by a stepped reveal, the far view inside (Bofill's arch, AB05) */
+.portals { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-bottom: 30px; }
+.portal { position: relative; height: 210px; background: var(--plaster); box-shadow: var(--shade); padding: 10px; cursor: pointer; }
+.portal .reveal { position: absolute; inset: 10px; background: var(--reveal); clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%); }
+.portal .view { position: absolute; inset: 18px 18px 0; overflow: hidden; transition: inset 380ms cubic-bezier(.2,.8,.2,1); }
+.portal:hover .view { inset: 12px 12px 0; }
+.portal .view .art { position: absolute; inset: -10px; transition: transform 600ms cubic-bezier(.2,.8,.2,1), filter 400ms; filter: saturate(.75) brightness(.9); }
+.portal:hover .view .art { transform: scale(1.06); filter: saturate(1) brightness(1); }
+.portal .view::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, transparent 30%, rgb(15 12 8 / 0.85)); }
+.portal .txt { position: absolute; left: 30px; right: 30px; bottom: 16px; z-index: 1; color: #f5efe2; }
+.portal .game { font: italic 400 14px 'Bodoni Moda'; opacity: .85; }
+.portal .line { font: 600 24px/1.05 'Bodoni Moda'; margin: 2px 0 8px; }
+.portal .foot { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+.portal .foot .btn { margin-left: auto; height: 30px; padding: 0 12px; font-size: 13px; background: rgb(245 239 226 / 0.16); color: #f5efe2; backdrop-filter: blur(6px); }
+.portal .live { position: absolute; z-index: 1; top: 28px; right: 28px; font: 700 12px 'Alegreya Sans'; letter-spacing: .04em; color: #fff; background: var(--shu); padding: 3px 8px; }
+.art.cs2 { background: linear-gradient(160deg, #c9873e 0%, #5d4a33 40%, #23313a 100%); }
+.art.d2 { background: linear-gradient(170deg, #b9c7d6 0%, #5c6f8c 40%, #1c2233 100%); }
+.art.dota { background: linear-gradient(165deg, #c0563c 0%, #6a2a1d 45%, #1d0f0b 100%); }
+.art::before { content: ''; position: absolute; inset: 0; background: repeating-linear-gradient(90deg, rgb(255 255 255 / .05) 0 1px, transparent 1px 22px); }
+
+h4.sec { display: flex; align-items: baseline; gap: 10px; margin: 0 0 14px; font: 500 22px 'Bodoni Moda', serif; }
+h4.sec .n { font: 500 14px 'Alegreya Sans'; color: var(--ink-3); }
+h4.sec .rule { flex: 1; height: 1px; background: var(--stone); align-self: center; }
+
+/* Live calls: hemicycles in miniature */
+.halls { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin-bottom: 26px; }
+.hall { display: flex; align-items: center; gap: 14px; padding: 12px 14px; background: var(--paper); box-shadow: var(--shade); cursor: pointer; transition: box-shadow 200ms, transform 200ms; }
+.hall:hover { transform: translateY(-2px); box-shadow: var(--shade), var(--lift); }
+.hall .arc { width: 92px; height: 48px; flex: none; }
+.hall .t { display: grid; }
+.hall .t b { font-weight: 700; }
+.hall .t span { font-size: 13.5px; color: var(--ink-3); }
+.hall .btn { margin-left: auto; }
+
+/* Chat */
+.split { display: flex; flex: 1; min-height: 0; }
+.split .col-main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.chat { flex: 1; min-height: 0; padding: 18px 26px 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 4px; overflow: hidden; }
+.day { align-self: center; font: italic 400 14px 'Bodoni Moda'; color: var(--ink-3); margin: 4px 0 8px; }
+.msg { position: relative; display: grid; grid-template-columns: 40px 1fr auto; gap: 0 12px; padding: 6px 10px; transition: background 150ms; }
+.msg:hover { background: color-mix(in srgb, var(--plaster) 55%, transparent); }
+.msg .crest { width: 40px; height: 40px; grid-row: span 3; }
+.msg .h { display: flex; align-items: baseline; gap: 8px; }
+.msg .h b { font-weight: 700; }
+.msg .h time { font-size: 13px; color: var(--ink-3); font-variant-numeric: tabular-nums; }
+.msg p { margin: 0; grid-column: 2; }
+.msg .stamp { grid-column: 3; grid-row: 1 / span 2; align-self: center; opacity: 0; transition: opacity 150ms; cursor: pointer; }
+.msg:hover .stamp, .msg .stamp.show { opacity: 1; }
+.msg.new { animation: land 520ms cubic-bezier(.2,.8,.2,1); }
+.msg.new .stamp { animation: press 700ms cubic-bezier(.3,1.6,.4,1) 260ms both; opacity: 1; }
+@keyframes land { from { opacity: 0; transform: translateY(8px); } }
+@keyframes press { 0% { transform: scale(1.8) rotate(-12deg); opacity: 0; } 60% { opacity: 1; } 100% { transform: scale(1) rotate(-4deg); opacity: 1; } }
+.seal { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 50%; color: var(--shu); border: 1.5px solid var(--shu); font: 700 11px 'Bodoni Moda'; transform: rotate(-4deg); }
+.seal svg { width: 18px; height: 18px; }
+.composer { margin: 12px 26px 20px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 14px; height: 52px; background: var(--paper); border: 1px solid var(--stone); }
+.composer { position: relative; }
+.composer::after { content: ''; position: absolute; left: -1px; right: -1px; bottom: -4px; height: 3px; border-radius: 3px; background: var(--ai); transform: scaleX(0); transform-origin: left; transition: transform 320ms cubic-bezier(.2,.8,.2,1); }
+.composer:focus-within::after, .composer.on::after { transform: scaleX(1); }
+.btn:focus-visible, .ib:focus-visible { outline: 3px solid var(--ai); outline-offset: 2px; border-radius: 3px; }
+.composer input { flex: 1; border: 0; outline: 0; background: transparent; font: 15.5px 'Alegreya Sans'; color: var(--ink); }
+.composer input::placeholder { color: var(--ink-3); }
+.composer .sealing { font: italic 400 13px 'Bodoni Moda'; color: var(--ink-3); white-space: nowrap; }
+
+/* The enclosure: encryption shown as rings within rings, like a castle's baileys (and Ando's ring in the rotunda) */
+.keep { width: 270px; flex: none; border-left: 1px solid var(--stone); padding: 22px 20px; display: flex; flex-direction: column; gap: 14px; background: color-mix(in srgb, var(--paper) 50%, transparent); }
+.keep h5 { margin: 0; font: 500 20px 'Bodoni Moda', serif; }
+.rings { position: relative; width: 230px; height: 230px; align-self: center; }
+.rings svg { width: 100%; height: 100%; overflow: visible; }
+.rings .ring { fill: none; stroke-linejoin: miter; stroke: var(--stone); transition: stroke 300ms, stroke-width 300ms; }
+.rings .ring.lit { stroke: var(--gold); stroke-width: 2; }
+.rings text { font: 500 11px 'Alegreya Sans'; fill: var(--ink-3); letter-spacing: .02em; }
+.keep .facts { display: grid; gap: 8px; font-size: 14px; }
+.keep .facts > div { display: flex; gap: 10px; align-items: flex-start; cursor: default; padding: 6px 8px; margin: 0 -8px; transition: background 150ms; }
+.keep .facts > div:hover { background: var(--plaster); }
+.keep .facts i { font-style: normal; color: var(--gold); font: 600 15px 'Bodoni Moda'; width: 16px; }
+.keep .facts b { font-weight: 700; display: block; }
+.keep .facts span { color: var(--ink-3); font-size: 13.5px; }
+
+/* Seal popover */
+.pop { position: absolute; z-index: 10; width: 300px; padding: 16px; background: var(--paper); box-shadow: var(--lift), 0 0 0 1px var(--stone); display: none; }
+.pop.open { display: block; animation: land 200ms ease-out; }
+.pop h6 { margin: 0 0 6px; font: 600 17px 'Bodoni Moda'; display: flex; gap: 8px; align-items: center; }
+.pop p { margin: 0 0 8px; font-size: 14px; color: var(--ink-2); }
+.pop .kf { font: 500 12.5px 'Alegreya Sans'; color: var(--ink-3); word-spacing: 4px; }
+
+/* The call: a hemicycle. Seats on an arc around a stage, the speaker lit by a slit of light. */
+.amph { position: relative; flex: 1; min-height: 0; overflow: hidden; }
+.amph .stage-arc { position: absolute; inset: 0; }
+.seat { position: absolute; width: 150px; transform: translate(-50%, -50%); display: grid; justify-items: center; gap: 8px; cursor: pointer; transition: transform 300ms cubic-bezier(.2,.8,.2,1); }
+.seat:hover { transform: translate(-50%, calc(-50% - 4px)); }
+.seat .pillar { position: relative; width: 112px; height: 150px; background: var(--paper); box-shadow: var(--shade), var(--lift); display: grid; place-items: center; overflow: hidden; border-top: 4px solid var(--stone); transition: border-color 300ms; }
+.seat .pillar .weave { position: absolute; inset: 0; opacity: .55; }
+.seat .pillar .crest { position: relative; }
+.seat .slit { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; background: var(--seam); box-shadow: 0 0 18px 4px var(--seam-glow); opacity: 0; transition: opacity 250ms; }
+.seat.speaking .slit { opacity: 1; }
+.seat.speaking .pillar { border-top-color: var(--gold); }
+.seat .nm { font-weight: 700; font-size: 15px; }
+.seat .sub { font-size: 13px; color: var(--ink-3); margin-top: -8px; text-align: center; }
+.seat .sub.game { color: var(--gold); }
+.amph .center { position: absolute; left: 50%; bottom: 4px; transform: translateX(-50%); width: 440px; text-align: center; }
+.amph .center h5 { margin: 0; font: 500 30px 'Bodoni Moda'; }
+.amph .center p { margin: 4px 0 0; color: var(--ink-3); }
+.dais { margin: 0 26px 22px; flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 12px; background: var(--paper); box-shadow: var(--shade); }
+.dais .sig { margin-right: auto; display: grid; }
+.dais .sig b { color: var(--moss); font-weight: 700; font-size: 14px; }
+.dais .sig span { font-size: 13px; color: var(--ink-3); }
+
+/* Pieces */
+.sheet { display: grid; grid-template-columns: 1fr 1fr; }
+.panel { padding: 26px; background: var(--ground); color: var(--ink); min-height: 300px; }
+.panel h5 { margin: 0 0 12px; font: 500 22px 'Bodoni Moda'; }
+.panel .hint { color: var(--ink-3); font-size: 14px; margin-top: 8px; max-width: 54ch; }
+.panel .blk { margin-bottom: 28px; }
+.flex { display: flex; gap: 14px; align-items: center; flex-wrap: wrap; }
+.maker { display: flex; gap: 20px; align-items: center; }
+.maker input { font: 500 16px 'Alegreya Sans'; padding: 8px 10px; width: 220px; background: var(--paper); border: 1px solid var(--stone); color: var(--ink); outline: 0; }
+.maker .out { display: flex; gap: 14px; align-items: center; }
+.specimen .d1 { font: 600 52px/1 'Bodoni Moda'; letter-spacing: -0.01em; }
+.specimen .d2 { font: italic 400 26px 'Bodoni Moda'; color: var(--ink-2); }
+.specimen .t1 { font: 400 17px/1.45 'Alegreya Sans'; max-width: 48ch; }
+.specimen .t2 { font: 500 13.5px 'Alegreya Sans'; color: var(--ink-3); }
+.sw { width: 56px; height: 56px; display: grid; align-content: end; padding: 4px; font: 500 10.5px 'Alegreya Sans'; color: #fff; text-shadow: 0 1px 2px rgb(0 0 0 / .4); }
+.weave-strip { height: 70px; position: relative; overflow: hidden; box-shadow: var(--shade); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
+  <symbol id="i-head" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4" height="6" rx="1"/><rect x="17" y="14" width="4" height="6" rx="1"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1 7 17M17 7l2.1-2.1"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/></symbol>
+  <symbol id="i-msg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-cam" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="m23 7-7 5 7 5z"/><rect x="1" y="5" width="15" height="14" rx="1"/></symbol>
+  <symbol id="i-screen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="1"/><path d="M8 21h8M12 17v4"/></symbol>
+  <symbol id="i-leave" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 12h12M12 6l6 6-6 6M20 4v16"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></symbol>
+  <symbol id="i-key" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M17 6l3 3M14 9l2 2"/></symbol>
+</svg>
+
+<div class="page">
+  <div class="page-head">
+    <h1>The court</h1>
+    <p>A pivot: architecture over game lore. Bofill's colonnades and hemicycles, Pei's knife-edge volumes, Ando's tie holes and slits of light, Isozaki's empty forum, Farrell's fortress, Stirling's coloured rails and Takamatsu's machined Kyoto, through Edo crests and seals and the tapestries of the French court. The backdrop is what the app does: people talking, behind walls only they hold the keys to.</p>
+    <div class="switch-theme" role="group" aria-label="Theme"><button aria-pressed="true" data-t="day">Ivory, by day</button><button aria-pressed="false" data-t="night">Indigo, by night</button></div>
+  </div>
+
+  <!-- ======================= A. Home ======================= -->
+  <section class="mock">
+    <h2>A. Home</h2>
+    <div class="why"><b>Colonnade rail:</b> each server or friend a column topped by its crest; hover lifts it, the selected one is lit by a slit of light. <b>Crests:</b> every key drawn as a mon, so the same person looks the same everywhere and a copycat looks different. <b>Woven banner:</b> the side column's head is a tapestry woven from your key. <b>Portals:</b> friends in game framed like Bofill's arch, the game the far view; hover steps the reveal in. <b>Halls:</b> live calls as small hemicycles, one seat per person. <b>Tie holes:</b> the layout grid, barely there.</div>
+    <div class="frame court" data-frame>
+      <div class="title"><span class="wordmark">Eleusinia</span><span class="where">· <b>Home</b></span><div class="find">Find a person, server or channel<kbd>Ctrl K</kbd></div><div class="win"><span>—</span><span>☐</span><span>✕</span></div></div>
+      <nav class="rail">
+        <div class="col sel" title="Home"><div class="shaft"></div><svg data-crest="eleusinia" data-mode="home"></svg></div>
+        <div class="gap"></div>
+        <div class="col" title="Night Owls"><div class="shaft"></div><svg data-crest="Night Owls"></svg><span class="unread">3</span></div>
+        <div class="col" title="Fireteam"><div class="shaft"></div><svg data-crest="Fireteam"></svg></div>
+        <div class="col" title="The Trio"><div class="shaft"></div><svg data-crest="The Trio"></svg></div>
+        <div class="gap"></div>
+        <div class="col" title="Mira"><div class="shaft"></div><svg data-crest="Mira"></svg></div>
+        <div class="col add" style="margin-top:auto" title="Add"><div class="shaft"></div><span>+</span></div>
+      </nav>
+      <aside class="side">
+        <div class="side-head"><div class="weave" data-weave="ann#7095"></div><h3>Ann</h3><span>ann#7095 · your crest and weave</span></div>
+        <div class="side-body">
+          <div class="row sel"><span class="hash">✧</span><div class="who"><span class="nm">Friends</span></div></div>
+          <div class="label">Letters <span class="n">4</span></div>
+          <div class="row"><div class="crest"><svg data-crest="Mira"></svg><span class="pr game"></span></div><div class="who"><span class="nm">Mira</span><span class="sub game">Counter-Strike 2</span></div><span class="seal-n"><span class="seal" style="width:22px;height:22px;font-size:10px;background:var(--shu);color:#fff;border:0">2</span></span></div>
+          <div class="row"><div class="crest"><svg data-crest="Dov"></svg><span class="pr voice"></span></div><div class="who"><span class="nm">Dov</span><span class="sub voice">In the Lounge, Night Owls</span></div></div>
+          <div class="row"><div class="crest"><svg data-crest="Kai"></svg><span class="pr on"></span></div><div class="who"><span class="nm">Kai</span><span class="sub">Here</span></div></div>
+          <div class="row"><div class="crest"><svg data-crest="Sol"></svg><span class="pr game"></span></div><div class="who"><span class="nm">Sol</span><span class="sub game">Destiny 2</span></div></div>
+          <div class="label">Groups</div>
+          <div class="row"><div class="crest"><svg data-crest="The Trio"></svg></div><div class="who"><span class="nm">The Trio</span><span class="sub">3 here</span></div></div>
+        </div>
+      </aside>
+      <div class="bar"><div class="crest"><svg data-crest="Ann"></svg><span class="pr on"></span></div><div class="who"><span class="nm">Ann</span><span class="id">ann#7095</span></div><div class="ctl"><span class="ib"><svg><use href="#i-mic"/></svg></span><span class="ib"><svg><use href="#i-head"/></svg></span><span class="ib"><svg><use href="#i-gear"/></svg></span></div></div>
+      <main class="main ties">
+        <div class="main-head"><h3>Friends</h3><span class="meta">six here, three at play</span><div class="right"><span class="btn ink">Add a friend</span></div></div>
+        <div class="body">
+          <h4 class="sec">At play <span class="n">3</span><span class="rule"></span></h4>
+          <div class="portals">
+            <div class="portal"><div class="reveal"></div><div class="view"><div class="art cs2"></div></div><span class="live">LIVE</span><div class="txt"><div class="game">Counter-Strike 2</div><div class="line">Mirage, 9 to 7</div><div class="foot"><div class="crest s"><svg data-crest="Mira"></svg></div>Mira<span class="btn"><svg><use href="#i-msg"/></svg>Write</span></div></div></div>
+            <div class="portal"><div class="reveal"></div><div class="view"><div class="art d2"></div></div><div class="txt"><div class="game">Destiny 2</div><div class="line">Salvation's Edge</div><div class="foot"><div class="crest s"><svg data-crest="Sol"></svg></div>Sol, 1 h 12 min<span class="btn"><svg><use href="#i-msg"/></svg>Write</span></div></div></div>
+            <div class="portal"><div class="reveal"></div><div class="view"><div class="art dota"></div></div><span class="live">LIVE</span><div class="txt"><div class="game">Dota 2</div><div class="line">Anti-Mage, 14 to 21</div><div class="foot"><div class="crest s"><svg data-crest="Dov"></svg></div>Dov<span class="btn"><svg><use href="#i-phone"/></svg>Join</span></div></div></div>
+          </div>
+          <h4 class="sec">In session <span class="n">2</span><span class="rule"></span></h4>
+          <div class="halls">
+            <div class="hall"><svg class="arc" data-arc="Dov,Rae,Pim,Lux"></svg><div class="t"><b>Lounge, Night Owls</b><span>Dov, Rae, Pim and Lux · Rae is showing her screen</span></div><span class="btn gold"><svg><use href="#i-phone"/></svg>Take a seat</span></div>
+            <div class="hall"><svg class="arc" data-arc="Mira,Kai"></svg><div class="t"><b>The Trio</b><span>Mira and Kai</span></div><span class="btn"><svg><use href="#i-phone"/></svg>Take a seat</span></div>
+          </div>
+          <h4 class="sec">Here <span class="n">6</span><span class="rule"></span></h4>
+          <div class="row" style="max-width:520px"><div class="crest"><svg data-crest="Kai"></svg><span class="pr on"></span></div><div class="who"><span class="nm">Kai</span><span class="sub">Here · last wrote yesterday</span></div></div>
+        </div>
+      </main>
+    </div>
+  </section>
+
+  <!-- ======================= B. A conversation ======================= -->
+  <section class="mock">
+    <h2>B. A conversation, and its keep</h2>
+    <div class="why"><b>Seals:</b> every message carries its author's seal; hover shows it, click opens what it proves. Sending presses the seal like wax. <b>The keep:</b> beside the chat, the conversation's walls drawn as a castle plan with stepped, crenellated walls and a moat (Farrell's fortress at Vauxhall Cross, an Edo castle's baileys): you and Mira inside, the route outside, and who could see what. Hover a fact to light its ring. <b>Sealing for Mira</b> under the box says, while you type, who alone can read it.</div>
+    <div class="frame court" data-frame>
+      <div class="title"><span class="wordmark">Eleusinia</span><span class="where">· <b>Mira</b></span><div class="find">Find a person, server or channel<kbd>Ctrl K</kbd></div><div class="win"><span>—</span><span>☐</span><span>✕</span></div></div>
+      <nav class="rail">
+        <div class="col" title="Home"><div class="shaft"></div><svg data-crest="eleusinia" data-mode="home"></svg></div>
+        <div class="gap"></div>
+        <div class="col"><div class="shaft"></div><svg data-crest="Night Owls"></svg><span class="unread">3</span></div>
+        <div class="col"><div class="shaft"></div><svg data-crest="Fireteam"></svg></div>
+        <div class="col"><div class="shaft"></div><svg data-crest="The Trio"></svg></div>
+        <div class="gap"></div>
+        <div class="col sel"><div class="shaft"></div><svg data-crest="Mira"></svg></div>
+        <div class="col add" style="margin-top:auto"><div class="shaft"></div><span>+</span></div>
+      </nav>
+      <aside class="side">
+        <div class="side-head"><div class="weave" data-weave="Mira"></div><h3>Mira</h3><span>mira#2210 · at play</span></div>
+        <div class="side-body">
+          <div class="label">Letters</div>
+          <div class="row sel"><div class="crest"><svg data-crest="Mira"></svg><span class="pr game"></span></div><div class="who"><span class="nm">Mira</span><span class="sub game">Mirage, 9 to 7</span></div></div>
+          <div class="row"><div class="crest"><svg data-crest="Dov"></svg><span class="pr voice"></span></div><div class="who"><span class="nm">Dov</span><span class="sub voice">In the Lounge</span></div></div>
+          <div class="row"><div class="crest"><svg data-crest="Kai"></svg><span class="pr on"></span></div><div class="who"><span class="nm">Kai</span><span class="sub">Here</span></div></div>
+        </div>
+      </aside>
+      <div class="bar"><div class="crest"><svg data-crest="Ann"></svg><span class="pr on"></span></div><div class="who"><span class="nm">Ann</span><span class="id">ann#7095</span></div><div class="ctl"><span class="ib"><svg><use href="#i-mic"/></svg></span><span class="ib"><svg><use href="#i-head"/></svg></span><span class="ib"><svg><use href="#i-gear"/></svg></span></div></div>
+      <main class="main ties">
+        <div class="main-head"><div class="crest"><svg data-crest="Mira"></svg></div><h3>Mira</h3><span class="meta">mira#2210</span><div class="right"><span class="btn"><svg><use href="#i-phone"/></svg>Call</span></div></div>
+        <div class="split">
+          <div class="col-main">
+            <div class="chat" id="chat">
+              <div class="day">Wednesday the nineteenth</div>
+              <div class="msg"><div class="crest"><svg data-crest="Mira"></svg></div><div class="h"><b>Mira</b><time>21:38</time></div><p>one more round then I'm on</p><span class="stamp" data-who="Mira"></span></div>
+              <div class="msg"><div class="crest"><svg data-crest="Ann"></svg></div><div class="h"><b>Ann</b><time>21:40</time></div><p>take your time, Dov's already in the lounge</p><span class="stamp" data-who="Ann"></span></div>
+              <div class="msg"><div class="crest"><svg data-crest="Mira"></svg></div><div class="h"><b>Mira</b><time>21:41</time></div><p>9 to 7, we're winning for once</p><p>save me a seat</p><span class="stamp show" data-who="Mira"></span></div>
+            </div>
+            <div class="composer on"><span class="ib"><svg><use href="#i-clip"/></svg></span><input id="draft" placeholder="Write to Mira, then press Enter" value="on my way"><span class="sealing">Sealed for Mira alone</span></div>
+          </div>
+          <aside class="keep">
+            <h5>The keep</h5>
+            <div class="rings"><svg viewBox="-115 -115 230 230" id="rings"></svg></div>
+            <div class="facts">
+              <div data-ring="0"><i>i</i><div><b>Only the two of you</b><span>Each letter is sealed with Mira's key and yours. Nobody else holds them.</span></div></div>
+              <div data-ring="1"><i>ii</i><div><b>Straight to her</b><span>No relay between you. A relay would carry sealed letters it cannot read.</span></div></div>
+              <div data-ring="2"><i>iii</i><div><b>Nothing kept elsewhere</b><span>Letters live on your computers only.</span></div></div>
+            </div>
+          </aside>
+        </div>
+        <div class="pop" id="pop"><h6><span class="seal" style="width:24px;height:24px"><svg><use href="#i-key"/></svg></span>Mira's seal</h6><p>Written by Mira's key and unchanged since. The same crest as on her card, so it is her.</p><div class="kf">KEY 9F2C · 41A7 · E0B3 · 77D1</div></div>
+      </main>
+    </div>
+  </section>
+
+  <!-- ======================= C. A call ======================= -->
+  <section class="mock">
+    <h2>C. A call, as a hemicycle</h2>
+    <div class="why"><b>An empty forum</b> (Isozaki's Tsukuba Center leaves its sunken oval empty): the centre of every call is empty, because nothing sits between you. <b>Seats on an arc</b> (Bofill's amphitheatre courtyards): each person a pillar with their weave and crest; whoever talks is lit by a slit of light down the pillar (Ando). The arc grows with the call; a stream takes the stage in the middle. Here the talking moves between people every few seconds, as it would; click a seat to open that person.</div>
+    <div class="frame court" data-frame>
+      <div class="title"><span class="wordmark">Eleusinia</span><span class="where">· Night Owls · <b>Lounge</b></span><div class="find">Find a person, server or channel<kbd>Ctrl K</kbd></div><div class="win"><span>—</span><span>☐</span><span>✕</span></div></div>
+      <nav class="rail">
+        <div class="col"><div class="shaft"></div><svg data-crest="eleusinia" data-mode="home"></svg></div>
+        <div class="gap"></div>
+        <div class="col sel"><div class="shaft"></div><svg data-crest="Night Owls"></svg></div>
+        <div class="col"><div class="shaft"></div><svg data-crest="Fireteam"></svg></div>
+        <div class="col"><div class="shaft"></div><svg data-crest="The Trio"></svg></div>
+        <div class="col add" style="margin-top:auto"><div class="shaft"></div><span>+</span></div>
+      </nav>
+      <aside class="side">
+        <div class="side-head"><div class="weave" data-weave="Night Owls"></div><h3>Night Owls</h3><span>24 members, six here</span></div>
+        <div class="side-body">
+          <div class="label">Rooms for writing</div>
+          <div class="row chan"><span class="hash">#</span><div class="who"><span class="nm">general</span></div></div>
+          <div class="row chan unread"><span class="hash">#</span><div class="who"><span class="nm">plans</span></div><span class="seal-n"><span class="seal" style="width:22px;height:22px;font-size:10px;background:var(--shu);color:#fff;border:0">4</span></span></div>
+          <div class="label">Rooms for talking</div>
+          <div class="row chan sel"><span class="hash">§</span><div class="who"><span class="nm">Lounge</span><span class="sub voice">Ann, Dov, Rae, Pim, Lux</span></div></div>
+          <div class="row chan"><span class="hash">§</span><div class="who"><span class="nm">Squad</span><span class="sub">empty</span></div></div>
+        </div>
+      </aside>
+      <div class="bar"><div class="crest"><svg data-crest="Ann"></svg><span class="pr voice"></span></div><div class="who"><span class="nm">Ann</span><span class="id">In the Lounge</span></div><div class="ctl"><span class="ib"><svg><use href="#i-mic"/></svg></span><span class="ib"><svg><use href="#i-head"/></svg></span><span class="ib"><svg><use href="#i-gear"/></svg></span></div></div>
+      <main class="main ties">
+        <div class="main-head"><h3>Lounge</h3><span class="meta">five seated</span></div>
+        <div class="amph" id="amph"><svg class="stage-arc" id="stagearc"></svg>
+          <div class="center"><h5>Nobody in the middle</h5><p>The centre stays empty: no server sits between the five of you. Each voice goes seat to seat, sealed.</p></div>
+        </div>
+        <div class="dais">
+          <div class="sig"><b>Seated, clear line</b><span>24 ms to the furthest seat</span></div>
+          <span class="ib"><svg><use href="#i-mic"/></svg></span><span class="ib"><svg><use href="#i-head"/></svg></span>
+          <span class="btn"><svg><use href="#i-cam"/></svg>Camera</span><span class="btn"><svg><use href="#i-screen"/></svg>Show your screen</span>
+          <span class="btn danger"><svg><use href="#i-leave"/></svg>Leave</span>
+        </div>
+      </main>
+    </div>
+  </section>
+
+  <!-- ======================= D. Pieces ======================= -->
+  <section class="mock">
+    <h2>D. The pieces</h2>
+    <div class="why"><b>Crest maker:</b> type any name to see its crest and weave; the app draws them from the key, so they cannot be chosen to look like someone else. <b>Type:</b> Bodoni Moda for titles, the type of the French court's last years; Alegreya Sans for everything you read, a humanist sans drawn from calligraphy. Italic serif carries the quiet labels instead of capitals. <b>Palette:</b> ivory and sumi by day, indigo lacquer and ivory by night; vermilion only for seals and what needs you.</div>
+    <div class="sheet">
+      <div class="panel court" data-frame>
+        <div class="blk"><h5>Crest and weave from a key</h5>
+          <div class="maker"><input id="maker" value="Theo" aria-label="A name"><div class="out"><div class="crest xl"><svg id="mk-crest"></svg></div><div class="crest l"><svg id="mk-crest-s"></svg></div></div></div>
+          <div class="weave-strip" id="mk-weave" style="margin-top:14px"></div>
+          <div class="hint">Symmetry, motif and colours all come from the key's bytes, like an Edo family's mon came from its house.</div></div>
+        <div class="blk"><h5>Presence</h5>
+          <div class="flex"><div class="flex" style="gap:8px"><div class="crest"><svg data-crest="Kai"></svg><span class="pr on"></span></div>Here</div><div class="flex" style="gap:8px"><div class="crest"><svg data-crest="Mira"></svg><span class="pr game"></span></div>At play</div><div class="flex" style="gap:8px"><div class="crest"><svg data-crest="Dov"></svg><span class="pr voice"></span></div>Seated in a call</div></div></div>
+        <div class="blk"><h5>Buttons with a knife edge</h5>
+          <div class="flex"><span class="btn ink">Add a friend</span><span class="btn gold">Take a seat</span><span class="btn">Not now</span><span class="btn danger">Leave the server</span></div></div>
+      </div>
+      <div class="panel court" data-frame>
+        <div class="blk specimen"><h5>Type</h5>
+          <div class="d1">Night Owls</div>
+          <div class="d2">Rooms for talking</div>
+          <p class="t1">Raid on Friday at eight? We need two more. Sol is bringing the new hunter and someone has to remind me to farm first.</p>
+          <div class="t2">21:41 · 24 ms · five seated</div></div>
+        <div class="blk"><h5>Palette</h5>
+          <div class="flex" style="gap:6px" id="swatches"></div>
+          <div class="hint">Muted ivory precast by day, indigo lacquer by night. Gold leaf marks what is chosen or at play; indigo, voice; vermilion, seals and what needs you.</div></div>
+        <div class="blk"><h5>Seal</h5>
+          <div class="flex"><span class="seal" style="width:44px;height:44px"><svg style="width:24px;height:24px"><use href="#i-key"/></svg></span><span class="seal" style="width:30px;height:30px;background:var(--shu);color:#fff;border:0">7</span><span style="color:var(--ink-3)">a message's seal, and an unread count pressed in the same wax</span></div></div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+// ---------- Keys: a stand-in hash of the name (the app uses the real public key) ----------
+function bytes(s) {
+  let h = 2166136261 >>> 0; const out = []
+  for (let i = 0; i < 32; i++) { for (const c of s + i) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0; out.push(h & 255) }
+  return out
+}
+const NS = 'http://www.w3.org/2000/svg'
+const el = (n, a = {}) => { const e = document.createElementNS(NS, n); for (const k in a) e.setAttribute(k, a[k]); return e }
+// Colours a crest may take: pigments of the period (indigo, vermilion, ochre, pine, plum, lacquer brown)
+const PIG = ['#2d4062', '#a63a2b', '#957434', '#3f5a48', '#6b3a52', '#5b4330', '#40516b', '#8a5a2b']
+
+// ---------- Crest: an n-fold mon in a ring ----------
+function crest(svg, name, home) {
+  const b = bytes(name)
+  svg.setAttribute('viewBox', '-50 -50 100 100'); svg.innerHTML = ''
+  const ink = home ? 'var(--ink)' : `color-mix(in srgb, ${PIG[b[0] % PIG.length]} 62%, var(--ink))`
+  svg.append(el('circle', { r: 48, fill: 'var(--paper)', stroke: ink, 'stroke-width': 3 }))
+  svg.append(el('circle', { r: 42, fill: 'none', stroke: ink, 'stroke-width': 0.8, opacity: 0.5 }))
+  if (home) { // the house mark: a hemicycle of columns over a stage
+    for (let i = 0; i < 7; i++) { const a = Math.PI * (i / 6); const x = -Math.cos(a) * 28, y = -Math.sin(a) * 22 + 10; svg.append(el('rect', { x: x - 2.5, y: y - 12, width: 5, height: 18, fill: ink })) }
+    svg.append(el('rect', { x: -30, y: 18, width: 60, height: 4, fill: ink })); return
+  }
+  const n = [3, 4, 5, 6, 8][b[1] % 5]
+  const motif = b[2] % 4
+  const g = el('g')
+  for (let i = 0; i < n; i++) {
+    const r = el('g', { transform: `rotate(${(360 / n) * i})` })
+    const L = 18 + (b[3] % 12)
+    if (motif === 0) r.append(el('path', { d: `M0 0 C ${8 + b[4] % 8} -${L / 2} ${4} -${L} 0 -${L + 8} C -4 -${L} -${8 + b[4] % 8} -${L / 2} 0 0`, fill: ink }))
+    if (motif === 1) r.append(el('circle', { cy: -L, r: 6 + b[5] % 6, fill: 'none', stroke: ink, 'stroke-width': 3.2 }))
+    if (motif === 2) r.append(el('path', { d: `M0 -6 L ${7} -${L} L 0 -${L + 10} L -7 -${L} Z`, fill: ink }))
+    if (motif === 3) r.append(el('path', { d: `M -10 -8 Q 0 -${L + 14} 10 -8`, fill: 'none', stroke: ink, 'stroke-width': 3.4, 'stroke-linecap': 'round' }))
+    g.append(r)
+  }
+  svg.append(g)
+  svg.append(el('circle', { r: 4 + b[6] % 4, fill: b[7] % 2 ? ink : 'var(--paper)', stroke: ink, 'stroke-width': 2 }))
+}
+
+// ---------- Weave: a tapestry band from the key: seigaiha arcs, kikko hexagons or a lattice ----------
+function weave(box, name) {
+  const b = bytes(name), w = 600, h = 140
+  const c1 = PIG[b[8] % PIG.length], c2 = PIG[(b[9] % (PIG.length - 1) + 1 + b[8]) % PIG.length]
+  const svg = el('svg', { viewBox: `0 0 ${w} ${h}`, preserveAspectRatio: 'xMidYMid slice', width: '100%', height: '100%' })
+  svg.style.position = 'absolute'; svg.style.inset = '0'
+  svg.append(el('rect', { width: w, height: h, fill: c1 }))
+  const kind = b[10] % 3, s = 18 + b[11] % 10
+  if (kind === 0) for (let y = 0; y < h + s; y += s / 2) for (let x = (y / (s / 2)) % 2 ? s : 0; x < w + s; x += s * 2)
+    for (let k = 3; k > 0; k--) svg.append(el('circle', { cx: x, cy: y, r: s * k / 3, fill: k % 2 ? c2 : c1, opacity: 0.85 }))
+  if (kind === 1) for (let y = 0; y < h + s; y += s * 0.87) for (let x = (Math.round(y / (s * 0.87)) % 2) * s * 0.75; x < w + s; x += s * 1.5) {
+    const p = [...Array(6)].map((_, i) => `${x + s * 0.5 * Math.cos(i * Math.PI / 3)},${y + s * 0.5 * Math.sin(i * Math.PI / 3)}`).join(' ')
+    svg.append(el('polygon', { points: p, fill: 'none', stroke: c2, 'stroke-width': 2.2 })) }
+  if (kind === 2) for (let x = -h; x < w + h; x += s) { svg.append(el('line', { x1: x, y1: 0, x2: x + h, y2: h, stroke: c2, 'stroke-width': 3 })); svg.append(el('line', { x1: x + h, y1: 0, x2: x, y2: h, stroke: c2, 'stroke-width': 1.2, opacity: .7 })) }
+  // the warp: fine threads over everything
+  for (let x = 0; x < w; x += 3) svg.append(el('line', { x1: x, y1: 0, x2: x, y2: h, stroke: '#000', 'stroke-width': 0.6, opacity: 0.08 }))
+  box.innerHTML = ''; box.append(svg)
+}
+
+// ---------- A hall: seats on an arc, for the live call cards ----------
+function arc(svg, names) {
+  svg.setAttribute('viewBox', '0 0 92 48'); svg.innerHTML = ''
+  svg.append(el('path', { d: 'M6 44 A40 40 0 0 1 86 44', fill: 'none', stroke: 'var(--stone)', 'stroke-width': 1.5 }))
+  const n = names.length
+  names.forEach((nm, i) => { const a = Math.PI * (1 - (i + 0.5) / n); const x = 46 + Math.cos(a) * 36, y = 44 - Math.sin(a) * 34
+    const g = el('svg', { x: x - 10, y: y - 10, width: 20, height: 20 }); crest(g, nm); svg.append(g) })
+}
+
+// ---------- The keep: three rings ----------
+function rings() {
+  const svg = document.getElementById('rings'); svg.innerHTML = ''
+  const labels = ['you and Mira', 'the route', 'the network']
+  const wall = (r) => { const c = 8, n = 6, step = (2 * r) / (n * 2); let d = `M ${-r} ${-r + c}`; for (let i = 0; i < n * 2; i++) { const x = -r + i * step; d += i % 2 ? ` L ${x} ${-r - 5} L ${x + step} ${-r - 5}` : ` L ${x} ${-r} L ${x + step} ${-r}` } return d + ` L ${r} ${-r + c} L ${r} ${r - c} L ${r - c} ${r} L ${-r + c} ${r} L ${-r} ${r - c} Z` }
+  ;[100, 70, 40].forEach((r, i) => { svg.append(el('path', { d: wall(r), class: 'ring' + (i === 2 ? ' lit' : ''), 'data-i': 2 - i, 'stroke-width': 1.2 }))
+    const t = el('text', { y: r - 8, 'text-anchor': 'middle' }); t.textContent = labels[2 - i]; svg.append(t) })
+  svg.append(el('rect', { x: -112, y: -112, width: 224, height: 224, fill: 'none', stroke: 'var(--ai)', 'stroke-width': 1, 'stroke-dasharray': '2 4', opacity: .6 }))
+  const a = el('svg', { x: -30, y: -12, width: 24, height: 24 }); crest(a, 'Ann'); svg.append(a)
+  const m = el('svg', { x: 6, y: -12, width: 24, height: 24 }); crest(m, 'Mira'); svg.append(m)
+  svg.append(el('line', { x1: -6, y1: 0, x2: 6, y2: 0, stroke: 'var(--gold)', 'stroke-width': 2 }))
+  document.querySelectorAll('.facts [data-ring]').forEach((f) => f.addEventListener('mouseenter', () => {
+    svg.querySelectorAll('.ring').forEach((c) => c.classList.toggle('lit', c.dataset.i === f.dataset.ring)) }))
+}
+
+// ---------- The hemicycle call ----------
+const SEATS = [['Dov', 'Dota 2', 'game'], ['Rae', 'showing her screen', ''], ['Ann', 'you', ''], ['Pim', 'Here', ''], ['Lux', 'Destiny 2', 'game']]
+function amph() {
+  const box = document.getElementById('amph'), W = 1280 - 76 - 268, H = 800 - 44 - 60 - 82
+  const svg = document.getElementById('stagearc'); svg.setAttribute('viewBox', `0 0 ${W} ${H}`); svg.innerHTML = ''
+  const cx = W / 2, cy = H - 30
+  for (let k = 0; k < 4; k++) svg.append(el('path', { d: `M ${cx - 380 + k * 40} ${cy} A ${380 - k * 40} ${330 - k * 40} 0 0 1 ${cx + 380 - k * 40} ${cy}`, fill: 'none', stroke: 'var(--stone)', 'stroke-width': k ? 1 : 2, opacity: k ? 0.6 : 1 }))
+  for (let k = 0; k < 4; k++) svg.append(el('ellipse', { cx, cy: cy - 40, rx: 150 - k * 26, ry: 56 - k * 10, fill: k === 3 ? 'var(--plaster)' : 'none', stroke: 'var(--stone)', 'stroke-width': k ? 1 : 1.6 }))
+  for (let k = 0; k < 12; k++) { const a = (Math.PI * 2 * k) / 12; svg.append(el('line', { x1: cx + Math.cos(a) * 72, y1: cy - 40 + Math.sin(a) * 26, x2: cx + Math.cos(a) * 150, y2: cy - 40 + Math.sin(a) * 56, stroke: 'var(--stone)', 'stroke-width': .8, opacity: .7 })) }
+  box.querySelectorAll('.seat').forEach((s) => s.remove())
+  SEATS.forEach(([nm, sub, cls], i) => {
+    const a = Math.PI * (1 - (i + 0.5) / SEATS.length)
+    const x = cx + Math.cos(a) * 340, y = cy - 96 - Math.sin(a) * 300
+    const s = document.createElement('div'); s.className = 'seat'; s.style.left = x + 'px'; s.style.top = y + 'px'
+    s.innerHTML = `<div class="pillar"><div class="weave" data-weave="${nm}"></div><div class="crest l"><svg data-crest="${nm}"></svg></div><span class="slit"></span></div><span class="nm">${nm}</span><span class="sub ${cls}">${sub}</span>`
+    box.append(s)
+  })
+}
+let talk = 0
+setInterval(() => { const seats = document.querySelectorAll('.seat'); seats.forEach((s, i) => s.classList.toggle('speaking', i === talk)); talk = (talk + [1, 2, 3][Math.floor(Math.random() * 3)]) % SEATS.length }, 2400)
+
+function paint(root = document) {
+  root.querySelectorAll('svg[data-crest]').forEach((s) => crest(s, s.dataset.crest, s.dataset.mode === 'home'))
+  root.querySelectorAll('[data-weave]').forEach((b) => weave(b, b.dataset.weave))
+  root.querySelectorAll('svg[data-arc]').forEach((s) => arc(s, s.dataset.arc.split(',')))
+  root.querySelectorAll('.stamp').forEach((s) => { s.innerHTML = `<span class="seal"><svg><use href="#i-key"/></svg></span>` })
+}
+amph(); rings(); paint()
+document.querySelectorAll('.seat')[0].classList.add('speaking')
+
+// Seal popover
+const pop = document.getElementById('pop')
+document.addEventListener('click', (e) => {
+  const st = e.target.closest('.stamp')
+  if (st) { const r = st.getBoundingClientRect(), f = st.closest('.main').getBoundingClientRect()
+    pop.querySelector('h6').lastChild.textContent = `${st.dataset.who}'s seal`
+    pop.style.left = (r.left - f.left - 290) + 'px'; pop.style.top = (r.top - f.top - 10) + 'px'; pop.classList.add('open'); return }
+  if (!e.target.closest('.pop')) pop.classList.remove('open')
+})
+// Sending presses a new seal
+document.getElementById('draft').addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || !e.target.value.trim()) return
+  const m = document.createElement('div'); m.className = 'msg new'
+  m.innerHTML = `<div class="crest"><svg data-crest="Ann"></svg></div><div class="h"><b>Ann</b><time>21:43</time></div><p></p><span class="stamp" data-who="Ann"></span>`
+  m.querySelector('p').textContent = e.target.value; document.getElementById('chat').append(m); paint(m); e.target.value = ''
+})
+// Crest maker
+const mk = document.getElementById('maker')
+const make = () => { crest(document.getElementById('mk-crest'), mk.value || '?'); crest(document.getElementById('mk-crest-s'), mk.value || '?'); weave(document.getElementById('mk-weave'), mk.value || '?') }
+mk.addEventListener('input', make); make()
+// Palette swatches follow the theme
+function swatches() {
+  const box = document.getElementById('swatches'), cs = getComputedStyle(box.closest('.court'))
+  box.innerHTML = ['ground', 'paper', 'stone', 'ink', 'gold', 'ai', 'moss', 'shu'].map((t) => `<div class="sw" style="background:var(--${t})">${t}</div>`).join('')
+}
+swatches()
+// Theme
+const setTheme = (t) => { document.querySelectorAll('[data-frame]').forEach((f) => f.classList.toggle('night', t === 'night'))
+  document.querySelectorAll('.switch-theme button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.t === t)) }
+document.querySelectorAll('.switch-theme button').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.t)))
+// ?s=2&t=night: one section, one theme, for screenshots
+const q = new URLSearchParams(location.search)
+if (q.get('t')) setTheme(q.get('t'))
+if (q.get('s')) { document.querySelectorAll('section.mock').forEach((s, i) => { if (i + 1 !== +q.get('s')) s.remove() }); document.querySelector('.page-head p').remove() }
+</script>
+</body>
+</html>

@@ -57,6 +57,8 @@ declare global {
       checkUpdates(): Promise<{ state: 'found' | 'latest' | 'unavailable'; version: string; current: string }>
       quit(): Promise<void>
       programs(): Promise<string[]>
+      steamGames(): Promise<{ app: number; name: string; hours: number }[]>
+      steamUnlocked(app: number): Promise<{ ach: string; icon: string }[]>
       openSteam(app: number, kind: 'store' | 'run'): Promise<void>
       openLink(url: string): Promise<void>
       previewLink(url: string): Promise<import('../shared/links').LinkPreview | null>
@@ -567,6 +569,7 @@ let master: GainNode | null = null
 let own: Listen | null = null
 let listening: ReturnType<typeof setInterval> | null = null
 export const speaking = new Set<Key>() // people speaking right now, you included
+export const levels = new Map<Key, number>() // each voice's loudness (RMS) at the last reading, for the call banners' seam
 
 function context() {
   if (!ctx) {
@@ -650,6 +653,7 @@ function listenAll() {
   let changed = false
   const level = (l: Listen) => (l.analyser.getFloatTimeDomainData(samplesBuf), rms(samplesBuf))
   const check = (k: Key, l: Listen | null | undefined, v: number, allowed: boolean) => {
+    levels.set(k, allowed ? v : 0)
     let on = false
     if (l) {
       const r = hear(v, now, l.loudAt)
@@ -671,6 +675,7 @@ function listenAll() {
 }
 
 function close(k: Key) {
+  levels.delete(k)
   const p = peers.get(k)
   if (!p) return
   p.pc.close()

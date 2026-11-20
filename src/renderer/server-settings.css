@@ -1,7 +1,7 @@
 /* Server settings: a wide dialog, pages on the left (design/mockups/servers.html, frames 5 and 6). */
 dialog.server-settings { max-width: none; }
 dialog.server-settings .dialog-body { width: min(980px, calc(100vw - 32px)); height: min(660px, calc(100vh - 48px)); padding: 0; gap: 0; grid-template-columns: 220px 1fr; }
-.server-settings .settings-nav { display: grid; align-content: start; gap: 2px; padding: 18px 10px; border-right: 1px solid var(--line); background: rgb(10 12 15 / 0.72); border-radius: 12px 0 0 12px; overflow-y: auto; }
+.server-settings .settings-nav { display: grid; align-content: start; gap: 2px; padding: 18px 10px; border-right: 1px solid var(--line); background: rgb(var(--lo) / 0.72); border-radius: 12px 0 0 12px; overflow-y: auto; }
 .server-settings .settings-nav-head { display: flex; align-items: center; gap: 10px; padding: 0 6px 14px; min-width: 0; }
 .server-settings .settings-nav-head .row-text { min-width: 0; }
 .server-settings .settings-page { padding: 7px 10px; border: none; border-radius: var(--r-sm); background: none; color: var(--silver-2); font: inherit; font-size: 13px; text-align: left; }

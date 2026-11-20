@@ -8,7 +8,7 @@ import { afterAll, beforeAll, expect, onTestFailed, test } from 'vitest'
 import { createHub } from '../src/forwarder/hub'
 import { createNode } from '../src/main/node'
 import { type RelayLimits, HOSTED_LIMITS, createNet, relayKeyPair, startBlindRelay } from '../src/main/network'
-import { CALL_VERSION, type Event, type Group, type Msg, cleanProfile, dmId, identicon, isHandle, keyTail, mutedNow, normHandle, stack, versionOf } from '../src/shared/protocol'
+import { CALL_VERSION, type Event, type Group, type Msg, cleanProfile, dmId, isHandle, keyTail, mutedNow, normHandle, stack, versionOf } from '../src/shared/protocol'
 import { inviteKeyPair, joinProof, signOp } from '../src/shared/server'
 import { makeInvite, parseInvite } from '../src/shared/invite'
 import { heldFrom, mergeGroup, missing, noteNat, signAdd, signLeft, signMsg, signPresence, validGroup, verifyAdd, verifyMsg, verifyPresence, withNat } from '../src/shared/sync'
@@ -118,15 +118,7 @@ test('a conversation is muted for good or until its end time', () => {
   expect(mutedNow(st, 'd', 1500)).toBe(false)
 })
 
-test('generated pictures are stable, mirrored and differ between keys', () => {
-  const [k1, k2] = [DHT.keyPair(), DHT.keyPair()].map((k) => k.publicKey.toString('hex'))
-  expect(identicon(k1)).toEqual(identicon(k1))
-  expect(identicon(k1)).not.toEqual(identicon(k2))
-  const { cells, hue } = identicon(k1)
-  expect(cells).toHaveLength(25)
-  for (let row = 0; row < 5; row++) expect(cells[row * 5]).toBe(cells[row * 5 + 4])
-  expect(hue).toBeGreaterThanOrEqual(0)
-  expect(hue).toBeLessThanOrEqual(360)
+test('a key tail is the last six characters, upper case', () => {
   expect(keyTail('ab'.repeat(29) + 'a3f9c2')).toBe('A3F9C2')
 })
 

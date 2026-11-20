@@ -3,22 +3,30 @@
 // profile, with everything about their game, opens from it.
 import { type FormEvent, type KeyboardEvent, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { type Key, type Profile, type State, MAX_TEXT, dmId } from '../shared/protocol'
+import type React from 'react'
+import { type Key, type Profile, type State, MAX_TEXT, dmId, statusOf } from '../shared/protocol'
 import { routeWords } from '../shared/reach'
 import { GameGlance } from './Activity'
 import * as call from './call'
 import { type People, type Run, api } from './common'
 import { PersonVolume, useSpeaking } from './Media'
-import { Avatar, Icon } from './ui'
+import { Avatar, BannerArt, Icon, VerifiedSeal, useAccent } from './ui'
 
-// The banner behind a profile: the art of the game they are playing, else their own picture, blurred into fog. It is
-// what makes each profile look like its person; without either, only the theme's fog shows.
+// The banner leans a little toward the pointer while it is over it
+const tilt = (e: React.MouseEvent<HTMLElement>) => {
+  const r = e.currentTarget.getBoundingClientRect()
+  e.currentTarget.style.setProperty('--px', ((e.clientX - r.left) / r.width - 0.5).toFixed(3))
+  e.currentTarget.style.setProperty('--py', ((e.clientY - r.top) / r.height - 0.5).toFixed(3))
+}
+const untilt = (e: React.MouseEvent<HTMLElement>) => (e.currentTarget.style.removeProperty('--px'), e.currentTarget.style.removeProperty('--py'))
+
+// The banner behind a profile: the art of the game they are playing (unless they turned that off), else their banner
+// (BannerArt). It is what makes each profile look like its person.
 export function ProfileBanner({ st, k, p }: { st: State; k: Key; p: Profile }) {
-  const app = st.activity[k]?.game?.app
-  const art = app ? `eleusinia-art://steam/${app}/header` : p.avatar
+  const app = p.gameArt === false ? undefined : st.activity[k]?.game?.app
   return (
-    <div className={`pop-banner ${app ? 'game' : ''}`} aria-hidden="true">
-      {art && <img src={art} alt="" onError={(e) => (e.currentTarget.style.display = 'none')} />}
+    <div className={`pop-banner ${app ? 'game' : 'weave'}`} aria-hidden="true" onMouseMove={tilt} onMouseLeave={untilt}>
+      {app ? <img src={`eleusinia-art://steam/${app}/header`} alt="" onError={(e) => (e.currentTarget.style.display = 'none')} /> : <BannerArt id={k} p={p} />}
     </div>
   )
 }
@@ -37,6 +45,7 @@ export function ProfilePop({ k, from, st, people, run, close, expand, chat, edit
   const inCall = !me && !!call.conv && call.peers.has(k)
   const voice = call.voices.get(k)
   const game = st.activity[k]?.game
+  const accent = useAccent(k, p, p.gameArt === false ? undefined : game?.app)
   const blocked = st.blocked.includes(k)
   const [blocking, setBlocking] = useState(false) // asked "are you sure" first
 
@@ -87,7 +96,7 @@ export function ProfilePop({ k, from, st, people, run, close, expand, chat, edit
       role="dialog"
       aria-label={`${name}'s profile`}
       className={`profile-pop ${at ? 'placed' : ''} from-${at?.side ?? 'right'} ${online ? 'online' : ''} ${inCall && call.speaking.has(k) ? 'speaking' : ''}`}
-      style={at ? { left: at.left, top: at.top } : { visibility: 'hidden' }}
+      style={{ ...(at ? { left: at.left, top: at.top } : { visibility: 'hidden' }), ['--person' as string]: accent }}
     >
       <ProfileBanner st={st} k={k} p={p} />
       <div className="pop-head">
@@ -99,7 +108,10 @@ export function ProfilePop({ k, from, st, people, run, close, expand, chat, edit
         </button>
       </div>
       <div className="pop-body">
-        <h2 className="pop-name">{name}</h2>
+        <h2 className="pop-name">
+          {name} {st.settings.verified?.includes(k) && <VerifiedSeal />}
+        </h2>
+        {statusOf(p) && <p className="pop-status">{statusOf(p)!.text}</p>}
         <p className="pop-handle">
           {p.handle || 'No friend ID yet'}
           {me && ' (you)'}

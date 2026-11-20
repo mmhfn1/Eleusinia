@@ -1,0 +1,650 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>UI refresh mockups</title>
+<!-- Design mockups for design/plan-ui-refresh.md. Static markup with its own stylesheet; not part of the build.
+     Game art is stood in by gradients: the real app uses each game's own capsule art. -->
+<style>
+@font-face { font-family: 'Bricolage'; src: url('../../docs/fonts/bricolage-grotesque-latin-wght-normal.woff2') format('woff2'); font-weight: 200 800; }
+@font-face { font-family: 'Instrument'; src: url('../../docs/fonts/instrument-sans-latin-wght-normal.woff2') format('woff2'); font-weight: 400 700; }
+
+/* ---------- Tokens: one semantic layer, the light theme overrides only these (finding 10) ---------- */
+.theme {
+  --bg: #060709;
+  --s1: #0b0d10;
+  --s2: #111418;
+  --s3: #181c21;
+  --s4: #22272d;
+  --line: rgb(255 255 255 / 0.07);
+  --line-2: rgb(255 255 255 / 0.12);
+  --t1: #f3f2ef;
+  --t2: #b7b9bc;
+  --t3: #80858c;
+  --lamp: #e7c78c;       /* in game, the fallback accent: the splash's lamp */
+  --lamp-glow: rgb(231 199 140 / 0.22);
+  --fog: #7fa3bd;        /* online: the throne's fog, lifted */
+  --live: #f2555a;       /* live, danger */
+  --voice: #8fe3b0;      /* in voice */
+  --tint: var(--lamp);   /* the context's colour: a server's, a game's; lamp when there is none */
+  --grain: 0.05;
+  --fog-top: rgb(84 118 140 / 0.38);
+  --pool: rgb(231 199 140 / 0.10);
+  --shadow: 0 12px 32px rgb(0 0 0 / 0.45);
+  color-scheme: dark;
+}
+.theme.light {
+  --bg: #dde2e6;
+  --s1: #e9edf0;
+  --s2: #f4f6f8;
+  --s3: #ffffff;
+  --s4: #e2e7eb;
+  --line: rgb(16 22 30 / 0.08);
+  --line-2: rgb(16 22 30 / 0.14);
+  --t1: #10151b;
+  --t2: #46505b;
+  --t3: #737d88;
+  --lamp: #b27a24;
+  --lamp-glow: rgb(178 122 36 / 0.18);
+  --fog: #3f6f92;
+  --live: #d63c44;
+  --voice: #1f9a5a;
+  --grain: 0.035;
+  --fog-top: rgb(110 150 178 / 0.35);
+  --pool: rgb(222 170 90 / 0.16);
+  --shadow: 0 12px 30px rgb(40 52 66 / 0.14);
+  color-scheme: light;
+}
+
+/* ---------- The mockup page (not part of the design) ---------- */
+* { box-sizing: border-box; }
+html { background: #2a2d31; }
+body { margin: 0; padding: 40px 0 80px; font: 14px/1.45 'Instrument', 'Segoe UI', sans-serif; color: #e9e9e6; }
+.page { width: 1280px; margin: 0 auto; }
+.page > h1 { font: 700 32px/1.1 'Bricolage', sans-serif; margin: 0 0 8px; }
+.page > p { color: #b9bbbe; max-width: 90ch; margin: 0 0 40px; }
+section.mock { margin: 0 0 64px; }
+section.mock > h2 { font: 650 20px/1.2 'Bricolage', sans-serif; margin: 0 0 4px; }
+section.mock > .why { color: #b9bbbe; margin: 0 0 14px; max-width: 110ch; }
+section.mock > .why b { color: #fff; font-weight: 600; }
+
+/* ---------- App frame ---------- */
+.frame {
+  position: relative; width: 1280px; height: 800px; overflow: hidden; border-radius: 10px;
+  background: var(--bg); color: var(--t1); box-shadow: 0 30px 80px rgb(0 0 0 / 0.5);
+  display: grid; grid-template-columns: 72px 264px 1fr; grid-template-rows: 40px 1fr 64px;
+  grid-template-areas: 'title title title' 'rail side main' 'rail bar main';
+  font-size: 14px;
+}
+/* Lighting (finding 9): a visible fog band from the top, one lamp pool behind the active view, a still grain. */
+.frame::before {
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 0;
+  background:
+    radial-gradient(70% 38% at 62% -6%, var(--fog-top), transparent 70%),
+    radial-gradient(46% 40% at 66% 104%, var(--pool), transparent 72%);
+}
+.frame::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none; z-index: 5; opacity: var(--grain); mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+.frame > * { position: relative; z-index: 1; }
+
+/* Title bar (finding 20): back, forward, the Ctrl K switcher made visible */
+.title { grid-area: title; display: flex; align-items: center; gap: 8px; padding: 0 0 0 14px; border-bottom: 1px solid var(--line); }
+.title .nav { display: flex; gap: 2px; }
+.ib { width: 28px; height: 28px; display: grid; place-items: center; border-radius: 7px; color: var(--t2); }
+.ib:hover { background: var(--s3); }
+.ib svg { width: 16px; height: 16px; }
+.search {
+  margin: 0 auto; width: 420px; height: 28px; display: flex; align-items: center; gap: 8px; padding: 0 10px;
+  border-radius: 8px; background: var(--s2); border: 1px solid var(--line); color: var(--t3); font-size: 13px;
+}
+.search svg { width: 14px; height: 14px; }
+.search kbd { margin-left: auto; font: 500 11px/1 'Instrument'; color: var(--t3); border: 1px solid var(--line-2); border-radius: 4px; padding: 3px 5px; }
+.winbtns { display: flex; }
+.winbtns span { width: 46px; height: 40px; display: grid; place-items: center; color: var(--t3); }
+.winbtns svg { width: 12px; height: 12px; }
+
+/* Rail (findings 7, 18): tinted squircles, rounder at rest, squarer when active */
+.rail { grid-area: rail; grid-row: 2 / 4; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 12px 0; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--s1) 70%, transparent); }
+.tile { position: relative; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; font: 650 16px 'Bricolage'; color: #fff; transition: border-radius 160ms; }
+.tile.active, .tile:hover { border-radius: 14px; }
+.tile.active::before { content: ''; position: absolute; left: -14px; width: 4px; height: 26px; border-radius: 0 3px 3px 0; background: var(--t1); }
+.tile.unread::before { content: ''; position: absolute; left: -14px; width: 4px; height: 8px; border-radius: 0 3px 3px 0; background: var(--t1); }
+.tile .badge { position: absolute; right: -10px; bottom: -8px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--live); color: #fff; font: 700 11px/18px 'Instrument'; text-align: center; border: 3px solid var(--bg); box-sizing: content-box; }
+.emblem { width: 44px; height: 44px; border-radius: 50%; background: radial-gradient(circle at 50% 40%, #2b2a27, #0c0c0c); display: grid; place-items: center; box-shadow: 0 0 0 1px var(--line-2), 0 0 24px var(--lamp-glow); }
+.emblem img { width: 34px; height: 34px; border-radius: 50%; }
+.light .emblem { background: radial-gradient(circle at 50% 40%, #ffffff, #e5e8eb); }
+.light .emblem img { filter: invert(1) brightness(0.35); }
+.rail hr { width: 28px; border: 0; border-top: 1px solid var(--line-2); margin: 2px 0; }
+.addtile { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--s3); color: var(--voice); margin-top: auto; }
+.addtile svg { width: 18px; height: 18px; }
+
+/* Side column */
+.side { grid-area: side; display: flex; flex-direction: column; min-height: 0; border-right: 1px solid var(--line); background: color-mix(in srgb, var(--s1) 55%, transparent); }
+.side-head { height: 52px; display: flex; align-items: center; justify-content: space-between; padding: 0 16px; font: 650 16px 'Bricolage'; border-bottom: 1px solid var(--line); }
+.side-head.tinted { background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 26%, transparent), transparent); }
+.side-body { padding: 10px 8px; display: grid; gap: 2px; align-content: start; overflow: hidden; }
+.group-label { display: flex; align-items: baseline; gap: 6px; padding: 14px 10px 6px; font-weight: 650; font-size: 13px; color: var(--t2); }
+.group-label .n { font-weight: 450; color: var(--t3); font-variant-numeric: tabular-nums; }
+.group-label .plus { margin-left: auto; color: var(--t3); }
+.row { display: flex; align-items: center; gap: 10px; padding: 6px 10px; border-radius: 8px; color: var(--t2); min-width: 0; }
+.row:hover { background: var(--s3); }
+.row.sel { background: color-mix(in srgb, var(--tint) 16%, var(--s3)); color: var(--t1); }
+.row .who { min-width: 0; display: grid; }
+.row .name { color: var(--t1); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.row .sub { font-size: 12.5px; color: var(--t3); display: flex; align-items: center; gap: 5px; white-space: nowrap; overflow: hidden; }
+.row .sub.game { color: var(--lamp); }
+.row .count { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--live); color: #fff; font: 700 11px/18px 'Instrument'; text-align: center; }
+.chan { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 7px; color: var(--t3); font-weight: 500; }
+.chan svg { width: 16px; height: 16px; opacity: 0.8; }
+.chan.sel { background: color-mix(in srgb, var(--tint) 18%, var(--s3)); color: var(--t1); }
+.chan.unread { color: var(--t1); font-weight: 650; }
+.chan .count { margin-left: auto; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--live); color: #fff; font: 700 11px/18px 'Instrument'; text-align: center; }
+.voicer { display: flex; align-items: center; gap: 8px; padding: 3px 10px 3px 34px; color: var(--t2); font-size: 13px; }
+
+/* Pictures (finding 6): generated from the key's hue, at the palette's lightness, with the first letter */
+.av { --h: 210; position: relative; flex: none; width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+  background: linear-gradient(140deg, hsl(var(--h) 46% 48%), hsl(calc(var(--h) + 38) 52% 30%)); color: #fff; font: 650 15px 'Bricolage'; }
+.light .av { background: linear-gradient(140deg, hsl(var(--h) 56% 62%), hsl(calc(var(--h) + 38) 48% 44%)); }
+.av.s { width: 24px; height: 24px; font-size: 11px; }
+.av.l { width: 72px; height: 72px; font-size: 28px; }
+.av.xl { width: 96px; height: 96px; font-size: 38px; }
+/* Presence (finding 3): shape and colour, never colour alone */
+.av .p { position: absolute; right: -2px; bottom: -2px; width: 13px; height: 13px; border-radius: 50%; border: 3px solid var(--bg); box-sizing: content-box; }
+.av.s .p { width: 9px; height: 9px; border-width: 2px; }
+.p.online { background: var(--fog); }
+.p.game { background: var(--lamp); border-radius: 3px; transform: rotate(45deg) scale(0.86); }
+.p.voice { background: transparent; box-shadow: inset 0 0 0 3px var(--voice); }
+.p.away { background: transparent; box-shadow: inset 0 0 0 3px var(--t3); }
+
+/* User bar (finding 15): the friend ID lives here */
+.bar { grid-area: bar; display: flex; align-items: center; gap: 10px; padding: 0 12px; border-top: 1px solid var(--line); border-right: 1px solid var(--line); background: var(--s1); }
+.bar .who { display: grid; min-width: 0; }
+.bar .name { font-weight: 650; }
+.bar .id { font-size: 12px; color: var(--t3); display: flex; gap: 4px; align-items: center; }
+.bar .id svg { width: 12px; height: 12px; }
+.bar .ctl { margin-left: auto; display: flex; gap: 2px; }
+
+/* Main */
+.main { grid-area: main; grid-row: 2 / 4; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+.main-head { height: 52px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+.main-head h3 { margin: 0; font: 650 18px 'Bricolage'; }
+.main-head .meta { color: var(--t3); font-size: 13px; }
+.main-body { flex: 1; min-height: 0; overflow: hidden; padding: 20px 24px; }
+h4.sec { display: flex; align-items: baseline; gap: 8px; margin: 0 0 12px; font: 650 17px 'Bricolage'; }
+h4.sec .n { font: 450 13px 'Instrument'; color: var(--t3); }
+h4.sec .more { margin-left: auto; font: 500 13px 'Instrument'; color: var(--t3); }
+
+/* Now playing shelf (finding 1): game art is the colour */
+.shelf { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 28px; }
+.cap { position: relative; height: 196px; border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; padding: 14px; color: #fff; box-shadow: var(--shadow); }
+.cap .art { position: absolute; inset: 0; }
+.cap .art::after { content: ''; position: absolute; inset: 0; background: linear-gradient(180deg, rgb(0 0 0 / 0) 25%, rgb(5 6 8 / 0.92)); }
+.cap > *:not(.art) { position: relative; }
+.cap .game { font: 700 12px 'Instrument'; opacity: 0.85; margin-bottom: auto; align-self: flex-start; padding: 4px 8px; border-radius: 6px; background: rgb(0 0 0 / 0.38); backdrop-filter: blur(6px); }
+.cap .line { font: 650 19px/1.15 'Bricolage'; margin-bottom: 4px; }
+.cap .detail { font-size: 12.5px; opacity: 0.82; }
+.cap .foot { display: flex; align-items: center; gap: 8px; margin-top: 10px; }
+.cap .foot .av { border: 2px solid rgb(255 255 255 / 0.25); }
+.cap .foot .nm { font-weight: 650; }
+.cap .live { position: absolute; top: 14px; right: 14px; display: flex; align-items: center; gap: 5px; font: 700 11px 'Instrument'; padding: 4px 8px; border-radius: 6px; background: var(--live); }
+.cap .live i { width: 6px; height: 6px; border-radius: 50%; background: #fff; }
+.btn { display: inline-flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px; border-radius: 8px; font: 650 13px 'Instrument'; border: 0; cursor: pointer; color: var(--t1); background: var(--s3); }
+.btn svg { width: 15px; height: 15px; }
+.btn.primary { background: var(--tint); color: #121212; }
+.btn.on-art { background: rgb(255 255 255 / 0.16); color: #fff; backdrop-filter: blur(8px); margin-left: auto; }
+.btn.danger { background: color-mix(in srgb, var(--live) 18%, transparent); color: var(--live); }
+.btn.wide { flex: 1; justify-content: center; }
+/* Stand-in art: gradients in each game's own colours */
+.art.cs2 { background: radial-gradient(60% 80% at 75% 20%, #f0a24a, transparent 60%), linear-gradient(135deg, #2f4a55, #18232a 60%, #c46b2a); }
+.art.dota { background: radial-gradient(60% 70% at 30% 20%, #e24a33, transparent 60%), linear-gradient(135deg, #3b1111, #120707 60%, #5c1d12); }
+.art.d2 { background: radial-gradient(55% 70% at 70% 25%, #9fd3ff, transparent 55%), linear-gradient(140deg, #1c2d4d, #0b1222 60%, #6b5a2c); }
+.art.lol { background: radial-gradient(60% 70% at 40% 25%, #d6b46a, transparent 60%), linear-gradient(140deg, #0d3b46, #071a20 60%, #2b6a6e); }
+
+/* Lists with activity (finding 2) */
+.list { display: grid; gap: 2px; }
+.list .row { padding: 8px 12px; }
+.list .acts { margin-left: auto; display: flex; gap: 4px; opacity: 0; }
+.list .row:hover .acts, .list .row.hov .acts { opacity: 1; }
+.thumb { width: 22px; height: 14px; border-radius: 3px; flex: none; }
+.calls { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; margin-bottom: 28px; }
+.callcard { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 12px; background: var(--s2); border: 1px solid var(--line); }
+.callcard .stack { display: flex; }
+.callcard .stack .av { margin-left: -8px; border: 2px solid var(--s2); }
+.callcard .stack .av:first-child { margin-left: 0; }
+.callcard .t { display: grid; }
+.callcard .t b { font-weight: 650; }
+.callcard .t span { font-size: 12.5px; color: var(--t3); }
+.callcard .btn { margin-left: auto; }
+
+/* Chat */
+.chat { flex: 1; min-height: 0; padding: 18px 24px 0; display: flex; flex-direction: column; justify-content: flex-end; gap: 2px; }
+.day { display: flex; align-items: center; gap: 12px; color: var(--t3); font-size: 12.5px; font-weight: 600; margin: 4px 0 10px; }
+.day::before, .day::after { content: ''; flex: 1; border-top: 1px solid var(--line); }
+.msg { display: grid; grid-template-columns: 40px 1fr; gap: 0 12px; padding: 4px 8px; border-radius: 8px; }
+.msg:hover { background: var(--s2); }
+.msg .av { width: 40px; height: 40px; grid-row: span 2; }
+.msg .h { display: flex; align-items: baseline; gap: 8px; }
+.msg .h b { font-weight: 650; }
+.msg .h time { font-size: 12px; color: var(--t3); font-variant-numeric: tabular-nums; }
+.msg p { margin: 0; color: var(--t1); }
+.msg .cont { grid-column: 2; margin: 2px 0 0; }
+.msg .tick { grid-column: 2; font-size: 12px; color: var(--t3); display: flex; align-items: center; gap: 4px; }
+.msg .tick svg { width: 12px; height: 12px; }
+.composer { margin: 12px 24px 18px; height: 48px; flex: none; display: flex; align-items: center; gap: 10px; padding: 0 8px 0 14px; border-radius: 12px; background: var(--s2); border: 1px solid var(--line-2); color: var(--t3); }
+.composer svg { width: 18px; height: 18px; }
+.composer .send { margin-left: auto; }
+.members { width: 248px; flex: none; border-left: 1px solid var(--line); padding: 10px 8px; display: grid; align-content: start; gap: 2px; background: color-mix(in srgb, var(--s1) 40%, transparent); }
+.members .role { color: color-mix(in srgb, var(--rc) 80%, var(--t1)); }
+.split { display: flex; flex: 1; min-height: 0; }
+.split > .col { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.invite { display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px; background: var(--s2); border: 1px solid var(--line); width: 420px; margin: 4px 0 0; }
+.invite .sq { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; font: 650 18px 'Bricolage'; color: #fff; }
+.invite .t { display: grid; }
+.invite .t span { font-size: 12.5px; color: var(--t3); }
+.invite .btn { margin-left: auto; }
+
+/* Call stage (finding 4): tiles sized to the call, each with its banner */
+.stage { flex: 1; min-height: 0; padding: 18px; display: grid; gap: 12px; }
+.stage.one { grid-template-columns: 1fr; }
+.stage.three { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.stage.three .ct:first-child { grid-row: span 2; }
+.ct { position: relative; border-radius: 14px; overflow: hidden; display: grid; place-items: center; background: var(--s2); border: 1px solid var(--line); }
+.ct .art { position: absolute; inset: 0; opacity: 0.7; }
+.ct .art::after { content: ''; position: absolute; inset: 0; background: radial-gradient(60% 70% at 50% 45%, transparent, rgb(6 7 9 / 0.85)); }
+.light .ct .art { opacity: 0.9; }
+.light .ct .art::after { background: radial-gradient(70% 80% at 50% 45%, transparent, rgb(20 26 34 / 0.45)); }
+.ct .av { z-index: 1; box-shadow: 0 10px 30px rgb(0 0 0 / 0.4); }
+.ct .cap-l { position: absolute; left: 12px; bottom: 12px; z-index: 1; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: rgb(0 0 0 / 0.45); backdrop-filter: blur(8px); color: #fff; font-size: 13px; }
+.ct .cap-l b { font-weight: 650; }
+.ct .cap-l span { opacity: 0.8; }
+.ct .cap-l svg { width: 14px; height: 14px; }
+.ct.speaking { box-shadow: 0 0 0 2px var(--voice), 0 0 32px color-mix(in srgb, var(--voice) 30%, transparent); }
+.ct.speaking .av { box-shadow: 0 0 0 3px var(--voice), 0 0 30px color-mix(in srgb, var(--voice) 45%, transparent); }
+.callbar { margin: 0 18px 18px; flex: none; display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 14px; background: var(--s2); border: 1px solid var(--line); }
+.callbar .sig { display: grid; margin-right: auto; }
+.callbar .sig b { color: var(--voice); font-weight: 650; font-size: 13px; display: flex; gap: 6px; align-items: center; }
+.callbar .sig b svg { width: 14px; height: 14px; }
+.callbar .sig span { font-size: 12px; color: var(--t3); }
+.cbtn { height: 40px; display: inline-flex; align-items: center; gap: 8px; padding: 0 14px; border-radius: 10px; background: var(--s3); font: 600 13px 'Instrument'; color: var(--t1); }
+.cbtn svg { width: 17px; height: 17px; }
+.cbtn.round { width: 40px; padding: 0; justify-content: center; }
+.cbtn.on { background: color-mix(in srgb, var(--voice) 20%, var(--s3)); color: var(--voice); }
+.cbtn.leave { background: var(--live); color: #fff; }
+
+/* Components sheet */
+.sheet { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border-radius: 10px; overflow: hidden; box-shadow: 0 30px 80px rgb(0 0 0 / 0.5); }
+.panel { position: relative; padding: 24px; background: var(--bg); color: var(--t1); }
+.panel h5 { margin: 0 0 12px; font: 650 15px 'Bricolage'; }
+.panel .blk { margin-bottom: 26px; }
+.panel .hint { font-size: 12.5px; color: var(--t3); margin-top: 6px; }
+.flex { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.menu { width: 260px; padding: 6px; border-radius: 12px; background: var(--s3); border: 1px solid var(--line-2); box-shadow: var(--shadow); font-size: 13.5px; }
+.menu .mi { display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 7px; color: var(--t1); }
+.menu .mi svg { width: 16px; height: 16px; color: var(--t2); flex: none; }
+.menu .mi:hover, .menu .mi.hov { background: color-mix(in srgb, var(--tint) 18%, var(--s4)); }
+.menu .mi .chk { margin-left: auto; width: 16px; height: 16px; border-radius: 4px; border: 1.5px solid var(--line-2); display: grid; place-items: center; }
+.menu .mi .chk.on { background: var(--tint); border-color: var(--tint); color: #111; }
+.menu .mi .chk svg { width: 11px; height: 11px; color: inherit; }
+.menu .mi.danger, .menu .mi.danger svg { color: var(--live); }
+.menu hr { border: 0; border-top: 1px solid var(--line); margin: 5px 4px; }
+.menu .vol { display: flex; align-items: center; gap: 10px; padding: 6px 10px 8px; color: var(--t2); font-size: 12.5px; }
+.menu .vol .track { flex: 1; height: 4px; border-radius: 2px; background: linear-gradient(90deg, var(--tint) 50%, var(--s4) 50%); position: relative; }
+.menu .vol .track::after { content: ''; position: absolute; left: 50%; top: 50%; width: 12px; height: 12px; border-radius: 50%; background: var(--t1); transform: translate(-50%, -50%); }
+.before { opacity: 0.55; text-decoration: line-through; text-decoration-color: var(--live); }
+.lbl-old { font: 600 11px 'Instrument'; letter-spacing: 0.12em; text-transform: uppercase; color: var(--lamp); }
+.lbl-new { font: 650 13px 'Instrument'; color: var(--t2); }
+.lbl-new .n { font-weight: 450; color: var(--t3); }
+.scale { display: grid; gap: 6px; }
+.scale div { display: flex; align-items: baseline; gap: 14px; }
+.scale code { width: 120px; font: 12px 'Instrument'; color: var(--t3); }
+.kv { display: grid; grid-template-columns: 110px 1fr; gap: 6px 12px; font-size: 13px; }
+.kv span:nth-child(odd) { color: var(--t3); }
+.sw { width: 44px; height: 44px; border-radius: 10px; border: 1px solid var(--line); }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-back" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-fwd" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+  <symbol id="i-min" viewBox="0 0 12 12" fill="none" stroke="currentColor"><path d="M1 6h10"/></symbol>
+  <symbol id="i-max" viewBox="0 0 12 12" fill="none" stroke="currentColor"><rect x="1.5" y="1.5" width="9" height="9"/></symbol>
+  <symbol id="i-x" viewBox="0 0 12 12" fill="none" stroke="currentColor"><path d="m1.5 1.5 9 9m0-9-9 9"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></symbol>
+  <symbol id="i-head" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 15v-3a8 8 0 0 1 16 0v3"/><rect x="3" y="14" width="4" height="6" rx="1.5"/><rect x="17" y="14" width="4" height="6" rx="1.5"/></symbol>
+  <symbol id="i-gear" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></symbol>
+  <symbol id="i-phone" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .4 1.9.7 2.8a2 2 0 0 1-.5 2.1L8 9.9a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2z"/></symbol>
+  <symbol id="i-msg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+  <symbol id="i-hash" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></symbol>
+  <symbol id="i-vol" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"><path d="M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/></symbol>
+  <symbol id="i-cam" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m23 7-7 5 7 5z"/><rect x="1" y="5" width="15" height="14" rx="2"/></symbol>
+  <symbol id="i-screen" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></symbol>
+  <symbol id="i-leave" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M10.7 13.3a16 16 0 0 0 3.4 2.6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.8.7a2 2 0 0 1 1.7 2v3a2 2 0 0 1-2.2 2A19.8 19.8 0 0 1 3.1 4.2 2 2 0 0 1 5.1 2h3a2 2 0 0 1 2 1.7M22 2 2 22"/></symbol>
+  <symbol id="i-wave" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M2 10v4M6 6v12M10 3v18M14 8v8M18 5v14M22 10v4"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12.6a10 10 0 0 1 14 0M8.5 16.1a5 5 0 0 1 7 0M2 8.8a15 15 0 0 1 20 0M12 20h.01"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m21.4 11-9.2 9.2a6 6 0 0 1-8.5-8.5l9.2-9.2a4 4 0 0 1 5.7 5.7l-9.2 9.2a2 2 0 0 1-2.8-2.8l8.5-8.5"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="m22 2-7 20-4-9-9-4zM22 2 11 13"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-user" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></symbol>
+  <symbol id="i-mute" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4zM23 9l-6 6M17 9l6 6"/></symbol>
+  <symbol id="i-novid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.7 0H14a2 2 0 0 1 2 2v3.3l1 1L23 7v10M1 1l22 22"/></symbol>
+  <symbol id="i-eye" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17.9 17.9A10 10 0 0 1 12 20c-7 0-11-8-11-8a18.5 18.5 0 0 1 5.1-5.9M9.9 4.2A9 9 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.2 3.2M1 1l22 22"/></symbol>
+  <symbol id="i-ban" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="m4.9 4.9 14.2 14.2"/></symbol>
+  <symbol id="i-unfriend" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="9" cy="8" r="4"/><path d="M2 21a7 7 0 0 1 14 0M17 11h6"/></symbol>
+  <symbol id="i-gamepad" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 12h4M8 10v4M15 13h.01M18 11h.01"/><rect x="2" y="6" width="20" height="12" rx="6"/></symbol>
+</svg>
+
+<div class="page">
+<h1>UI refresh mockups</h1>
+<p>Every proposal in <code>design/plan-ui-refresh.md</code>, numbered as there. Dark is Ink and fog with more light; light is
+"fog by day". Saturated colour comes only from content: game art (stood in by gradients here), pictures, server and
+role colours. Names, games and numbers are made up.</p>
+
+<!-- ======================= 1. HOME: NOW (dark) ======================= -->
+<section class="mock">
+  <h2>A. Home, "Now" (dark)</h2>
+  <div class="why"><b>1</b> Home opens on friends in game, with the live match and Join call. <b>2</b> Every row's second line is the game.
+  <b>3</b> Presence by shape: fog-blue dot online, lamp diamond in game, green ring in voice. <b>6</b> Generated pictures.
+  <b>7</b> Tinted rail tiles, squarer when active. <b>9</b> Fog from the top, lamp pool below, still grain.
+  <b>12, 13</b> Sentence-case labels, one count style. <b>15</b> Friend ID in the user bar. <b>18</b> Solid + tile. <b>20</b> Back, forward and the switcher in the title bar.</div>
+  <div class="frame theme">
+    <div class="title">
+      <div class="nav"><span class="ib"><svg><use href="#i-back"/></svg></span><span class="ib"><svg><use href="#i-fwd"/></svg></span></div>
+      <div class="search"><svg><use href="#i-search"/></svg>Find a friend, group, server or channel<kbd>Ctrl K</kbd></div>
+      <div class="winbtns"><span><svg><use href="#i-min"/></svg></span><span><svg><use href="#i-max"/></svg></span><span><svg><use href="#i-x"/></svg></span></div>
+    </div>
+    <nav class="rail">
+      <div class="emblem"><img src="../../docs/emblem.png" alt=""></div>
+      <hr>
+      <div class="tile unread" style="background:#6b4bd1">N<span class="badge">3</span></div>
+      <div class="tile" style="background:#c0612f">F</div>
+      <div class="tile" style="background:#2f7f78">T</div>
+      <hr>
+      <div class="av" style="--h:330;width:44px;height:44px">M<span class="p game"></span></div>
+      <div class="av" style="--h:190;width:44px;height:44px">K<span class="p online"></span></div>
+      <div class="addtile"><svg><use href="#i-plus"/></svg></div>
+    </nav>
+    <aside class="side">
+      <div class="side-head">Home</div>
+      <div class="side-body">
+        <div class="row sel" style="--tint:var(--lamp)"><svg width="20" height="20"><use href="#i-user"/></svg><span class="name">Friends</span></div>
+        <div class="group-label">Direct messages <span class="plus"><svg width="14" height="14"><use href="#i-plus"/></svg></span></div>
+        <div class="row"><div class="av" style="--h:330">M<span class="p game"></span></div><div class="who"><span class="name">Mira</span><span class="sub game"><span class="thumb art cs2"></span>Counter-Strike 2</span></div><span class="count">2</span></div>
+        <div class="row"><div class="av" style="--h:20">D<span class="p voice"></span></div><div class="who"><span class="name">Dov</span><span class="sub">In voice: Night Owls</span></div></div>
+        <div class="row"><div class="av" style="--h:190">K<span class="p online"></span></div><div class="who"><span class="name">Kai</span><span class="sub">Online</span></div></div>
+        <div class="row"><div class="av" style="--h:95">S<span class="p game"></span></div><div class="who"><span class="name">Sol</span><span class="sub game"><span class="thumb art d2"></span>Destiny 2</span></div></div>
+        <div class="group-label">Groups</div>
+        <div class="row"><div class="tile" style="width:36px;height:36px;font-size:14px;background:#2f7f78">T</div><div class="who"><span class="name">The Trio</span><span class="sub">3 online</span></div></div>
+      </div>
+    </aside>
+    <div class="bar">
+      <div class="av" style="--h:260">A<span class="p online"></span></div>
+      <div class="who"><span class="name">Ann</span><span class="id">ann#7095 <svg><use href="#i-copy"/></svg></span></div>
+      <div class="ctl"><span class="ib"><svg><use href="#i-mic"/></svg></span><span class="ib"><svg><use href="#i-head"/></svg></span><span class="ib"><svg><use href="#i-gear"/></svg></span></div>
+    </div>
+    <main class="main">
+      <div class="main-head"><h3>Friends</h3><span class="meta">6 online, 3 in game</span><span style="margin-left:auto" class="btn primary"><svg><use href="#i-plus"/></svg>Add friend</span></div>
+      <div class="main-body">
+        <h4 class="sec">Playing now <span class="n">3</span></h4>
+        <div class="shelf">
+          <div class="cap"><div class="art cs2"></div><span class="game">Counter-Strike 2</span><span class="live"><i></i>Live</span>
+            <div class="line">Mirage 9–7</div><div class="detail">Premier, round 17 · 21 kills</div>
+            <div class="foot"><div class="av s" style="--h:330">M</div><span class="nm">Mira</span><span class="btn on-art"><svg><use href="#i-msg"/></svg>Message</span></div></div>
+          <div class="cap"><div class="art d2"></div><span class="game">Destiny 2</span>
+            <div class="line">Salvation's Edge</div><div class="detail">Raid, 1 h 12 min · fireteam of 6</div>
+            <div class="foot"><div class="av s" style="--h:95">S</div><span class="nm">Sol</span><span class="btn on-art"><svg><use href="#i-msg"/></svg>Message</span></div></div>
+          <div class="cap"><div class="art dota"></div><span class="game">Dota 2</span><span class="live"><i></i>Live</span>
+            <div class="line">Anti-Mage 14–21</div><div class="detail">34:10, night · 8/2/5</div>
+            <div class="foot"><div class="av s" style="--h:20">D</div><span class="nm">Dov</span><span class="btn on-art"><svg><use href="#i-phone"/></svg>Join call</span></div></div>
+        </div>
+        <h4 class="sec">Live calls <span class="n">2</span></h4>
+        <div class="calls">
+          <div class="callcard"><div class="stack"><div class="av s" style="--h:20">D</div><div class="av s" style="--h:150">R</div><div class="av s" style="--h:280">P</div></div><div class="t"><b>Night Owls · Lounge</b><span>Dov, Rae and Pim · 1 streaming</span></div><span class="btn primary" style="--tint:#6b4bd1;color:#fff"><svg><use href="#i-phone"/></svg>Join</span></div>
+          <div class="callcard"><div class="stack"><div class="av s" style="--h:330">M</div><div class="av s" style="--h:190">K</div></div><div class="t"><b>The Trio</b><span>Mira and Kai</span></div><span class="btn primary" style="--tint:#2f7f78;color:#fff"><svg><use href="#i-phone"/></svg>Join</span></div>
+        </div>
+        <h4 class="sec">Online <span class="n">6</span></h4>
+        <div class="list">
+          <div class="row hov"><div class="av" style="--h:190">K<span class="p online"></span></div><div class="who"><span class="name">Kai</span><span class="sub">Online</span></div><div class="acts"><span class="ib"><svg><use href="#i-msg"/></svg></span><span class="ib"><svg><use href="#i-phone"/></svg></span></div></div>
+          <div class="row"><div class="av" style="--h:150">R<span class="p voice"></span></div><div class="who"><span class="name">Rae</span><span class="sub">In voice: Night Owls</span></div></div>
+        </div>
+      </div>
+    </main>
+  </div>
+</section>
+
+<!-- ======================= 1 light ======================= -->
+<section class="mock">
+  <h2>B. Home, "Now" (light: fog by day)</h2>
+  <div class="why"><b>11</b> The same lighting by day: pale cold stone, ink text, fog as a blue-grey haze from the top, the lamp pooled warm below.
+  Content colour keeps it from going monochrome. Follows the system setting, with a switch in Settings.</div>
+  <div class="frame theme light" id="home-light"></div>
+</section>
+
+<!-- ======================= Server channel ======================= -->
+<section class="mock">
+  <h2>C. A server's text channel (dark)</h2>
+  <div class="why"><b>7, 8</b> The server's colour (violet here) tints its header, the selected channel and its main buttons.
+  <b>2</b> Members show their game. <b>13</b> "Online 2". <b>14</b> 14 px text, tabular times. <b>19</b> "Delivered" only on the newest message.
+  <b>12</b> "Today" in sentence case.</div>
+  <div class="frame theme" style="--tint:#8b6cf0">
+    <div class="title">
+      <div class="nav"><span class="ib"><svg><use href="#i-back"/></svg></span><span class="ib"><svg><use href="#i-fwd"/></svg></span></div>
+      <div class="search"><svg><use href="#i-search"/></svg>Find a friend, group, server or channel<kbd>Ctrl K</kbd></div>
+      <div class="winbtns"><span><svg><use href="#i-min"/></svg></span><span><svg><use href="#i-max"/></svg></span><span><svg><use href="#i-x"/></svg></span></div>
+    </div>
+    <nav class="rail">
+      <div class="emblem"><img src="../../docs/emblem.png" alt=""></div><hr>
+      <div class="tile active" style="background:#6b4bd1">N</div>
+      <div class="tile" style="background:#c0612f">F</div>
+      <div class="tile" style="background:#2f7f78">T</div><hr>
+      <div class="av" style="--h:330;width:44px;height:44px">M<span class="p game"></span></div>
+      <div class="addtile"><svg><use href="#i-plus"/></svg></div>
+    </nav>
+    <aside class="side">
+      <div class="side-head tinted">Night Owls <svg width="16" height="16" style="transform:rotate(90deg)"><use href="#i-fwd"/></svg></div>
+      <div class="side-body">
+        <div class="group-label">Text</div>
+        <div class="chan"><svg><use href="#i-hash"/></svg>general</div>
+        <div class="chan sel"><svg><use href="#i-hash"/></svg>plans</div>
+        <div class="chan unread"><svg><use href="#i-hash"/></svg>clips<span class="count">4</span></div>
+        <div class="group-label">Voice</div>
+        <div class="chan"><svg><use href="#i-vol"/></svg>Lounge</div>
+        <div class="voicer"><div class="av s" style="--h:20">D<span class="p voice"></span></div>Dov</div>
+        <div class="voicer"><div class="av s" style="--h:150">R<span class="p voice"></span></div>Rae</div>
+        <div class="chan"><svg><use href="#i-vol"/></svg>Squad</div>
+      </div>
+    </aside>
+    <div class="bar">
+      <div class="av" style="--h:260">A<span class="p online"></span></div>
+      <div class="who"><span class="name">Ann</span><span class="id">ann#7095 <svg><use href="#i-copy"/></svg></span></div>
+      <div class="ctl"><span class="ib"><svg><use href="#i-mic"/></svg></span><span class="ib"><svg><use href="#i-head"/></svg></span><span class="ib"><svg><use href="#i-gear"/></svg></span></div>
+    </div>
+    <main class="main">
+      <div class="main-head"><svg width="20" height="20" style="color:var(--t3)"><use href="#i-hash"/></svg><h3>plans</h3><span class="meta">Friday's raid and who brings what</span></div>
+      <div class="split">
+        <div class="col">
+          <div class="chat">
+            <div class="day">Today</div>
+            <div class="msg"><div class="av" style="--h:20">D</div><div class="h"><b>Dov</b><time>21:40</time></div><p>raid friday at 8? need two more</p></div>
+            <div class="msg"><div class="av" style="--h:95">S</div><div class="h"><b style="color:#e7c78c">Sol</b><time>21:41</time></div><p>in. bringing the new hunter</p><p class="cont">someone remind me to farm first</p></div>
+            <div class="msg"><div class="av" style="--h:260">A</div><div class="h"><b>Ann</b><time>21:43</time></div><p>count me in, and here's the invite for the others</p>
+              <div class="invite" style="grid-column:2"><div class="sq" style="background:#6b4bd1">N</div><div class="t"><b>Night Owls</b><span>24 members, 6 online</span></div><span class="btn primary" style="color:#fff">Join</span></div>
+              <span class="tick"><svg><use href="#i-check"/></svg>Delivered</span></div>
+          </div>
+          <div class="composer"><svg><use href="#i-clip"/></svg>Message #plans<span class="ib send"><svg><use href="#i-send"/></svg></span></div>
+        </div>
+        <aside class="members">
+          <div class="group-label" style="--rc:#e7c78c"><span class="role">Raid lead</span> <span class="n">1</span></div>
+          <div class="row"><div class="av" style="--h:95">S<span class="p game"></span></div><div class="who"><span class="name" style="color:#e7c78c">Sol</span><span class="sub game"><span class="thumb art d2"></span>Destiny 2</span></div></div>
+          <div class="group-label">Online <span class="n">3</span></div>
+          <div class="row"><div class="av" style="--h:20">D<span class="p voice"></span></div><div class="who"><span class="name">Dov</span><span class="sub">In voice: Lounge</span></div></div>
+          <div class="row"><div class="av" style="--h:330">M<span class="p game"></span></div><div class="who"><span class="name">Mira</span><span class="sub game"><span class="thumb art cs2"></span>Mirage 9–7</span></div></div>
+          <div class="row"><div class="av" style="--h:260">A<span class="p online"></span></div><div class="who"><span class="name">Ann</span><span class="sub">Online</span></div></div>
+          <div class="group-label">Offline <span class="n">20</span></div>
+          <div class="row" style="opacity:.55"><div class="av" style="--h:40">B</div><div class="who"><span class="name">Bex</span></div></div>
+          <div class="row" style="opacity:.55"><div class="av" style="--h:210">J</div><div class="who"><span class="name">Jun</span></div></div>
+        </aside>
+      </div>
+    </main>
+  </div>
+</section>
+
+<!-- ======================= Call ======================= -->
+<section class="mock">
+  <h2>D. A voice channel call (dark)</h2>
+  <div class="why"><b>4</b> Tiles sized to the call; each person's banner (game art or picture) behind them; the speaker gets a lit edge; the game under the name.
+  <b>5</b> The same banners as the profile. <b>16</b> Filled, labelled Camera and Share screen; Disconnect is the one red control.</div>
+  <div class="frame theme" style="--tint:#8b6cf0">
+    <div class="title">
+      <div class="nav"><span class="ib"><svg><use href="#i-back"/></svg></span><span class="ib"><svg><use href="#i-fwd"/></svg></span></div>
+      <div class="search"><svg><use href="#i-search"/></svg>Find a friend, group, server or channel<kbd>Ctrl K</kbd></div>
+      <div class="winbtns"><span><svg><use href="#i-min"/></svg></span><span><svg><use href="#i-max"/></svg></span><span><svg><use href="#i-x"/></svg></span></div>
+    </div>
+    <nav class="rail">
+      <div class="emblem"><img src="../../docs/emblem.png" alt=""></div><hr>
+      <div class="tile active" style="background:#6b4bd1">N</div>
+      <div class="tile" style="background:#c0612f">F</div>
+      <div class="tile" style="background:#2f7f78">T</div><hr>
+      <div class="addtile"><svg><use href="#i-plus"/></svg></div>
+    </nav>
+    <aside class="side">
+      <div class="side-head tinted">Night Owls</div>
+      <div class="side-body">
+        <div class="group-label">Text</div>
+        <div class="chan"><svg><use href="#i-hash"/></svg>general</div>
+        <div class="chan"><svg><use href="#i-hash"/></svg>plans</div>
+        <div class="group-label">Voice</div>
+        <div class="chan sel"><svg><use href="#i-vol"/></svg>Lounge</div>
+        <div class="voicer"><div class="av s" style="--h:260">A<span class="p voice"></span></div>Ann</div>
+        <div class="voicer"><div class="av s" style="--h:20">D<span class="p voice"></span></div>Dov</div>
+        <div class="voicer"><div class="av s" style="--h:150">R<span class="p voice"></span></div>Rae</div>
+      </div>
+    </aside>
+    <div class="bar">
+      <div class="av" style="--h:260">A<span class="p voice"></span></div>
+      <div class="who"><span class="name">Ann</span><span class="id">In voice: Lounge</span></div>
+      <div class="ctl"><span class="ib"><svg><use href="#i-mic"/></svg></span><span class="ib"><svg><use href="#i-head"/></svg></span><span class="ib"><svg><use href="#i-gear"/></svg></span></div>
+    </div>
+    <main class="main">
+      <div class="main-head"><svg width="20" height="20" style="color:var(--t3)"><use href="#i-vol"/></svg><h3>Lounge</h3><span class="meta">3 in the call</span></div>
+      <div class="stage three">
+        <div class="ct speaking"><div class="art dota"></div><div class="av xl" style="--h:20">D</div><div class="cap-l"><b>Dov</b><span>Dota 2 · Anti-Mage 14–21</span></div></div>
+        <div class="ct"><div class="art d2"></div><div class="av l" style="--h:150">R</div><div class="cap-l"><b>Rae</b><span>Destiny 2 · In orbit</span></div></div>
+        <div class="ct"><div class="art" style="background:linear-gradient(140deg,hsl(260 46% 40%),hsl(298 52% 22%))"></div><div class="av l" style="--h:260">A</div><div class="cap-l"><svg><use href="#i-mute"/></svg><b>Ann</b><span>You</span></div></div>
+      </div>
+      <div class="callbar">
+        <div class="sig"><b><svg><use href="#i-wifi"/></svg>Voice connected</b><span>Lounge, Night Owls · 24 ms</span></div>
+        <span class="cbtn round"><svg><use href="#i-mic"/></svg></span>
+        <span class="cbtn round"><svg><use href="#i-wave"/></svg></span>
+        <span class="cbtn"><svg><use href="#i-cam"/></svg>Camera</span>
+        <span class="cbtn on"><svg><use href="#i-screen"/></svg>Share screen</span>
+        <span class="cbtn leave round"><svg><use href="#i-leave"/></svg></span>
+      </div>
+    </main>
+  </div>
+</section>
+
+<section class="mock">
+  <h2>E. The same call (light)</h2>
+  <div class="why"><b>11</b> Banners keep their colour; the fog and lamp light the frame.</div>
+  <div class="frame theme light" id="call-light" style="--tint:#6b4bd1"></div>
+</section>
+
+<!-- ======================= Components ======================= -->
+<section class="mock">
+  <h2>F. The pieces, dark and light</h2>
+  <div class="why"><b>3</b> Presence. <b>6</b> Pictures. <b>7</b> Tiles. <b>8</b> The main button takes the context's colour. <b>12, 13</b> Labels and counts, before and after.
+  <b>14</b> Type scale. <b>17</b> The menu with icons, checks and danger grouped. <b>21</b> Motion answers actions only.</div>
+  <div class="sheet" id="sheet">
+    <div class="panel theme" id="pieces">
+      <div class="blk"><h5>Presence</h5>
+        <div class="flex">
+          <div class="flex" style="gap:8px"><div class="av" style="--h:190">K<span class="p online"></span></div>Online</div>
+          <div class="flex" style="gap:8px"><div class="av" style="--h:330">M<span class="p game"></span></div>In game</div>
+          <div class="flex" style="gap:8px"><div class="av" style="--h:20">D<span class="p voice"></span></div>In voice</div>
+          <div class="flex" style="gap:8px"><div class="av" style="--h:60">B<span class="p away"></span></div>Away</div>
+        </div><div class="hint">Shape tells them apart too: dot, diamond, ring, hollow ring.</div></div>
+      <div class="blk"><h5>Pictures nobody uploaded</h5>
+        <div class="flex"><div class="av l" style="--h:12">R</div><div class="av l" style="--h:72">S</div><div class="av l" style="--h:150">K</div><div class="av l" style="--h:205">J</div><div class="av l" style="--h:265">A</div><div class="av l" style="--h:320">M</div></div>
+        <div class="hint">The hue comes from the key, so it is the same everywhere for one person. Replaces the maroon circle and pixel pattern.</div></div>
+      <div class="blk"><h5>Server tiles</h5>
+        <div class="flex" style="padding-left:16px;gap:26px"><div class="tile" style="background:#6b4bd1">N</div><div class="tile active" style="background:#c0612f">F</div><div class="tile unread" style="background:#2f7f78">T<span class="badge">12</span></div><div class="addtile" style="margin:0"><svg><use href="#i-plus"/></svg></div></div>
+        <div class="hint">Round at rest, squarer on hover and when active; tinted from the server's picture or key.</div></div>
+      <div class="blk"><h5>Main buttons take the context's colour</h5>
+        <div class="flex"><span class="btn primary">Start call</span><span class="btn primary" style="--tint:#8b6cf0;color:#fff">Join Night Owls</span><span class="btn primary" style="--tint:#e0762f;color:#fff">Watch Mira</span><span class="btn">Cancel</span><span class="btn danger">Leave server</span></div>
+        <div class="hint">Lamp gold when there is no context; danger and live never change.</div></div>
+      <div class="blk"><h5>Labels and counts</h5>
+        <div class="kv">
+          <span>Before</span><span class="flex" style="gap:18px"><span class="lbl-old">Your friend ID</span><span class="lbl-old">Online · 2</span><span class="lbl-old">Online — 2</span><span class="lbl-old">Online (2)</span></span>
+          <span>After</span><span class="flex" style="gap:18px"><span class="lbl-new">Direct messages</span><span class="lbl-new">Online <span class="n">2</span></span><span class="lbl-new">Offline <span class="n">20</span></span></span>
+          <span>Wordmark</span><span class="flex" style="gap:18px"><span style="font:600 13px 'Instrument';letter-spacing:.42em" class="before">ELEUSINIA</span><span style="font:700 20px 'Bricolage'">Eleusinia</span></span>
+        </div></div>
+    </div>
+    <div class="panel theme light" id="pieces-light"></div>
+  </div>
+  <div class="sheet" style="margin-top:24px">
+    <div class="panel theme" style="--tint:#8b6cf0">
+      <div class="blk"><h5>Right-click a person</h5>
+        <div class="menu">
+          <div class="mi hov"><svg><use href="#i-user"/></svg>Profile</div>
+          <div class="mi"><svg><use href="#i-msg"/></svg>Message</div>
+          <div class="mi"><svg><use href="#i-phone"/></svg>Start a call</div>
+          <hr>
+          <div class="vol"><svg width="16" height="16"><use href="#i-vol"/></svg><span class="track"></span>100 %</div>
+          <div class="mi"><svg><use href="#i-mute"/></svg>Mute for me<span class="chk"></span></div>
+          <div class="mi"><svg><use href="#i-novid"/></svg>Hide their video<span class="chk on"><svg><use href="#i-check"/></svg></span></div>
+          <div class="mi"><svg><use href="#i-eye"/></svg>Ignore<span class="chk"></span></div>
+          <hr>
+          <div class="mi"><svg><use href="#i-mute"/></svg>Server mute<span class="chk"></span></div>
+          <div class="mi"><svg><use href="#i-head"/></svg>Server deafen<span class="chk"></span></div>
+          <hr>
+          <div class="mi danger"><svg><use href="#i-leave"/></svg>Disconnect</div>
+          <div class="mi danger"><svg><use href="#i-unfriend"/></svg>Remove friend</div>
+          <div class="mi danger"><svg><use href="#i-ban"/></svg>Block</div>
+        </div>
+        <div class="hint">Every item has an icon; toggles show their state; red items last.</div></div>
+    </div>
+    <div class="panel theme">
+      <div class="blk"><h5>Type scale</h5>
+        <div class="scale">
+          <div><code>Display 40</code><span style="font:700 40px/1 'Bricolage'">Night Owls</span></div>
+          <div><code>Title 28</code><span style="font:650 28px/1.1 'Bricolage'">Playing now</span></div>
+          <div><code>Heading 20</code><span style="font:650 20px 'Bricolage'">Live calls</span></div>
+          <div><code>Body 14</code><span>raid friday at 8? need two more</span></div>
+          <div><code>Secondary 13</code><span style="font-size:13px;color:var(--t2)">In voice: Night Owls</span></div>
+          <div><code>Meta 12</code><span style="font-size:12px;color:var(--t3);font-variant-numeric:tabular-nums">21:40 · 24 ms · 3 of 6</span></div>
+        </div><div class="hint">Bricolage for titles at normal tracking, Instrument Sans for everything else; was mostly 11 to 13 px.</div></div>
+      <div class="blk"><h5>Motion</h5>
+        <div class="kv">
+          <span>Rail tile</span><span>rounds to square in 160 ms on hover and select</span>
+          <span>Menus</span><span>open from where you clicked, 120 ms</span>
+          <span>Join stream</span><span>the tile lifts 2 px and its art brightens</span>
+          <span>In a call</span><span>nothing runs in the steady state; the speaking edge only changes when speech starts or stops</span>
+          <span>Reduced motion</span><span>all of it off</span>
+        </div></div>
+      <div class="blk"><h5>Palette</h5>
+        <div class="flex" style="gap:8px">
+          <div class="sw" style="background:#060709"></div><div class="sw" style="background:#111418"></div><div class="sw" style="background:#22272d"></div><div class="sw" style="background:#f3f2ef"></div>
+          <div class="sw" style="background:#e7c78c"></div><div class="sw" style="background:#7fa3bd"></div><div class="sw" style="background:#8fe3b0"></div><div class="sw" style="background:#f2555a"></div>
+        </div><div class="hint">Ink, surfaces, text; then lamp (in game, fallback accent), fog (online), voice, live. Everything else is content.</div></div>
+    </div>
+  </div>
+</section>
+</div>
+
+<script>
+// The light frames reuse the dark frames' markup, so both themes always show the same thing.
+const copy = (from, to) => { document.getElementById(to).innerHTML = document.querySelector(from).innerHTML }
+copy('section.mock:nth-of-type(1) .frame', 'home-light')
+copy('section.mock:nth-of-type(4) .frame', 'call-light')
+copy('#pieces', 'pieces-light')
+// ?s=3 shows only the third section, for screenshots
+const only = +new URLSearchParams(location.search).get('s')
+if (only) document.querySelectorAll('section.mock').forEach((s, i) => { if (i + 1 !== only) s.remove() }), document.querySelector('.page > p').remove()
+</script>
+</body>
+</html>

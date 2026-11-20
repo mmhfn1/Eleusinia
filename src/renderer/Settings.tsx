@@ -1,15 +1,18 @@
 // The Settings dialog and what opens from it: audio, hotkeys, general options, problem reports and account deletion.
-import { type FormEvent, useEffect, useReducer, useState } from 'react'
+import { type FormEvent, useEffect, useReducer, useRef, useState } from 'react'
 import { usable } from '../shared/devices'
 import { type Action, type Hotkey, sameKeys } from '../shared/hotkeys'
 import { type Area, type Diag, type Kind, type Meta, BUILD, cleanReport, describe } from '../shared/reports'
 import { GATE_DB, dbOf } from '../shared/speaking'
 import { DEFAULT_CACHE_MB, sizeLabel } from '../shared/media'
-import { type State } from '../shared/protocol'
+import { type State, statusOf } from '../shared/protocol'
 import * as call from './call'
-import { Avatar, Dialog, Icon, Info } from './ui'
+import { Avatar, BannerPick, Dialog, Icon, Info } from './ui'
+import * as theme from './theme'
 import { NOBODY, api, labelOf } from './common'
-import { ActivitySettingsSection } from './Activity'
+import { ActivitySettingsSection, GameGlance } from './Activity'
+import { ProfileBanner } from './Profile'
+import { ShowcaseView, WeekBars } from './Person'
 
 // Microphone, speakers and voice quality, in Settings.
 function AudioSettings({ st }: { st: State }) {
@@ -206,86 +209,347 @@ function Hotkeys({ st }: { st: State }) {
   )
 }
 
-export function SettingsDialog({ st, close, edit, remove }: { st: State; close: () => void; edit: () => void; remove: () => void }) {
+// Ink by night, ivory by day, or whichever Windows uses (theme.ts); kept in this window's storage. Each choice is a
+// small picture of the app in that theme.
+function ThemePick() {
+  const [t, setT] = useState(theme.get)
   return (
-    <Dialog label="Settings" close={close} className="settings-dialog">
-      <h1>Settings</h1>
-      <section className="settings-section">
-        <h2>Profile</h2>
-        <div className="settings-row">
-          <Avatar k={st.me} p={st.profile} size={40} />
-          <span className="row-text">
-            <span className="row-title">{st.profile.name}</span>
-            <span className="row-sub">{st.profile.handle}</span>
+    <div className="theme-cards" role="radiogroup" aria-label="Theme">
+      {theme.CHOICES.map(([v, label]) => (
+        <button key={v} type="button" role="radio" aria-checked={t === v} className={`theme-card ${t === v ? 'on' : ''}`} onClick={() => (theme.set(v), setT(v))}>
+          <span className={`theme-swatch ${v}`} aria-hidden="true">
+            <i />
+            <i />
+            <i />
           </span>
-          <button
-            className="button"
-            onClick={() => {
-              close()
-              edit()
-            }}
-          >
+          {label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+// Name, about line and banner, saved here; the picture opens Edit profile, which has the cropper.
+function MyProfile({ st, edit }: { st: State; edit: () => void }) {
+  const [name, setName] = useState(st.profile.name)
+  const [about, setAbout] = useState(st.profile.about)
+  const [err, setErr] = useState('')
+  const changed = name.trim() !== st.profile.name || about.trim() !== st.profile.about
+  const save = (p: Partial<State['profile']>) => api.call('setProfile', { ...st.profile, ...p }).then(() => setErr(''), (x) => setErr(String(x.message ?? x).replace(/^.*Error: /, '')))
+  return (
+    <>
+      <label className="field-label">
+        Display name
+        <input value={name} maxLength={40} onChange={(e) => setName(e.target.value)} />
+      </label>
+      <label className="field-label">
+        About you
+        <input value={about} maxLength={200} onChange={(e) => setAbout(e.target.value)} />
+      </label>
+      <div className="settings-row">
+        <button className="button primary" disabled={!changed || !name.trim()} onClick={() => save({ name: name.trim(), about: about.trim() })}>
+          Save
+        </button>
+        {err && <span className="form-error">{err}</span>}
+      </div>
+      <StatusEdit st={st} save={save} />
+      <ShowcasePick st={st} save={save} />
+      <div className="field-label">
+        Picture
+        <div className="settings-row">
+          <Avatar k={st.me} p={st.profile} size={48} />
+          <span className="row-text">
+            <span className="row-title">{st.profile.avatar ? 'Your picture' : 'Drawn from your key'}</span>
+            <span className="row-sub">{st.profile.avatar ? 'Shown to everyone you share a chat with.' : "Everyone sees the same picture, and nobody else's key draws it."}</span>
+          </span>
+          <button className="button" onClick={edit}>
             Edit profile
           </button>
         </div>
-      </section>
-      <section className="settings-section">
-        <h2>General</h2>
+      </div>
+      <div className="field-label">
+        Banner
+        <BannerPick id={st.me} p={st.profile} set={(banner) => save({ banner })} />
         <label className="check-row">
-          <input type="checkbox" role="switch" checked={st.settings.closeToTray !== false} onChange={(e) => api.call('setSettings', { closeToTray: e.target.checked })} />
-          <span>
-            Minimize to the system tray when the window is closed
-          </span>
+          <input type="checkbox" role="switch" checked={st.profile.gameArt !== false} onChange={(e) => save({ gameArt: e.target.checked ? undefined : false })} />
+          <span>Show the game's art as my banner while I play</span>
         </label>
-        <p className="hint">
-          Eleusinia may carry voice and text for friends and server members whose networks block direct connections,
-          using at most about 2 Mbit/s of upload.
-        </p>
-        <label className="check-row">
-          <input type="checkbox" role="switch" checked={!!st.settings.suggest} onChange={(e) => api.call('setSettings', { suggest: e.target.checked })} />
-          <span>
-            Suggest me to people typing the start of my username. Anyone can then see when you are online; with this off
-            you are found only by your exact friend ID
+      </div>
+    </>
+  )
+}
+
+// Pin up to three things to your profile: a favourite game (its hours from Steam) or one of its achievements
+function ShowcasePick({ st, save }: { st: State; save: (p: Partial<State['profile']>) => Promise<unknown> }) {
+  const items = st.profile.showcase ?? []
+  const [open, setOpen] = useState(false)
+  const [games, setGames] = useState<{ app: number; name: string; hours: number }[] | null>(null)
+  const [game, setGame] = useState<{ app: number; name: string } | null>(null)
+  const [achs, setAchs] = useState<{ ach: string; icon: string }[] | null>(null)
+  const set = (next: NonNullable<State['profile']['showcase']>) => save({ showcase: next.length ? next : undefined })
+  const pin = (x: NonNullable<State['profile']['showcase']>[number]) => (set([...items, x].slice(0, 3)), setOpen(false), setGame(null))
+  const start = () => {
+    setOpen(true)
+    if (!games) window.api.steamGames().then(setGames)
+  }
+  const pickGame = (g: { app: number; name: string }) => {
+    setGame(g)
+    setAchs(null)
+    window.api.steamUnlocked(g.app).then(setAchs)
+  }
+  return (
+    <div className="field-label">
+      Showcase
+      <div className="show-slots">
+        {items.map((x, i) => (
+          <span key={i} className="show-slot">
+            <img src={'ach' in x ? `eleusinia-art://achievement/${x.app}/${x.icon}` : `eleusinia-art://steam/${x.app}/header`} alt="" />
+            <span>{'ach' in x ? x.ach : x.game}</span>
+            <button className="icon-button" aria-label="Remove from showcase" title="Remove" onClick={() => set(items.filter((_, j) => j !== i))}>
+              <Icon name="close" size={14} />
+            </button>
           </span>
-        </label>
-      </section>
-      <section className="settings-section">
-        <h2>Blocked people</h2>
-        <Blocked st={st} />
-      </section>
-      <section className="settings-section">
-        <h2>Audio devices and quality</h2>
-        <AudioSettings st={st} />
-      </section>
-      <section className="settings-section">
-        <h2>Activity</h2>
-        <ActivitySettingsSection st={st} name={(k) => labelOf(st.profiles[k] ?? NOBODY, k)} />
-      </section>
-      <section className="settings-section">
-        <h2>Hotkeys</h2>
-        <Hotkeys st={st} />
-        {WINDOWS && <RunAsAdmin />}
-      </section>
-      <section className="settings-section">
-        <h2>Storage</h2>
-        <MediaCache st={st} />
-      </section>
-      <section className="settings-section">
-        <h2>Help and feedback</h2>
-        <Feedback st={st} />
-      </section>
-      <section className="settings-section">
-        <h2>Account</h2>
-        <div className="settings-row">
-          <span className="row-text">
-            <span className="row-title">Delete account</span>
-            <span className="row-sub">Removes your account, friends, groups and messages from this computer.</span>
-          </span>
-          <button className="button danger" onClick={remove}>
-            <Icon name="trash" size={16} /> Delete
+        ))}
+        {items.length < 3 && (
+          <button className="button subtle" onClick={start}>
+            <Icon name="plus" size={15} /> Pin a game or achievement
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="show-picker">
+          {!games && <p className="quiet">Reading your Steam library…</p>}
+          {games && !games.length && <p className="quiet">No Steam games found on this computer.</p>}
+          {games && !game && (
+            <div className="show-list">
+              {games.map((g) => (
+                <div key={g.app} className="show-row">
+                  <img src={`eleusinia-art://steam/${g.app}/header`} alt="" />
+                  <span className="row-text">
+                    <span className="row-title">{g.name}</span>
+                    <span className="row-sub">{g.hours.toLocaleString()} h</span>
+                  </span>
+                  <button className="button subtle" onClick={() => pin({ app: g.app, game: g.name, hours: g.hours })}>
+                    Pin game
+                  </button>
+                  <button className="button subtle" onClick={() => pickGame(g)}>
+                    Achievements
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+          {game && (
+            <div className="show-list">
+              <button className="button subtle" onClick={() => setGame(null)}>
+                <Icon name="back" size={14} /> {game.name}
+              </button>
+              {!achs && <p className="quiet">Reading achievements…</p>}
+              {achs && !achs.length && <p className="quiet">No unlocked achievements found for this game.</p>}
+              {achs?.map((a) => (
+                <button key={a.ach} className="show-row ach" onClick={() => pin({ app: game.app, game: game.name, ach: a.ach, icon: a.icon })}>
+                  <img src={`eleusinia-art://achievement/${game.app}/${a.icon}`} alt="" />
+                  <span className="row-title">{a.ach}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          <button className="button subtle" onClick={() => (setOpen(false), setGame(null))}>
+            Done
           </button>
         </div>
-      </section>
+      )}
+    </div>
+  )
+}
+
+const CLEARS: [string, number | null][] = [
+  ["Don't clear", null],
+  ['30 minutes', 30],
+  ['1 hour', 60],
+  ['4 hours', 240],
+  ['Today', -1],
+]
+// A line under your name, cleared after a while if you like; quiet holds back pokes while it lasts
+function StatusEdit({ st, save }: { st: State; save: (p: Partial<State['profile']>) => Promise<unknown> }) {
+  const now = statusOf(st.profile)
+  const [text, setText] = useState(now?.text ?? '')
+  const [clear, setClear] = useState(0)
+  const [quiet, setQuiet] = useState(!!now?.quiet)
+  const until = () => {
+    const m = CLEARS[clear][1]
+    if (m === null) return undefined
+    if (m > 0) return Date.now() + m * 60000
+    const d = new Date()
+    d.setHours(23, 59, 59, 0)
+    return d.getTime()
+  }
+  return (
+    <div className="field-label status-edit">
+      Status
+      <input value={text} maxLength={60} placeholder="What are you up to?" onChange={(e) => setText(e.target.value)} />
+      <div className="settings-row">
+        <select value={clear} onChange={(e) => setClear(+e.target.value)} aria-label="Clear after">
+          {CLEARS.map(([label], i) => (
+            <option key={label} value={i}>
+              {i ? `Clear after ${label.toLowerCase()}` : label}
+            </option>
+          ))}
+        </select>
+        <label className="check-row inline">
+          <input type="checkbox" role="switch" checked={quiet} onChange={(e) => setQuiet(e.target.checked)} />
+          <span>Quiet: no pokes</span>
+        </label>
+      </div>
+      <div className="settings-row">
+        <button className="button primary" disabled={!text.trim()} onClick={() => save({ status: { text: text.trim(), ...(until() && { until: until() }), ...(quiet && { quiet: true as const }) } })}>
+          Set status
+        </button>
+        {now && (
+          <button className="button subtle" onClick={() => (setText(''), save({ status: undefined }))}>
+            Clear status
+          </button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// What others see of you, beside the settings and answering every change in them
+function Preview({ st }: { st: State }) {
+  const game = st.activity[st.me]?.game
+  return (
+    <div className="settings-preview" aria-label="What others see">
+      <h2>What others see</h2>
+      <div className="preview-card">
+        <ProfileBanner st={st} k={st.me} p={st.profile} />
+        <div className="preview-portrait">
+          <Avatar k={st.me} p={st.profile} size={72} online />
+        </div>
+        <div className="preview-body">
+          <b className="preview-name">{st.profile.name}</b>
+          <span className="row-sub">{st.profile.handle}</span>
+          {statusOf(st.profile) && <p className="pop-status">{statusOf(st.profile)!.text}</p>}
+          {st.profile.about && <p className="preview-about">{st.profile.about}</p>}
+          {game && <GameGlance g={game} />}
+          <ShowcaseView items={st.profile.showcase} />
+          <WeekBars week={st.activity[st.me]?.week} />
+        </div>
+      </div>
+    </div>
+  )
+}
+
+const PANES: [string, string, string][] = [
+  ['You', 'profile', 'My profile'],
+  ['You', 'activity', 'Activity'],
+  ['You', 'privacy', 'Privacy and safety'],
+  ['App', 'appearance', 'Appearance'],
+  ['App', 'voice', 'Voice and video'],
+  ['App', 'hotkeys', 'Hotkeys'],
+  ['App', 'storage', 'Storage'],
+  ['App', 'help', 'Help and feedback'],
+  ['App', 'account', 'Account'],
+]
+
+// Settings (design/mockups/hall.html, F): an index on the left, every section in one column, and what others see on
+// the right. The index scrolls to a section and marks the one in view.
+export function SettingsDialog({ st, close, edit, remove }: { st: State; close: () => void; edit: () => void; remove: () => void }) {
+  const [here, setHere] = useState('profile')
+  const body = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = body.current!
+    const seen = () => {
+      const top = el.getBoundingClientRect().top + 80
+      const passed = [...el.querySelectorAll<HTMLElement>('section[data-pane]')].filter((s) => s.getBoundingClientRect().top <= top)
+      setHere(passed.at(-1)?.dataset.pane ?? 'profile')
+    }
+    el.addEventListener('scroll', seen)
+    return () => el.removeEventListener('scroll', seen)
+  }, [])
+  const go = (id: string) => body.current!.querySelector(`[data-pane="${id}"]`)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  const editNow = () => (close(), edit())
+  return (
+    <Dialog label="Settings" close={close} className="settings-dialog">
+      <div className="settings-shell">
+        <nav className="settings-index" aria-label="Settings sections">
+          <h1>Settings</h1>
+          {['You', 'App'].map((g) => (
+            <div key={g} className="settings-index-group">
+              <span className="side-cat">{g}</span>
+              {PANES.filter((p) => p[0] === g).map(([, id, label]) => (
+                <button key={id} className={`settings-index-row ${here === id ? 'on' : ''}`} onClick={() => go(id)}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          ))}
+        </nav>
+        <div className="settings-body" ref={body}>
+          <section className="settings-section" data-pane="profile">
+            <h2>My profile</h2>
+            <MyProfile st={st} edit={editNow} />
+          </section>
+          <section className="settings-section" data-pane="activity">
+            <h2>Activity</h2>
+            <ActivitySettingsSection st={st} name={(k) => labelOf(st.profiles[k] ?? NOBODY, k)} />
+          </section>
+          <section className="settings-section" data-pane="privacy">
+            <h2>Privacy and safety</h2>
+            <label className="check-row">
+              <input type="checkbox" role="switch" checked={!!st.settings.suggest} onChange={(e) => api.call('setSettings', { suggest: e.target.checked })} />
+              <span>
+                Suggest me to people typing the start of my username. Anyone can then see when you are online; with this off
+                you are found only by your exact friend ID
+              </span>
+            </label>
+            <p className="hint">
+              Eleusinia may carry voice and text for friends and server members whose networks block direct connections,
+              using at most about 2 Mbit/s of upload.
+            </p>
+            <h3>Blocked people</h3>
+            <Blocked st={st} />
+          </section>
+          <section className="settings-section" data-pane="appearance">
+            <h2>Appearance</h2>
+            <ThemePick />
+            <label className="check-row">
+              <input type="checkbox" role="switch" checked={st.settings.closeToTray !== false} onChange={(e) => api.call('setSettings', { closeToTray: e.target.checked })} />
+              <span>Minimize to the system tray when the window is closed</span>
+            </label>
+          </section>
+          <section className="settings-section" data-pane="voice">
+            <h2>Voice and video</h2>
+            <AudioSettings st={st} />
+          </section>
+          <section className="settings-section" data-pane="hotkeys">
+            <h2>Hotkeys</h2>
+            <Hotkeys st={st} />
+            {WINDOWS && <RunAsAdmin />}
+          </section>
+          <section className="settings-section" data-pane="storage">
+            <h2>Storage</h2>
+            <MediaCache st={st} />
+          </section>
+          <section className="settings-section" data-pane="help">
+            <h2>Help and feedback</h2>
+            <Feedback st={st} />
+          </section>
+          <section className="settings-section" data-pane="account">
+            <h2>Account</h2>
+            <div className="settings-row">
+              <span className="row-text">
+                <span className="row-title">Delete account</span>
+                <span className="row-sub">Removes your account, friends, groups and messages from this computer.</span>
+              </span>
+              <button className="button danger" onClick={remove}>
+                <Icon name="trash" size={16} /> Delete
+              </button>
+            </div>
+          </section>
+        </div>
+        <Preview st={st} />
+      </div>
     </Dialog>
   )
 }

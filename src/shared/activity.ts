@@ -31,7 +31,9 @@ export type Game = {
   destiny?: Destiny // Destiny 2 through the Bungie.net API (shared/destiny.ts)
 }
 // now: the sender's clock when sent, so `since` can be moved onto the receiver's clock.
-export type Activity = { now: number; game?: Game }
+// week: minutes played per game on each of the last 7 days (d: 0 today, 1 yesterday...), counted by their own app
+export type Week = { d: number; g: string; m: number }[]
+export type Activity = { now: number; game?: Game; week?: Week }
 
 // What may be shared, set in Settings → Activity. On unless `games` is turned off; each detail is on unless turned
 // off, except the store `details`, which are off unless turned on.
@@ -54,7 +56,9 @@ export const sharing = (set: ActivitySettings | undefined) => set?.games !== fal
 
 // Only what the user chose to share leaves this computer.
 export function shareable(a: Activity, set: ActivitySettings | undefined): Activity {
-  if (!sharing(set) || !a.game) return { now: a.now }
+  if (!sharing(set)) return { now: a.now }
+  const week = set?.playtime !== false && a.week?.length ? { week: a.week } : {}
+  if (!a.game) return { now: a.now, ...week }
   const g: Game = { ...a.game }
   if (set?.playtime === false) delete g.played
   if (set?.achievements === false) delete g.achievements
@@ -62,21 +66,48 @@ export function shareable(a: Activity, set: ActivitySettings | undefined): Activ
   if (g.cs2) g.cs2 = shareableCs2(g.cs2, set?.cs2)
   if (g.dota) g.dota = shareableDota(g.dota, set?.dota)
   if (g.destiny) g.destiny = shareableDestiny(g.destiny, set?.destiny)
-  return { now: a.now, game: g }
+  return { now: a.now, game: g, ...week }
 }
 
 const int = (v: unknown, min: number, max: number) => (Number.isSafeInteger(v) && (v as number) >= min && (v as number) <= max ? (v as number) : undefined)
 const DAY = 864e5
 
 // A friend's activity, checked and capped like a profile. Null when there is nothing valid to show.
+// A friend's week, capped: at most 3 games a day for 7 days, minutes within a day
+export function cleanWeek(w: unknown): Week {
+  if (!Array.isArray(w)) return []
+  return w.slice(0, 21).flatMap((x: any) => {
+    const d = int(x?.d, 0, 6), m = int(x?.m, 1, 1440), g = str(x?.g, 100)
+    return d === undefined || !m || !g ? [] : [{ d, g, m }]
+  })
+}
+
+// Our own minutes per game per day (YYYY-MM-DD), as node.ts keeps them, turned into the week we share: the 3 games
+// played most each day, rounded to 5 minutes so the shared copy changes only every few minutes
+export function weekOf(played: Record<string, Record<string, number>>, now = Date.now()): Week {
+  const out: Week = []
+  for (let d = 0; d < 7; d++) {
+    const day = dayKey(now - d * DAY)
+    const games = Object.entries(played[day] ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 3)
+    for (const [g, m] of games) if (m >= 5) out.push({ d, g, m: Math.round(m / 5) * 5 })
+  }
+  return out
+}
+export const dayKey = (t: number) => {
+  const d = new Date(t)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 export function cleanActivity(x: unknown, now = Date.now()): Activity | null {
   if (!x || typeof x !== 'object') return null
   const a = x as Record<string, any>
   const shift = Number.isFinite(a.now) ? now - a.now : 0
+  const week = cleanWeek(a.week)
+  const base = week.length ? { now, week } : { now }
   const g = a.game
-  if (!g || typeof g !== 'object') return { now }
+  if (!g || typeof g !== 'object') return base
   const name = str(g.name, 100)
-  if (!name || (g.source !== 'steam' && g.source !== 'program')) return { now }
+  if (!name || (g.source !== 'steam' && g.source !== 'program')) return base
   const since = Number.isFinite(g.since) ? Math.min(now, Math.max(now - 30 * DAY, g.since + shift)) : now
   const game: Game = { name, since, source: g.source }
   const app = int(g.app, 1, 1e8)
@@ -107,9 +138,27 @@ export function cleanActivity(x: unknown, now = Date.now()): Activity | null {
   if (dota) game.dota = dota
   const destiny = game.app === DESTINY_APP ? cleanDestiny(g.destiny, shift, now) : undefined
   if (destiny) game.destiny = destiny
-  return { now, game }
+  return { ...base, game }
 }
 const ICON = /^[0-9a-f]{40}\.(jpg|png)$/
+
+// A profile's showcase (Profile.showcase): up to three things pinned to it, a favourite game with its hours, or an
+// achievement with its icon. Steam ids and names only; the art is fetched by each viewer's app from Steam.
+export type Showcase = ({ app: number; game: string; hours?: number } | { app: number; game: string; ach: string; icon: string })[]
+export function cleanShowcase(v: unknown): Showcase | undefined {
+  if (!Array.isArray(v)) return undefined
+  const out = v.slice(0, 3).flatMap((x: any): Showcase => {
+    const app = int(x?.app, 1, 1e8), game = str(x?.game, 100)
+    if (!app || !game) return []
+    if (x.ach !== undefined) {
+      const ach = str(x.ach, 100)
+      return ach && typeof x.icon === 'string' && ICON.test(x.icon) ? [{ app, game, ach, icon: x.icon }] : []
+    }
+    const hours = int(x.hours, 0, 1e6)
+    return [{ app, game, ...(hours !== undefined && { hours }) }]
+  })
+  return out.length ? out : undefined
+}
 
 // The only addresses activity pictures come from, built here from ids (eleusinia-art:// in src/main/index.ts).
 // eleusinia-art://steam/<app>/<header|capsule|hero|logo>, eleusinia-art://achievement/<app>/<icon file>, and Dota 2's

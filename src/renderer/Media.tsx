@@ -5,7 +5,7 @@ import { type Key, type State } from '../shared/protocol'
 import type { Steadiness } from '../shared/quality'
 import { type Level, type Quality, SOUND_KBPS, type Verdict, choices, defaultQuality, fitQuality, heightLabel, streamKbps } from '../shared/video'
 import * as call from './call'
-import { Avatar, Dialog, Icon } from './ui'
+import { Avatar, BannerArt, Dialog, Icon } from './ui'
 import type { SourceKind } from '../shared/sources'
 import { api } from './common'
 import { callWords, throughWords } from '../shared/reach'
@@ -49,8 +49,12 @@ export function VoiceSignal({ name }: { name: (k: Key) => string }) {
 // Redraws the component that calls it whenever someone starts or stops speaking.
 export const useSpeaking = () => useSyncExternalStore(call.onSpeaking, call.speakingVersion)
 
+// Everyone in the call as a tall banner (their chosen weave, or their key's): whoever talks is lit, and a seam of
+// light runs down from the top, as long as their voice is loud (Seams).
 export function Oculus({ st, name, show }: { st: State; name: (k: Key) => string; show: (k: Key, from: HTMLElement) => void }) {
   useSpeaking()
+  const ref = useRef<HTMLElement>(null)
+  useSeams(ref)
   if (call.shares.size || call.cameras.size || call.sharing() || call.filming()) return null
   const people = [st.me, ...call.peers.keys()]
   const prof = (k: Key) => (k === st.me ? st.profile : st.profiles[k])
@@ -59,11 +63,15 @@ export function Oculus({ st, name, show }: { st: State; name: (k: Key) => string
     return v?.deafened ? 'Deafened' : v?.muted ? 'Muted' : call.speaking.has(k) ? 'Talking' : k === st.me ? '' : callWords(st, k, call.peers.get(k)?.pc.connectionState ?? '')
   }
   return (
-    <section className="oculus" aria-label="People in the call">
+    <section ref={ref} className="oculus" aria-label="People in the call">
       {people.map((k) => (
-        <figure key={k} className={`oculus-person ${call.speaking.has(k) ? 'speaking' : ''}`}>
+        <figure key={k} data-k={k} className={`oculus-person ${call.speaking.has(k) ? 'speaking' : ''}`}>
+          <span className="oculus-banner" aria-hidden="true">
+            <BannerArt id={k} p={prof(k) ?? { handle: '', name: '', about: '', avatar: '' }} tall still />
+          </span>
+          <span className="seam" aria-hidden="true" />
           <button className="oculus-who" onClick={(e) => show(k, e.currentTarget)} aria-label={`${k === st.me ? 'Your' : `${name(k)}'s`} profile`}>
-            <Avatar k={k} p={prof(k) ?? { handle: '', name: '', about: '', avatar: '' }} size={call.speaking.has(k) ? 96 : 80} />
+            <Avatar k={k} p={prof(k) ?? { handle: '', name: '', about: '', avatar: '' }} size={72} />
           </button>
           <figcaption>
             <span className="row-title">{k === st.me ? 'You' : name(k)}</span>
@@ -73,6 +81,22 @@ export function Oculus({ st, name, show }: { st: State; name: (k: Key) => string
       ))}
     </section>
   )
+}
+
+// The seam's length follows each speaker's level, read ten times a second straight onto the element (no re-render;
+// at most a few style writes, and none while nobody talks).
+function useSeams(ref: { current: HTMLElement | null }) {
+  useEffect(() => {
+    const t = setInterval(() => {
+      for (const el of ref.current?.querySelectorAll<HTMLElement>('[data-k]') ?? []) {
+        const k = el.dataset.k as Key
+        const v = call.speaking.has(k) ? Math.min(1, Math.sqrt(call.levels.get(k) ?? 0) * 4) : 0
+        const px = `${Math.round(v * 90)}px`
+        if (el.style.getPropertyValue('--lvl') !== px) el.style.setProperty('--lvl', px)
+      }
+    }, 100)
+    return () => clearInterval(t)
+  }, [])
 }
 
 // A direct call you have not joined: it rings for up to 40 s (jingles.ts), and stays here to join for as long as it lasts.
@@ -593,6 +617,8 @@ export function Stage({ st, name, settings }: { st: State; name: (k: Key) => str
     } catch {}
   }
   const [away, setAway] = useState(document.hidden)
+  const rowRef = useRef<HTMLDivElement>(null)
+  useSeams(rowRef)
   const items: Item[] = [
     ...[...call.shares.keys()].map((k) => ({ k, slot: 'screen' as const })),
     ...[...call.cameras.keys()].map((k) => ({ k, slot: 'camera' as const })),
@@ -670,14 +696,20 @@ export function Stage({ st, name, settings }: { st: State; name: (k: Key) => str
     const own = k === st.me
     const stream = own ? cam?.stream : call.cameras.has(k) ? media({ k, slot: 'camera' }) : undefined
     return (
-      <div key={k} className={`person-tile ${call.speaking.has(k) ? 'speaking' : ''}`}>
+      <div key={k} data-k={k} className={`person-tile ${call.speaking.has(k) ? 'speaking' : ''}`}>
+        {!stream && (
+          <span className="oculus-banner" aria-hidden="true">
+            <BannerArt id={k} p={(own ? st.profile : st.profiles[k]) ?? { handle: '', name: '', about: '', avatar: '' }} tall still />
+          </span>
+        )}
+        {!stream && <span className="seam" aria-hidden="true" />}
         {stream ? <Screen stream={stream} label={own ? 'You' : name(k)} mirror={own} /> : <Avatar k={k} p={(own ? st.profile : st.profiles[k]) ?? { handle: '', name: '', about: '', avatar: '' }} size={34} />}
         {!stream && <span className="person-name">{own ? 'You' : name(k)}</span>}
       </div>
     )
   }
   const people = (
-    <div className={`people-row ${rowHidden ? 'folded' : ''}`}>
+    <div ref={rowRef} className={`people-row ${rowHidden ? 'folded' : ''}`}>
       <button className="people-toggle" aria-expanded={!rowHidden} aria-label={rowHidden ? 'Show the people in the call' : 'Hide the people in the call'} onClick={() => foldRow(!rowHidden)}>
         <Icon name="chevron" size={14} />
       </button>

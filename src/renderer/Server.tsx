@@ -9,7 +9,7 @@ import { Oculus, ShareDialog, Stage, VoiceMark, useSpeaking } from './Media'
 import { type Modal, type People, type Run, api, card } from './common'
 import { ContextMenu, type Item, useMenus } from './Rail'
 import { ServerSettings } from './ServerSettings'
-import { CopyButton, Dialog, GroupEmblem, Icon, Splitter, useWidth, Avatar } from './ui'
+import { CopyButton, Dialog, GroupEmblem, Icon, ServerBannerArt, Splitter, useWidth, Avatar } from './ui'
 
 type Channel = ServerView['channels'][number]
 type Ask =
@@ -206,6 +206,7 @@ export function Server({ st, sv, channel, people: everyone, run, go, show }: Pro
           const r = e.currentTarget.getBoundingClientRect()
           setMenu({ x: r.left + 8, y: r.bottom + 4, for: null })
         }}>
+          <ServerBannerArt sv={sv} />
           <GroupEmblem g={sv} size={28} />
           <span className="server-name">{sv.name}</span>
           <Icon name="chevron" size={16} />

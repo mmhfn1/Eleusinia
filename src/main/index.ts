@@ -21,7 +21,7 @@ import { DESTINY_APP, type Game, artUrl, sharing } from '../shared/activity'
 import type { Destiny } from '../shared/destiny'
 import type { Cs2 } from '../shared/cs2'
 import type { Dota } from '../shared/dota'
-import { programs, watchActivity } from './activity'
+import { programs, steamGames, steamUnlocked, watchActivity } from './activity'
 import { type BungieConfig, createBungie } from './bungie'
 import { GSI_GAMES, type GsiGame, createGsi } from './gsi'
 import { runInbox } from './inbox'
@@ -53,8 +53,9 @@ if (!firstCopy) {
 // Activity pictures (game art, achievement icons) as eleusinia-art://…, built from ids by shared/activity.ts artUrl.
 protocol.registerSchemesAsPrivileged([
   { scheme: 'eleusinia-file', privileges: { standard: true, secure: true, stream: true, supportFetchAPI: true } },
-  { scheme: 'eleusinia-art', privileges: { standard: true, secure: true } },
-  { scheme: 'eleusinia-pic', privileges: { standard: true, secure: true } },
+  // corsEnabled, with the header on each answer, lets the page read a picture's colours (a profile's accent colour)
+  { scheme: 'eleusinia-art', privileges: { standard: true, secure: true, corsEnabled: true } },
+  { scheme: 'eleusinia-pic', privileges: { standard: true, secure: true, corsEnabled: true } },
 ])
 
 // Testing only: join this DHT instead of the public one, as "host:port,host:port" (test/smoke.mjs runs a local
@@ -218,6 +219,8 @@ function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (
     return bungie.status()
   })
   ipcMain.handle('programs', () => programs())
+  ipcMain.handle('steamGames', () => steamGames())
+  ipcMain.handle('steamUnlocked', (_e, app: unknown) => steamUnlocked(Number(app)))
   // Links in messages open in the browser, web addresses only; previews are fetched for links we are about to send.
   ipcMain.handle('openLink', (_e, url: unknown) => (isWebUrl(url) ? shell.openExternal(url) : undefined))
   ipcMain.handle('previewLink', (_e, url: unknown) => previewLink(url))
@@ -233,7 +236,7 @@ function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (
     if (!url) return new Response(null, { status: 404 })
     const file = join(cache, createHash('sha256').update(url).digest('hex').slice(0, 32))
     const type = url.endsWith('.png') ? 'image/png' : 'image/jpeg'
-    if (existsSync(file)) return new Response(readFileSync(file), { headers: { 'content-type': type } })
+    if (existsSync(file)) return new Response(readFileSync(file), { headers: { 'content-type': type, 'access-control-allow-origin': '*' } })
     const res = await net.fetch(url, { signal: AbortSignal.timeout(15000) }).catch(() => null)
     const ct = res?.headers.get('content-type') ?? ''
     if (!res?.ok || !/^image\/(jpeg|png|webp)/.test(ct)) return new Response(null, { status: 404 })
@@ -247,10 +250,15 @@ function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (
         .sort((a, b) => a.at - b.at)
         .slice(0, 300)
         .forEach(({ f }) => rmSync(join(cache, f), { force: true }))
-    return new Response(body, { headers: { 'content-type': ct } })
+    return new Response(body, { headers: { 'content-type': ct, 'access-control-allow-origin': '*' } })
   })
 }
 let activityChanged = () => {}
+
+// Testing only (a local test DHT): smoke windows are invisible and never take focus, so a run never covers what the
+// user is doing. Windows would then count them as hidden (occluded), which pauses streams and frames the run checks.
+const background = !!testDht() && process.env.ELEUSINIA_TEST_BACKGROUND === '1'
+if (background) app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
 
 // Closing windows never quits by itself: the tray menu, the close-to-tray setting or an update does, explicitly.
 app.on('window-all-closed', () => {})
@@ -396,8 +404,6 @@ function startApp() {
       } catch {}
     } else writeFileSync(stayPut, '')
   }
-  // Testing only (a local test DHT): shown without taking focus, so smoke runs stay behind whatever the user is doing
-  const background = !!testDht() && process.env.ELEUSINIA_TEST_BACKGROUND === '1'
   const win = new BrowserWindow({
     show: !background,
     width: 1280,
@@ -413,7 +419,12 @@ function startApp() {
     trafficLightPosition: { x: 14, y: 9 }, // macOS: its own buttons, centred in our 32 px bar
     webPreferences: { preload: join(__dirname, '../preload/index.js') },
   })
-  if (background) win.showInactive()
+  if (background) {
+    // On screen, since a window off every screen stops drawing and stalls the run, but invisible and click-through
+    win.setOpacity(0)
+    win.setIgnoreMouseEvents(true)
+    win.showInactive()
+  }
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
   // Events wait while the page loads, until it asks for its first state (App.tsx subscribes in the same effect), so
   // nothing sent meanwhile is lost, such as the join of someone already in a call. State events from before that ask
@@ -463,6 +474,7 @@ function startApp() {
   const show = () => {
     // While quitting the window is already gone, and opening Eleusinia again then crashed (0.1.3 crash report)
     if (win.isDestroyed()) return
+    if (background) return win.showInactive()
     if (win.isMinimized()) win.restore()
     win.show()
     win.focus()
@@ -654,9 +666,9 @@ function startApp() {
   // their stored type and no sniffing; ranges pass through so long videos can seek.
   // People's pictures, which the state gives as eleusinia-pic://<id> (node.ts picture) instead of the data itself.
   protocol.handle('eleusinia-pic', (req) => {
-    const m = /^data:(image\/(?:jpeg|png|webp));base64,(.+)$/.exec(node.picture(new URL(req.url).hostname) ?? '')
+    const m = /^data:(image\/(?:jpeg|png|webp|gif));base64,(.+)$/.exec(node.picture(new URL(req.url).hostname) ?? '')
     if (!m) return new Response(null, { status: 404 })
-    return new Response(Buffer.from(m[2], 'base64'), { headers: { 'content-type': m[1], 'x-content-type-options': 'nosniff', 'cache-control': 'max-age=31536000, immutable' } })
+    return new Response(Buffer.from(m[2], 'base64'), { headers: { 'content-type': m[1], 'x-content-type-options': 'nosniff', 'cache-control': 'max-age=31536000, immutable', 'access-control-allow-origin': '*' } })
   })
   protocol.handle('eleusinia-file', async (req) => {
     const f = node.filePath(new URL(req.url).hostname)

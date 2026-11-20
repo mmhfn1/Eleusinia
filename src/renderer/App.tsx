@@ -1,19 +1,22 @@
 import { type FormEvent, type KeyboardEvent, useEffect, useReducer, useRef, useState } from 'react'
 import { type Offset, clampOffset, cropRect } from '../shared/crop'
 import { usable } from '../shared/devices'
-import { type Group, type Key, type Profile, type State, dmId, keyTail, mutedNow } from '../shared/protocol'
+import { type Group, type Key, type Profile, type State, dmId, keyTail, mutedNow, statusOf } from '../shared/protocol'
 import * as call from './call'
-import { Avatar, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Splitter, Wordmark, useWidth } from './ui'
+import { Avatar, BannerArt, BannerPick, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Splitter, VerifiedSeal, Wordmark, gifFrom, useAccent, useWidth } from './ui'
 import { Chat } from './Chat'
 import { CameraDialog, Oculus, PersonVolume, Pip, RingBar, ShareDialog, Stage, VoiceMark, VoiceSignal } from './Media'
 import { DeleteAccount, ReportDialog, SettingsDialog } from './Settings'
-import { ActivityLine, ProfileActivity } from './Activity'
+import { ActivityLine, ProfileActivity, liveOf } from './Activity'
 import { MemberRow, Server, Speaking, channelOf, newId } from './Server'
 import { ProfileBanner, ProfilePop } from './Profile'
 import { type Modal, NOBODY, type People, type Run, api, card, groupName, labelOf } from './common'
 import { REACH_WORDS, callWords, forwardingWords, reachOf, routeWords } from '../shared/reach'
-import { ContextMenu, type Item, Rail, useMenus } from './Rail'
+import { ContextMenu, type Item, Rail, otherIn, railDms, useMenus } from './Rail'
 import { Splash, StillConnecting } from './Splash'
+import { ActivityFeed, DmList, observe as observeFeed } from './Lists'
+import { PersonPanel, ShowcaseView, WeekBars } from './Person'
+import { TOGETHER_TICK, tick as tickTogether } from './together'
 
 type Poke = { from: Key; server: string; channel: string }
 // "Ann invites you to Lounge in Ashen Vanguard", or null when that is not a channel we can see.
@@ -44,6 +47,11 @@ export default function Root() {
 }
 
 function App({ loaded }: { loaded: () => void }) {
+  useEffect(() => void (latest.current && observeFeed(latest.current)))
+  useEffect(() => {
+    const t = setInterval(() => latest.current && tickTogether(latest.current), TOGETHER_TICK)
+    return () => clearInterval(t)
+  }, [])
   const [st, setSt] = useState<State | null>(null)
   const [sel, setSel] = useState<string | null>(null)
   const [modal, setModal] = useState<Modal>(null)
@@ -63,15 +71,19 @@ function App({ loaded }: { loaded: () => void }) {
     t.forward = []
     setSel(c)
   }
+  // Back and forward through where we have been: the title bar's arrows and the mouse's own buttons
+  const stepTrail = (back: boolean) => {
+    const t = trail.current
+    const [from, to] = back ? [t.back, t.forward] : [t.forward, t.back]
+    if (!from.length) return
+    to.push(t.at)
+    setSel(from.pop()!)
+  }
   useEffect(() => {
     const step = (e: MouseEvent) => {
       if (e.button !== 3 && e.button !== 4) return
       e.preventDefault()
-      const t = trail.current
-      const [from, to] = e.button === 3 ? [t.back, t.forward] : [t.forward, t.back]
-      if (!from.length) return
-      to.push(t.at)
-      setSel(from.pop()!)
+      stepTrail(e.button === 3)
     }
     window.addEventListener('mouseup', step)
     return () => window.removeEventListener('mouseup', step)
@@ -97,6 +109,7 @@ function App({ loaded }: { loaded: () => void }) {
       const text = pokeText(latest.current, p)
       // An ignored person's pokes show nothing and make no sound
       if (!text || latest.current!.settings.ignored?.includes(p.from)) return
+      if (statusOf(latest.current!.profile)?.quiet) return // our status asks for quiet
       call.cue('poke')
       setPoke(p)
       setTimeout(() => setPoke((x) => (x === p ? null : x)), 120000)
@@ -176,7 +189,7 @@ function App({ loaded }: { loaded: () => void }) {
   }
   return (
     <>
-    <TitleBar place={place} call={callAway ? { name: callName!, back: () => go(callAway) } : undefined} />
+    <TitleBar place={place} call={callAway ? { name: callName!, back: () => go(callAway) } : undefined} nav={{ step: stepTrail, find: () => setModal({ kind: 'menu' }) }} />
     <div className="app">
       <Rail st={st} people={people} open={open} go={go} show={setModal} run={run} />
       {sv ? (
@@ -184,7 +197,7 @@ function App({ loaded }: { loaded: () => void }) {
       ) : open ? (
         <Conversation key={open} st={st} conv={open} people={people} run={run} go={go} show={setModal} />
       ) : (
-        <Home st={st} people={people} run={run} open={go} ring={(c) => (go(c), run(call.join(c)))} newGroup={() => setModal({ kind: 'group' })} />
+        <Home st={st} people={people} run={run} open={go} ring={(c) => (go(c), run(call.join(c)))} showModal={setModal} />
       )}
       <Bars st={st} people={people} where={call.conv ? callWhere(call.conv) : ''} back={() => call.conv && go(call.conv)} show={setModal} />
       <div className="pip-layer">
@@ -269,7 +282,7 @@ function App({ loaded }: { loaded: () => void }) {
 
 // The window's own title bar: where you are, a way back to a call you are in elsewhere, and the window buttons. The
 // strip itself drags the window (and double-click maximizes, as Windows does); the buttons opt out of dragging.
-function TitleBar({ place, call: live }: { place: string; call?: { name: string; back: () => void } }) {
+function TitleBar({ place, call: live, nav }: { place: string; call?: { name: string; back: () => void }; nav?: { step: (back: boolean) => void; find: () => void } }) {
   const [max, setMax] = useState(false)
   useEffect(() => {
     window.api.win('state').then(setMax)
@@ -277,11 +290,28 @@ function TitleBar({ place, call: live }: { place: string; call?: { name: string;
   }, [])
   return (
     <header className="titlebar">
+      {nav && (
+        <span className="titlebar-nav">
+          <button aria-label="Back" title="Back" onClick={() => nav.step(true)}>
+            <Icon name="back" size={16} />
+          </button>
+          <button aria-label="Forward" title="Forward" onClick={() => nav.step(false)}>
+            <Icon name="back" size={16} />
+          </button>
+        </span>
+      )}
       <span className="titlebar-place">{place}</span>
       {live && (
         <button className="titlebar-call" onClick={live.back} title="Back to your call">
           <span className="titlebar-live" aria-hidden="true" />
           In a call in {live.name}
+        </button>
+      )}
+      {nav && (
+        <button className="titlebar-find" onClick={nav.find}>
+          <Icon name="search" size={14} />
+          Find a friend, group, server or channel
+          <kbd>Ctrl K</kbd>
         </button>
       )}
       <div className="window-buttons">
@@ -305,88 +335,80 @@ function TitleBar({ place, call: live }: { place: string; call?: { name: string;
   )
 }
 
-// The narrow rail on the far left: identity, Home, each group, and the global actions.
-function Home({ st, people, run, open, ring, newGroup }: { st: State; people: People; run: Run; open: (conv: string) => void; ring: (conv: string) => void; newGroup: () => void }) {
-  const [width, setWidth] = useWidth('home', 260)
+// Home (design/mockups/hall.html, A): the column lists Friends, direct messages and groups; the page opens on friends
+// in game as art, then live calls, then everyone online and offline, with friend requests and the search on top.
+function Home({ st, people, run, open, ring, showModal }: { st: State; people: People; run: Run; open: (conv: string) => void; ring: (conv: string) => void; showModal: (m: Modal) => void }) {
+  const [width, setWidth] = useWidth('home', 300)
+  const menus = useMenus({ st, people, open: null, go: (c) => c && open(c), show: showModal, run })
+  const searchRef = useRef<HTMLDivElement>(null)
   const { prof, name, user, isOnline, show } = people
   const byStatus = (s: string) => Object.keys(st.friends).filter((k) => st.friends[k] === s)
   const friends = byStatus('friend').sort((a, b) => name(a).localeCompare(name(b)))
-  // A group call a friend is in, so the row can say where to find them.
-  const inCallIn = (k: Key) => Object.values(st.groups).find((g) => call.active.get(g.id)?.has(k))
-  const friend = (k: Key) => {
-    const r = reachOf(st, k)
-    return (
-      <div key={k} className="friend-row">
-        <button className="row-button" onClick={() => open(dmId(st.me, k))} onContextMenu={card(show, k)}>
-          <Avatar k={k} p={prof(k)} size={40} online={isOnline(k)} />
-          <span className="row-text">
-            <span className="row-title">{name(k)}</span>
-            <span className="row-sub">{st.activity[k]?.game ? <ActivityLine a={st.activity[k]} /> : r === 'connecting' || r === 'unreachable' ? REACH_WORDS[r] : prof(k).handle}</span>
-          </span>
-          {inCallIn(k) && <span className="row-where">In a call in {groupName(inCallIn(k)!)}</span>}
-          {call.active.get(dmId(st.me, k))?.size ? (
-            <span className="call-chip">
-              <Icon name="phone" size={14} /> Calling
-            </span>
-          ) : null}
-        </button>
-        <span className="row-actions">
-          <button className="round" aria-label={`Message ${name(k)}`} title="Message" onClick={() => open(dmId(st.me, k))}>
-            <Icon name="send" size={16} />
-          </button>
-          {isOnline(k) && (
-            <button className="round" aria-label={`Call ${name(k)}`} title="Call" onClick={() => ring(dmId(st.me, k))}>
-              <Icon name="phone" size={16} />
-            </button>
-          )}
-        </span>
-      </div>
-    )
+  // Where a live call is, in words: a group, a server's voice channel, or a direct call
+  const callName = (c: string) => {
+    if (st.groups[c]) return groupName(st.groups[c])
+    const sv = st.servers[c.split('.')[0]]
+    if (sv) return `${sv.channels.find((x) => `${sv.id}.${x.id}` === c)?.name ?? 'Voice'}, ${sv.name}`
+    return name(otherIn(c, st.me))
   }
+  const callOf = (k: Key) => [...call.active].find(([, ks]) => ks.has(k))?.[0]
+  const sub = (k: Key) => {
+    const r = reachOf(st, k)
+    if (st.activity[k]?.game) return <ActivityLine a={st.activity[k]} />
+    const c = callOf(k)
+    if (c) return <span className="voice-line">In voice: {callName(c)}</span>
+    return r === 'connecting' || r === 'unreachable' ? REACH_WORDS[r] : isOnline(k) ? 'Online' : prof(k).handle
+  }
+  const friend = (k: Key) => (
+    <div key={k} className="friend-row">
+      <button className="row-button" onClick={() => open(dmId(st.me, k))} onContextMenu={card(show, k)}>
+        <Avatar k={k} p={prof(k)} size={36} online={isOnline(k)} />
+        <span className="row-text">
+          <span className="row-title">{name(k)}</span>
+          <span className="row-sub">{sub(k)}</span>
+        </span>
+        {call.active.get(dmId(st.me, k))?.size ? (
+          <span className="call-chip">
+            <Icon name="phone" size={14} /> Calling
+          </span>
+        ) : null}
+      </button>
+      <span className="row-actions">
+        <button className="round" aria-label={`Message ${name(k)}`} title="Message" onClick={() => open(dmId(st.me, k))}>
+          <Icon name="send" size={16} />
+        </button>
+        {isOnline(k) && (
+          <button className="round" aria-label={`Call ${name(k)}`} title="Call" onClick={() => ring(dmId(st.me, k))}>
+            <Icon name="phone" size={16} />
+          </button>
+        )}
+      </span>
+    </div>
+  )
   // Online by a presence note counts too: seen online but not linked yet, which the row says
   const online = friends.filter(isOnline)
   const offline = friends.filter((k) => !isOnline(k))
   const incoming = byStatus('incoming')
   const outgoing = byStatus('outgoing')
   const groups = Object.values(st.groups).sort((a, b) => groupName(a).localeCompare(groupName(b)))
-  const live = groups.filter((g) => call.active.get(g.id)?.size && call.conv !== g.id)
+  const dms = railDms(st)
+  const playing = online.filter((k) => st.activity[k]?.game).sort((a, b) => st.activity[b]!.game!.since - st.activity[a]!.game!.since)
+  // Calls with people in them that we are not in: groups and servers' voice channels (a direct call rings instead)
+  const live = [...call.active].filter(([c, ks]) => ks.size && c !== call.conv && (st.groups[c] || st.servers[c.split('.')[0]]))
 
   return (
     <>
-      <aside className="sidebar side" style={{ width }} aria-label="Your groups">
-        <header className="sidebar-head">
-          <Wordmark />
-        </header>
+      <aside className="sidebar side home-column" style={{ width }} aria-label="Home">
+        <header className="side-title">Home</header>
+        <nav className="side-list">
+          <button className="side-row on" aria-current="page">
+            <Icon name="userPlus" size={18} />
+            <span className="row-title">Friends</span>
+          </button>
+          <ActivityFeed st={st} people={people} go={open} join={ring} />
+          <DmList st={st} people={people} here={null} go={open} menu={menus.open} />
+        </nav>
         <FriendId st={st} />
-        <section className="sidebar-section">
-          <div className="section-head">
-            <h2>Groups</h2>
-            <button className="icon-button" aria-label="Create a group" title="Create a group" onClick={newGroup}>
-              <Icon name="plus" size={16} />
-            </button>
-          </div>
-          {groups.map((g) => {
-            const here = g.members.filter(isOnline).length
-            const live = call.active.get(g.id)?.size || call.conv === g.id
-            return (
-              <button key={g.id} className="row-button item" onClick={() => open(g.id)}>
-                <GroupEmblem g={g} size={34} />
-                <span className="row-text">
-                  <span className="row-title">{groupName(g)}</span>
-                  <span className="row-sub">
-                    {here} of {g.members.length} online
-                  </span>
-                </span>
-                {live ? (
-                  <span className="call-chip">
-                    <Icon name="phone" size={14} /> In call
-                  </span>
-                ) : null}
-              </button>
-            )
-          })}
-          {!groups.length && <p className="quiet">No groups yet. Create one to talk with several friends at once.</p>}
-        </section>
       </aside>
       <Splitter label="Resize groups sidebar" width={width} set={setWidth} dir={1} />
 
@@ -394,47 +416,16 @@ function Home({ st, people, run, open, ring, newGroup }: { st: State; people: Pe
         <header className="page-head">
           <h1>Friends</h1>
           <span className="page-sub">
-            {online.length} of {friends.length} online
+            {online.length} of {friends.length} online{playing.length ? `, ${playing.length} in game` : ''}
           </span>
+          <button className="button primary page-action" onClick={() => searchRef.current?.querySelector('input')?.focus()}>
+            <Icon name="userPlus" size={16} /> Add friend
+          </button>
         </header>
         <div className="page-body">
-          <Search st={st} run={run} />
-          <div className="home-grid">
-          <div className="home-list">
-          <section className="online" aria-label="Online friends">
-            <h2>Online · {online.length}</h2>
-            {online.map(friend)}
-          </section>
-          <hr />
-          <section className="offline" aria-label="Offline friends">
-            <h2>Offline · {offline.length}</h2>
-            {offline.map(friend)}
-          </section>
-          {!friends.length && (
-            <div className="empty-state">
-              <p className="empty-title">No friends yet</p>
-              <p className="quiet">Search for someone's friend ID above. Your own ID is in the sidebar for them to find you.</p>
-            </div>
-          )}
+          <div ref={searchRef}>
+            <Search st={st} run={run} />
           </div>
-          {(live.length > 0 || incoming.length > 0 || outgoing.length > 0) && (
-          <div className="home-side">
-          {live.map((g) => (
-            <section key={g.id} className="live-call" aria-label={`Call in ${groupName(g)}`}>
-              <h2>Live in {groupName(g)}</h2>
-              <div className="live-row">
-                <span className="live-faces">
-                  {[...call.active.get(g.id)!].slice(0, 4).map((k) => (
-                    <Avatar key={k} k={k} p={prof(k)} size={34} />
-                  ))}
-                </span>
-                <span className="row-sub">{[...call.active.get(g.id)!].map(name).join(', ')}</span>
-                <button className="button primary" onClick={() => ring(g.id)}>
-                  Join call
-                </button>
-              </div>
-            </section>
-          ))}
           {(incoming.length > 0 || outgoing.length > 0) && (
             <section className="requests" aria-label="Friend requests">
               <div className="requests-head">
@@ -476,11 +467,98 @@ function Home({ st, people, run, open, ring, newGroup }: { st: State; people: Pe
               ))}
             </section>
           )}
-          </div>
+          {playing.length > 0 && (
+            <section className="playing-now" aria-label="Playing now">
+              <h2 className="shelf-title">
+                Playing now <span>{playing.length}</span>
+              </h2>
+              <div className="shelf">
+                {playing.map((k) => {
+                  const a = st.activity[k]!
+                  const g = a.game!
+                  const where = liveOf(g)
+                  const c = callOf(k)
+                  return (
+                    <article key={k} className="game-card">
+                      {g.app ? <img className="game-card-art" src={`eleusinia-art://steam/${g.app}/header`} alt="" onError={(e) => (e.currentTarget.style.display = 'none')} /> : <BannerArt id={k} p={prof(k)} still />}
+                      <div className="game-card-top">
+                        <span className="game-card-game">{g.name}</span>
+                        {(g.cs2 || g.dota) && <span className="game-card-live">Live</span>}
+                      </div>
+                      <div className="game-card-bottom">
+                        <div className="game-card-score">{where || g.name}</div>
+                        <div className="game-card-line">
+                          <ActivityLine a={a} />
+                        </div>
+                        <div className="game-card-foot">
+                          <button className="game-card-who" onClick={(e) => show(k, e.currentTarget)} aria-label={`${name(k)}'s profile`}>
+                            <Avatar k={k} p={prof(k)} size={24} />
+                            <span>{name(k)}</span>
+                          </button>
+                          {c ? (
+                            <button className="button" onClick={() => ring(c)}>
+                              <Icon name="phone" size={15} /> Join call
+                            </button>
+                          ) : (
+                            <button className="button" onClick={() => open(dmId(st.me, k))}>
+                              <Icon name="send" size={15} /> Message
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    </article>
+                  )
+                })}
+              </div>
+            </section>
           )}
-          </div>
+          {live.length > 0 && (
+            <section className="live-calls" aria-label="Live calls">
+              <h2 className="shelf-title">
+                Live calls <span>{live.length}</span>
+              </h2>
+              <div className="call-cards">
+                {live.map(([c, ks]) => (
+                  <div key={c} className="call-card live-call">
+                    <span className="live-faces">
+                      {[...ks].slice(0, 4).map((k) => (
+                        <Avatar key={k} k={k} p={prof(k)} size={32} />
+                      ))}
+                    </span>
+                    <span className="row-text">
+                      <span className="row-title">{callName(c)}</span>
+                      <span className="row-sub">{[...ks].map(name).join(', ')}</span>
+                    </span>
+                    <button className="button primary" onClick={() => ring(c)}>
+                      <Icon name="phone" size={15} /> Join
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
+          <section className="online people-list" aria-label="Online friends">
+            <h2 className="shelf-title">
+              Online <span>{online.length}</span>
+            </h2>
+            {online.map(friend)}
+          </section>
+          <hr className="people-divider" />
+          <section className="offline people-list" aria-label="Offline friends">
+            <h2 className="shelf-title">
+              Offline <span>{offline.length}</span>
+            </h2>
+            {offline.map(friend)}
+          </section>
+          {!friends.length && (
+            <div className="empty-state">
+              <p className="empty-title">No friends yet</p>
+              <p className="quiet">Search for someone's friend ID above. Your own ID is in the column on the left for them to find you.</p>
+            </div>
+          )}
         </div>
       </main>
+      {menus.node}
     </>
   )
 }
@@ -698,6 +776,8 @@ function Cropper({ file, done, close }: { file: File; done: (url: string) => voi
 // First launch (and Edit profile): the threshold into Eleusinia.
 function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () => void }) {
   const [avatar, setAvatar] = useState(st.profile.avatar)
+  const [banner, setBanner] = useState(st.profile.banner)
+  const [gameArt, setGameArt] = useState(st.profile.gameArt !== false)
   const [picking, setPicking] = useState<File | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -705,7 +785,7 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
     e.preventDefault()
     const f = new FormData(e.currentTarget)
     setBusy(true)
-    api.call('setProfile', { username: f.get('username'), name: f.get('name'), about: f.get('about'), avatar }).then(done, (x) => {
+    api.call('setProfile', { username: f.get('username'), name: f.get('name'), about: f.get('about'), avatar, ...(banner && { banner }), ...(!gameArt && { gameArt: false }) }).then(done, (x) => {
       setErr(String(x.message ?? x).replace(/^.*Error: /, ''))
       setBusy(false)
     })
@@ -733,13 +813,14 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
                   onChange={(e) => {
                     const f = e.target.files?.[0]
                     e.target.value = '' // so choosing the same file again reopens the cropper
-                    if (f) setPicking(f)
+                    if (f?.type === 'image/gif') gifFrom(f).then(setAvatar, (x) => setErr(String(x.message ?? x)))
+                    else if (f) setPicking(f)
                   }}
                 />
               </label>
               {avatar && (
                 <button type="button" className="button subtle" onClick={() => setAvatar('')}>
-                  Use my pattern instead
+                  Use the picture from my key
                 </button>
               )}
             </div>
@@ -771,6 +852,19 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
             </span>
             <input name="about" defaultValue={st.profile.about} maxLength={200} />
           </label>
+          {!first && (
+            <div className="field-label">
+              Banner
+              <div className="banner-preview profile">
+                <BannerArt id={st.me} p={{ ...st.profile, avatar, banner }} />
+              </div>
+              <BannerPick id={st.me} p={{ ...st.profile, avatar, banner }} set={setBanner} />
+              <label className="check-row">
+                <input type="checkbox" role="switch" checked={gameArt} onChange={(e) => setGameArt(e.target.checked)} />
+                <span>Show the game's art as my banner while I play</span>
+              </label>
+            </div>
+          )}
           {err && (
             <p role="alert" className="form-error">
               {err}
@@ -809,6 +903,7 @@ type CardProps = { k: Key; st: State; p: Profile; close: () => void; message: ()
 
 function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
   const status = st.friends[k]
+  const accent = useAccent(k, p, p.gameArt === false ? undefined : st.activity[k]?.game?.app)
   const shared = k === st.me ? [] : Object.values(st.groups).filter((g) => g.members.includes(k)).map(groupName)
   const then = (fn: () => void) => () => {
     fn()
@@ -817,11 +912,14 @@ function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
   return (
     <Dialog label={`Profile of ${p.name}`} close={close} className="card-dialog">
       <ProfileBanner st={st} k={k} p={p} />
-      <div className="card">
+      <div className="card" style={{ ['--person' as string]: accent }}>
         <div className="card-portrait">
           <Avatar k={k} p={p} size={96} online={k === st.me ? undefined : reachOf(st, k) !== 'offline'} />
         </div>
-        <h1>{p.name}</h1>
+        <h1>
+          {p.name} {st.settings.verified?.includes(k) && <VerifiedSeal />}
+        </h1>
+        {statusOf(p) && <p className="card-status">{statusOf(p)!.text}</p>}
         {k !== st.me && (
           <p className="row-sub">
             {st.hostedRelayed.includes(k) ? 'Online through an Eleusinia relay' : st.relayed.includes(k) ? 'Online through a friend: voice and text only' : REACH_WORDS[reachOf(st, k)]}
@@ -830,6 +928,8 @@ function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
         )}
         {p.about && <p className="about">{p.about}</p>}
         <ProfileActivity st={st} k={k} />
+        <ShowcaseView items={p.showcase} />
+        <WeekBars week={st.activity[k]?.week} />
         <dl className="identity">
           <dt>Friend ID</dt>
           <dd>
@@ -839,6 +939,20 @@ function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
           <dd>
             <b className="tail">{keyTail(k)}</b>
           </dd>
+          {k !== st.me && <dd className="key-hint">Their key's last letters. Read them out on a call or compare them in person to be sure this is really {p.name}.</dd>}
+          {k !== st.me && (
+            <dd className="key-verify">
+              <button
+                className="button subtle"
+                onClick={() => {
+                  const v = st.settings.verified ?? []
+                  run(api.call('setSettings', { verified: v.includes(k) ? v.filter((x) => x !== k) : [...v, k] }))
+                }}
+              >
+                {st.settings.verified?.includes(k) ? 'Verified in person · Undo' : 'We compared it: mark as verified'}
+              </button>
+            </dd>
+          )}
           {shared.length > 0 && (
             <>
               <dt>Groups</dt>
@@ -1142,8 +1256,8 @@ function Conversation({ st, conv, people, run, go, show: showModal }: ConvProps)
   const [picking, setPicking] = useState<File | null>(null)
   const menus = useMenus({ st, people, open: conv, go, show: showModal, run })
   const home = () => go(null)
-  const [left, setLeft] = useWidth('voice', 320)
-  const [right, setRight] = useWidth('members', 230)
+  const [left, setLeft] = useWidth('voice', 300)
+  const [right, setRight] = useWidth('members', 320)
   const { prof, name, isOnline, show } = people
   const group = st.groups[conv]
   const other = conv.split('_').find((k) => k !== st.me)!
@@ -1206,13 +1320,7 @@ function Conversation({ st, conv, people, run, go, show: showModal }: ConvProps)
               />
             )}
           </div>
-        ) : (
-          <button className="chamber-id person" onClick={(e) => show(other, e.currentTarget)} aria-label={`Open ${title}'s profile`}>
-            <Avatar k={other} p={prof(other)} size={64} online={isOnline(other)} />
-            <h1>{title}</h1>
-            <span className="row-sub">{prof(other).handle}</span>
-          </button>
-        )}
+        ) : null}
         <section className="chamber" aria-labelledby="voice-title">
           <h2 id="voice-title">Voice</h2>
           {inCall ? (
@@ -1281,6 +1389,10 @@ function Conversation({ st, conv, people, run, go, show: showModal }: ConvProps)
             </>
           )}
         </section>
+        <div className="side-list">
+          <ActivityFeed st={st} people={people} go={go} join={(c) => (go(c), run(call.join(c)))} max={4} />
+          <DmList st={st} people={people} here={conv} go={go} menu={menus.open} />
+        </div>
       </aside>
       <Splitter label="Resize voice sidebar" width={left} set={setLeft} dir={1} />
 
@@ -1307,6 +1419,8 @@ function Conversation({ st, conv, people, run, go, show: showModal }: ConvProps)
 
       <Splitter label="Resize members sidebar" width={right} set={setRight} dir={-1} />
       <aside className="members" style={{ width: right }} aria-label={group ? 'Group members' : 'People in this chat'}>
+        {!group && <PersonPanel st={st} k={other} conv={conv} people={people} />}
+        {!group && <h2 className="in-chat">In this chat</h2>}
         <h2>Online ({onlineMembers.length})</h2>
         <Speaking>{() => onlineMembers.map(member)}</Speaking>
         <hr />

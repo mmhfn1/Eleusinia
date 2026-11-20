@@ -5,9 +5,9 @@ import { type LinkPreview, firstLink, splitLinks } from '../shared/links'
 import { type FileRef, MAX_FILES, inlineKind, sizeLabel } from '../shared/media'
 import { type FileState, type Key, type Msg, type Profile, type State, MAX_TEXT, stack } from '../shared/protocol'
 import * as call from './call'
-import { Avatar, Dialog, Emblem, GroupEmblem, Icon } from './ui'
+import { Avatar, Dialog, Emblem, GroupEmblem, Icon, VerifiedSeal } from './ui'
 import { type People, type Run, api } from './common'
-import { pendingWords, reachOf } from '../shared/reach'
+import { pendingWords, reachOf, routeWords } from '../shared/reach'
 
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString()
 const dayLabel = (ts: number) =>
@@ -185,6 +185,7 @@ export function Chat({ st, conv, title, people, run, home, go, menu, stage, head
         delivered={m === lastDelivered}
         p={prof(m.author)}
         name={name(m.author)}
+        verified={!!st.settings.verified?.includes(m.author)}
         files={m.files?.map((f) => files[f.h]) ?? []}
         show={show}
         view={setViewing}
@@ -215,6 +216,7 @@ export function Chat({ st, conv, title, people, run, home, go, menu, stage, head
             </span>
           </button>
         ))}
+        {!group && !head && <KeepChip st={st} k={other} name={title} online={isOnline(other)} />}
         {addable.length > 0 && (
           <label className="add-member">
             <Icon name="userPlus" size={16} />
@@ -386,6 +388,7 @@ export function Chat({ st, conv, title, people, run, home, go, menu, stage, head
 // inline once downloaded; anything else is a card to download and then find in its folder.
 type RowProps = {
   m: Msg
+  verified: boolean // their key compared in person: a seal beside the name
   continued: boolean
   mine: boolean
   pending: boolean
@@ -401,7 +404,7 @@ type RowProps = {
 // One message. Kept from redrawing unless it changed: every state push (someone coming online) would otherwise redraw
 // the whole history. show and view are left out of the comparison: they only open things and never change what shows.
 const MsgRow = memo(
-  function MsgRow({ m, continued, mine, pending, waiting, delivered, p, name, files, show, view, go }: RowProps) {
+  function MsgRow({ m, continued, mine, pending, waiting, delivered, p, name, verified, files, show, view, go }: RowProps) {
     // An invite link shows as its card instead of its text
     const invites = m.text ? findInvites(m.text) : []
     const text = invites.reduce((t, l) => t.split(l).join(''), m.text ?? '').trim()
@@ -414,6 +417,7 @@ const MsgRow = memo(
               <button className="user" onClick={(e) => show(m.author, e.currentTarget)}>
                 {name}
               </button>
+              {verified && <VerifiedSeal />}
               <time dateTime={iso(m.ts)} title={new Date(m.ts).toLocaleString()}>
                 {clock(m.ts)}
               </time>
@@ -446,6 +450,7 @@ const MsgRow = memo(
             </span>
           )}
         </div>
+        <Seal name={name} />
       </div>
     )
   },
@@ -457,11 +462,73 @@ const MsgRow = memo(
     a.waiting === b.waiting &&
     a.delivered === b.delivered &&
     a.name === b.name &&
+    a.verified === b.verified &&
     a.p.name === b.p.name &&
     a.p.avatar === b.p.avatar &&
     a.files.length === b.files.length &&
     a.files.every((f, i) => f === b.files[i]),
 )
+
+// Every message is signed by its author and checked before it shows (sync.ts verifyMsg): the seal says so when asked.
+function Seal({ name }: { name: string }) {
+  const [open, setOpen] = useState(false)
+  return (
+    <span className="msg-seal-wrap">
+      <button className="msg-seal" aria-label={`Signed by ${name}`} aria-expanded={open} title={`Signed by ${name}`} onClick={() => setOpen(!open)}>
+        <Icon name="check" size={12} />
+      </button>
+      {open && (
+        <span className="msg-seal-note" role="note">
+          <b>Signed by {name}</b> Their key signed this message, so nobody passing it on could have changed a word.
+        </span>
+      )}
+    </span>
+  )
+}
+
+// In a DM's header: why the conversation is private, in one line, and the walls behind it on click (an Edo castle's
+// rings: the two of you, the route, the network).
+function KeepChip({ st, k, name, online }: { st: State; k: Key; name: string; online: boolean }) {
+  const [open, setOpen] = useState(false)
+  const route = routeWords(st, k)
+  const how = !online ? '' : route ? ` · ${route}` : ' · direct'
+  const lit = (i: number) => (i === 0 || (i === 1 && online) || i === 2 ? 'lit' : '')
+  return (
+    <span className="keep">
+      <button className="keep-chip" aria-expanded={open} onClick={() => setOpen(!open)}>
+        <Icon name="lock" size={13} /> Private{how}
+      </button>
+      {open && (
+        <span className="keep-pop" role="dialog" aria-label="Why this conversation is private">
+          <b className="keep-title">Private{online ? (route ? `, ${route}` : ', and direct') : ''}</b>
+          <svg className="keep-walls" viewBox="-60 -60 120 120" aria-hidden="true">
+            {[52, 36, 20].map((r, i) => (
+              <path key={r} className={lit(2 - i)} d={wall(r)} />
+            ))}
+          </svg>
+          <span className="keep-facts">
+            <span><b>Only the two of you</b> Sealed with {name}'s key and yours, and signed by whoever wrote it.</span>
+            <span><b>{online ? (route ? `Carried ${route}` : `Straight to ${name}`) : 'Sent when they are back'}</b> {online ? (route ? 'It carries sealed messages it cannot read.' : 'Nothing sits between you.') : 'It waits on your computer until then.'}</span>
+            <span><b>Kept on your computers</b> No copy lives anywhere else.</span>
+          </span>
+          <span className="keep-key">
+            {name}'s key <code>{k.slice(0, 16).replace(/(.{4})/g, '$1 ').trim()}</code>
+          </span>
+        </span>
+      )}
+    </span>
+  )
+}
+// A stepped, crenellated wall of radius r, for the keep
+function wall(r: number) {
+  const c = 6, n = 5, st = (2 * r) / (n * 2)
+  let d = `M ${-r} ${-r + c}`
+  for (let i = 0; i < n * 2; i++) {
+    const x = -r + i * st
+    d += i % 2 ? ` L ${x} ${-r - 4} L ${x + st} ${-r - 4}` : ` L ${x} ${-r} L ${x + st} ${-r}`
+  }
+  return d + ` L ${r} ${-r + c} L ${r} ${r - c} L ${r - c} ${r} L ${-r + c} ${r} L ${-r} ${r - c} Z`
+}
 
 type Invite = { server: string; name: string; avatar: string; members: number; online: number; member: boolean; expired?: boolean; revoked?: boolean; usedUp?: boolean } | null
 // Invite cards already asked for, while a chat is open (Chat clears it when it closes)
