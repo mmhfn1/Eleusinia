@@ -1,5 +1,6 @@
 import { expect, test } from 'vitest'
 import { LIMITS, createHub, refusal, tooFast } from '../src/forwarder/hub'
+import { cleanFwd } from '../src/shared/fwdproto'
 
 const k = (n: number) => n.toString(16).padStart(64, '0')
 
@@ -47,6 +48,8 @@ test('the server serves only viewers the streamer listed, holds offers until the
   linked.add(k(2))
   hub.opened(k(2))
   expect(sent).toContainEqual([k(2), { t: 'fwd', k: 'offer', s: k(1), sdp: 'v=0 offer' }])
+  expect(sent).toContainEqual([k(2), { t: 'fwd', k: 'hi' }]) // a greeting, so the dialer keeps the link
+  expect(cleanFwd({ t: 'fwd', k: 'hi' })).toBeNull() // which nodes drop
   hub.msg(k(2), { t: 'fwd', k: 'accept', s: k(1), sdp: 'v=0 answer' })
   hub.msg(k(3), { t: 'fwd', k: 'accept', s: k(1), sdp: 'v=0 sneaky' }) // a key not in the list
   await tick()

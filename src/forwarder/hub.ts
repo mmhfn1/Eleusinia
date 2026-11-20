@@ -120,6 +120,9 @@ export function createHub({ forwarder, link, used }: { forwarder: Fwdr; link: Li
       if (m && forForwarder(m)) handle(from, m).catch(() => counts.failed++)
     },
     opened(k: Key) {
+      // A dialer drops a link that hears nothing for 3 s (network.ts), and we may have nothing to say until our answer:
+      // this says we are here. Nodes drop it, as cleanFwd knows no 'hi'.
+      link.send(k, { t: 'fwd', k: 'hi' })
       for (const w of waiting.get(k)?.ws ?? []) link.send(k, w)
       waiting.delete(k)
     },
