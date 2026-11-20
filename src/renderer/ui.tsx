@@ -474,7 +474,9 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
   )
 }
 
-const [MIN_W, MAX_W] = [180, 480]
+const [MIN_W, MAX_W] = [180, 640]
+// A column's default: a share of the window, so wide screens get wide columns rather than a vast middle
+export const fit = (share: number, min: number, max: number) => Math.round(Math.max(min, Math.min(max, window.innerWidth * share)))
 // A sidebar width the user can drag, remembered on this computer.
 export function useWidth(id: string, initial: number) {
   const [w, setW] = useState(() => Number(localStorage.getItem('width-' + id)) || initial)

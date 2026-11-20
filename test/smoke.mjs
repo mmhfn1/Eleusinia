@@ -1317,6 +1317,7 @@ try {
   await b.ev(press('Disconnect'))
   await c.ev(press('Disconnect'))
 
+  await a.shot('conversation')
   console.log('--- Resizable sidebars')
   const widths = await a.ev(`(() => {
     const out = {}
@@ -1329,7 +1330,7 @@ try {
     return out
   })()`)
   await sleep(300)
-  const after = await a.ev(`[document.querySelector('aside.voice').getBoundingClientRect().width, document.querySelector('aside.members').getBoundingClientRect().width, localStorage.getItem('width-voice'), localStorage.getItem('width-members')]`)
+  const after = await a.ev(`[document.querySelector('aside.voice').getBoundingClientRect().width, document.querySelector('aside.members').getBoundingClientRect().width, localStorage.getItem('width-conv-left'), localStorage.getItem('width-conv-right')]`)
   console.log('     ', JSON.stringify(widths), '->', JSON.stringify(after))
   if (!(after[0] === 316 && after[1] === 336 && after[2] === '316' && after[3] === '336')) throw new Error('sidebars did not resize and persist')
   console.log('ok   voice and members sidebars grew by 16px and the widths were saved')
