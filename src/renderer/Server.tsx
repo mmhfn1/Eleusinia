@@ -9,7 +9,7 @@ import { Oculus, ShareDialog, Stage, VoiceMark, useSpeaking } from './Media'
 import { type Modal, type People, type Run, api, card } from './common'
 import { ContextMenu, type Item, useMenus } from './Rail'
 import { ServerSettings } from './ServerSettings'
-import { CopyButton, Dialog, GroupEmblem, Icon, ServerBannerArt, Splitter, useWidth, Avatar } from './ui'
+import { CopyButton, Dialog, GroupEmblem, Icon, ServerBannerArt, Splitter, useWidth, Avatar, leftWidth, rightWidth } from './ui'
 
 type Channel = ServerView['channels'][number]
 type Ask =
@@ -45,8 +45,8 @@ export function channelOf(sv: ServerView, asked?: string) {
 type Props = { st: State; sv: ServerView; channel?: string; people: People; run: Run; go: (c: string | null) => void; show: (m: Modal) => void }
 
 export function Server({ st, sv, channel, people: everyone, run, go, show }: Props) {
-  const [left, setLeft] = useWidth('server', 260)
-  const [right, setRight] = useWidth('members', 230)
+  const [left, setLeft] = useWidth('left', leftWidth())
+  const [right, setRight] = useWidth('right', rightWidth())
   const [menu, setMenu] = useState<{ x: number; y: number; for: Key | null } | null>(null)
   const [rolesOpen, setRolesOpen] = useState(false)
   const [ask, setAsk] = useState<Ask>(null)

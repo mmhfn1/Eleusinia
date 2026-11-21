@@ -476,6 +476,10 @@ export function CopyButton({ text, label }: { text: string; label: string }) {
 
 const [MIN_W, MAX_W] = [180, 640]
 // A column's default: a share of the window, so wide screens get wide columns rather than a vast middle
+// One width per side for every view (Home, DMs, groups, servers), so moving between them never shifts the columns;
+// the shares are a group's columns on a 1920 px window: 421 px left, 378 px right
+export const leftWidth = () => fit(0.22, 300, 520)
+export const rightWidth = () => fit(0.197, 280, 480)
 export const fit = (share: number, min: number, max: number) => Math.round(Math.max(min, Math.min(max, window.innerWidth * share)))
 // A sidebar width the user can drag, remembered on this computer.
 export function useWidth(id: string, initial: number) {
