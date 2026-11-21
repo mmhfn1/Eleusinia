@@ -3,7 +3,8 @@ import { type Offset, clampOffset, cropRect } from '../shared/crop'
 import { usable } from '../shared/devices'
 import { type Group, type Key, type Profile, type State, dmId, keyTail, mutedNow, statusOf } from '../shared/protocol'
 import * as call from './call'
-import { Avatar, BannerArt, BannerPick, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Splitter, VerifiedSeal, leftWidth, rightWidth, Wordmark, gifFrom, useAccent, useWidth } from './ui'
+import { Avatar, BannerArt, BannerPick, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Splitter, VerifiedSeal, leftWidth, rightWidth, Wordmark, gifPicture, useAccent, useWidth } from './ui'
+import { GifPicker, type Picked, gifFile } from './Gifs'
 import { Chat } from './Chat'
 import { CameraDialog, Oculus, PersonVolume, Pip, RingBar, ShareDialog, Stage, VoiceMark, VoiceSignal } from './Media'
 import { DeleteAccount, ReportDialog, SettingsDialog } from './Settings'
@@ -776,16 +777,20 @@ function Cropper({ file, done, close }: { file: File; done: (url: string) => voi
 // First launch (and Edit profile): the threshold into Eleusinia.
 function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () => void }) {
   const [avatar, setAvatar] = useState(st.profile.avatar)
+  const [gif, setGif] = useState(st.profile.gif) // the picture as a GIF, avatar then being its first frame
+  const [gifs, setGifs] = useState(false)
   const [banner, setBanner] = useState(st.profile.banner)
   const [gameArt, setGameArt] = useState(st.profile.gameArt !== false)
   const [picking, setPicking] = useState<File | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
+  const picture = (still: string, g?: typeof gif) => (setAvatar(still), setGif(g))
+  const pickGif = (p: Picked) => gifPicture(p, 256, 256).then(({ still, gif }) => picture(still, gif))
   function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     const f = new FormData(e.currentTarget)
     setBusy(true)
-    api.call('setProfile', { username: f.get('username'), name: f.get('name'), about: f.get('about'), avatar, ...(banner && { banner }), ...(!gameArt && { gameArt: false }) }).then(done, (x) => {
+    api.call('setProfile', { username: f.get('username'), name: f.get('name'), about: f.get('about'), avatar, ...(gif && { gif }), ...(banner && { banner }), ...(!gameArt && { gameArt: false }) }).then(done, (x) => {
       setErr(String(x.message ?? x).replace(/^.*Error: /, ''))
       setBusy(false)
     })
@@ -802,7 +807,7 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
         <form className="profile panel" onSubmit={submit}>
           <h1>{first ? 'Create your account' : 'Edit profile'}</h1>
           <div className="portrait-pick">
-            <Avatar k={st.me} p={{ ...st.profile, avatar }} size={88} />
+            <Avatar k={st.me} p={{ ...st.profile, avatar, gif }} size={88} />
             <div>
               <label className="button file-button">
                 {avatar ? 'Change picture' : 'Choose a picture'}
@@ -813,13 +818,16 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
                   onChange={(e) => {
                     const f = e.target.files?.[0]
                     e.target.value = '' // so choosing the same file again reopens the cropper
-                    if (f?.type === 'image/gif') gifFrom(f).then(setAvatar, (x) => setErr(String(x.message ?? x)))
+                    if (f?.type === 'image/gif') gifFile(f).then(pickGif).catch((x) => setErr(String(x.message ?? x)))
                     else if (f) setPicking(f)
                   }}
                 />
               </label>
+              <button type="button" className="button" onClick={() => setGifs(true)}>
+                <Icon name="gif" size={16} /> GIF
+              </button>
               {avatar && (
-                <button type="button" className="button subtle" onClick={() => setAvatar('')}>
+                <button type="button" className="button subtle" onClick={() => picture('')}>
                   Use the picture from my key
                 </button>
               )}
@@ -856,9 +864,9 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
             <div className="field-label">
               Banner
               <div className="banner-preview profile">
-                <BannerArt id={st.me} p={{ ...st.profile, avatar, banner }} />
+                <BannerArt id={st.me} p={{ ...st.profile, avatar, gif, banner }} />
               </div>
-              <BannerPick id={st.me} p={{ ...st.profile, avatar, banner }} set={setBanner} />
+              <BannerPick id={st.me} p={{ ...st.profile, avatar, gif, banner }} set={setBanner} />
               <label className="check-row">
                 <input type="checkbox" role="switch" checked={gameArt} onChange={(e) => setGameArt(e.target.checked)} />
                 <span>Show the game's art as my banner while I play</span>
@@ -874,7 +882,7 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
             <Cropper
               file={picking}
               done={(url) => {
-                setAvatar(url)
+                picture(url)
                 setPicking(null)
               }}
               close={(e) => {
@@ -883,6 +891,7 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
               }}
             />
           )}
+          {gifs && <GifPicker close={() => setGifs(false)} pick={pickGif} />}
           <div className="form-actions">
             {!first && (
               <button type="button" className="button" onClick={done}>

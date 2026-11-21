@@ -25,6 +25,7 @@ type Entry = {
   mine?: boolean // we sent it: never evicted
   want?: boolean // a download was asked for and is not done yet (resumed after a restart)
   saveTo?: string
+  open?: boolean // a profile's or server's GIF (protocol.ts GifRef): public, so served to anyone linked and asked of anyone
 }
 type Job = { from: Key | null; tried: Set<Key>; next: number; got: number; last: number; shown: number; failed?: string; checking?: boolean }
 
@@ -36,6 +37,7 @@ type Opts = {
   relayed: (key: Key) => boolean
   backlog: (key: Key) => number // bytes waiting to leave on that link
   members: (conv: string) => Key[]
+  everyone: () => Key[] // everyone linked now, asked for an open file after its owner
   emit: (f: FileState) => void
   limitMB: () => number | undefined
   want?: (key: Key) => void // nobody linked has it: link with whoever sent it (in a big group we may not be)
@@ -54,7 +56,7 @@ export const hashFile = (path: string) =>
       .on('error', reject)
   })
 
-export function createFiles({ dir, me, send, linked, relayed, backlog, members, emit, limitMB, want }: Opts) {
+export function createFiles({ dir, me, send, linked, relayed, backlog, members, everyone, emit, limitMB, want }: Opts) {
   const root = join(dir, 'files')
   mkdirSync(root, { recursive: true })
   const indexFile = join(root, 'index.json')
@@ -86,7 +88,7 @@ export function createFiles({ dir, me, send, linked, relayed, backlog, members, 
   function sources(h: string, relayedOnly = false) {
     const e = entries[h]
     const j = jobs.get(h)
-    const all = [...new Set(e.convs.flatMap(members))].filter((k) => k !== me && linked(k) && !j?.tried.has(k))
+    const all = [...new Set([...(e.open ? [e.by, ...everyone()] : []), ...e.convs.flatMap(members)])].filter((k) => k !== me && linked(k) && !j?.tried.has(k))
     const ok = (k: Key) => !relayed(k) || autoFetch({ h, n: 'x', s: e.size, t: e.type })
     const list = all.filter((k) => (relayedOnly ? !ok(k) : ok(k)))
     return list.sort((a, b) => +(b === e.by) - +(a === e.by))
@@ -168,6 +170,23 @@ export function createFiles({ dir, me, send, linked, relayed, backlog, members, 
     for (const f of m.files ?? []) if (autoFetch(f) && !entries[f.h].path) fetch(f.h)
   }
 
+  // A profile's or server's GIF someone is looking at: fetched into the cache unless it is here already. by: its owner.
+  function openGif(h: string, size: number, by: Key) {
+    // One we have from a chat stays served only there: a profile naming its hash cannot make it public
+    if (!isOwn(h)) (entries[h] = { size, type: 'image/gif', by, convs: [], at: Date.now(), open: true }), save()
+    if (!entries[h].path) fetch(h)
+    return status(h)
+  }
+
+  // A GIF here that the user made their picture or banner (or a server's): anyone linked may fetch it from now on, and
+  // it is kept like a file we sent. False when we do not have it.
+  function publish(h: string, open = true) {
+    const e = isOwn(h) ? entries[h] : undefined
+    if (!e?.path || !fresh(e)) return false
+    if ((open && !e.open) || !e.mine) Object.assign(e, { mine: true }, open && { open: true }), save()
+    return true
+  }
+
   // A file the user is sending from where it is: not copied, only hashed. It is served for as long as it stays unchanged.
   async function addPath(path: string): Promise<FileRef> {
     const st = statSync(path)
@@ -214,7 +233,7 @@ export function createFiles({ dir, me, send, linked, relayed, backlog, members, 
     if (typeof h !== 'string' || !/^[0-9a-f]{64}$/.test(h)) return
     // The same answer whether we lack it or it is not theirs to ask for, so nobody learns what we hold by guessing.
     const e = isOwn(h) ? entries[h] : undefined
-    if (!e || !e.convs.some((c) => members(c).includes(key)) || !Number.isSafeInteger(off) || (off as number) < 0 || (off as number) >= e.size) return send(key, { t: 'nope', h })
+    if (!e || !(e.open || e.convs.some((c) => members(c).includes(key))) || !Number.isSafeInteger(off) || (off as number) < 0 || (off as number) >= e.size) return send(key, { t: 'nope', h })
     if (backlog(key) > BACKLOG) return // asked again once the stalled sender is given up on, or the link drains
     if (!e.path || !fresh(e)) return send(key, { t: 'nope', h })
     const buf = Buffer.alloc(Math.min(CHUNK, e.size - (off as number)))
@@ -278,7 +297,7 @@ export function createFiles({ dir, me, send, linked, relayed, backlog, members, 
   function forgetConv(conv: string) {
     for (const [h, e] of Object.entries(entries)) {
       e.convs = e.convs.filter((c) => c !== conv)
-      if (!e.convs.length && !e.mine) drop(h)
+      if (!e.convs.length && !e.mine && !e.open) drop(h)
     }
     save()
   }
@@ -305,6 +324,16 @@ export function createFiles({ dir, me, send, linked, relayed, backlog, members, 
     busy: (k: Key) => [...jobs.values()].some((j) => j.from === k && !j.failed),
     addPath,
     addBytes,
+    openGif,
+    publish,
+    keep: (h: string) => publish(h, false), // a starred GIF: never evicted, still served only where it was shared
+    // GIFs here, the most recently used first: the picker's Recent
+    gifs: (max = 60) =>
+      Object.entries(entries)
+        .filter(([h, e]) => e.type === 'image/gif' && e.path && fresh(e) && isOwn(h))
+        .sort((a, b) => b[1].at - a[1].at)
+        .slice(0, max)
+        .map(([h, e]): FileRef => ({ h, n: h.slice(0, 12) + '.gif', s: e.size, t: 'image/gif' })),
     fetch,
     status,
     pathOf,

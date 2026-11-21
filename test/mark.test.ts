@@ -62,6 +62,15 @@ describe('a profile banner', () => {
     expect(cleanProfile({ ...base, banner: { pic: 'data:image/gif;base64,' + 'A'.repeat(MAX_MEDIA) } }).banner).toBeUndefined()
     expect(cleanProfile({ ...base, avatar: 'data:image/svg+xml;base64,AAAA' }).avatar).toBe('')
   })
+  it('keeps a GIF of any size up to 25 MB by hash beside its still, and only with one', () => {
+    const still = 'data:image/jpeg;base64,AAAA'
+    const ref = { h: 'cd'.repeat(32), s: 25 * 2 ** 20 }
+    const p = cleanProfile({ ...base, avatar: still, gif: { ...ref, by: 'x' }, banner: { pic: still, gif: ref } })
+    expect(p.gif).toEqual(ref)
+    expect(p.banner).toEqual({ pic: still, gif: ref })
+    expect(cleanProfile({ ...base, gif: ref }).gif).toBeUndefined() // no still: older copies would show nothing
+    expect(cleanProfile({ ...base, avatar: still, gif: { ...ref, s: ref.s + 1 } }).gif).toBeUndefined()
+  })
 })
 
 describe('a status', () => {

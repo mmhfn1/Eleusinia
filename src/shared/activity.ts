@@ -166,7 +166,10 @@ export function cleanShowcase(v: unknown): Showcase | undefined {
 // eleusinia-art://bungie/<path> (a bungie.net path from Destiny's icon or activity picture folders).
 const STEAM = 'https://cdn.akamai.steamstatic.com/'
 const STEAM_ART: Record<string, string> = { header: 'header.jpg', capsule: 'library_600x900.jpg', hero: 'library_hero.jpg', logo: 'logo.png' }
+// KLIPY's media (main/klipy.ts): eleusinia-art://klipy/<static|static1|static2>/<path>.webp or .gif, no dots in the path
 export function artUrl(url: string): string | null {
+  const g = /^eleusinia-art:\/\/klipy\/(static[12]?)(\/[\w/-]{1,200}\.(?:webp|gif))$/.exec(url)
+  if (g) return `https://${g[1]}.klipy.com${g[2]}`
   const d = /^eleusinia-art:\/\/dota\/(heroes|items)\/([a-z0-9_]{1,60})$/.exec(url)
   if (d) return `${STEAM}apps/dota2/images/dota_react/${d[1]}/${d[2]}.png`
   const b = /^eleusinia-art:\/\/bungie(\/.*)$/.exec(url)

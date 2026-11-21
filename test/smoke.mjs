@@ -1475,8 +1475,9 @@ try {
   if (!report.meta?.version || !report.events?.some((e) => e.area === 'call')) throw new Error('the received report lacks its app details or call events')
   console.log('ok   what arrived holds app details and events, and nothing identifying')
   await a.ev(`document.querySelector('dialog[open] .button.primary').click()`)
-  // Bob was killed earlier in this run: on his restart the app noticed and sent that on its own (diagnostics died with it).
-  await until("Bob's abrupt end earlier was reported by itself on his restart", async () => (await b.ev(`api.call('state').then((s) => s.reports === 0)`)) && inboxed().some((r) => r.kind === 'crash' && r.title === 'Eleusinia closed unexpectedly last time' && !r.events?.length), 90)
+  // Bob was killed earlier in this run: on his restart the app noticed and sent that on its own, with what led up to it
+  // (his run before the kill, from diagnostics.json)
+  await until("Bob's abrupt end earlier was reported by itself on his restart, with his run before it", async () => (await b.ev(`api.call('state').then((s) => s.reports === 0)`)) && inboxed().some((r) => r.kind === 'crash' && r.title === 'Eleusinia closed unexpectedly last time' && r.events?.some((e) => e.text.startsWith('started Eleusinia'))), 90)
 
 
   c.crash()
@@ -1607,6 +1608,22 @@ try {
   await until("Ann sets the server's banner to Dota 2's art", () => a.ev(banner570), 10)
   await until('and it reaches Bob with the server', () => b.ev(`api.call('state').then((s) => Object.values(s.servers).some((v) => v.banner?.app === 570))`), 30)
   await a.shot('server-banner')
+  // The server's picture as a GIF far too big for a greeting (about 600 KB): picked from the GIF picker's Recent, it
+  // goes by hash beside its still (protocol.ts GifRef), and Bob's rail fetches it from whoever has it
+  const gifH = await a.ev(`(() => {
+    const out = [71,73,70,56,57,97,1,0,1,0,128,0,0,255,255,255,0,0,0,33,249,4,0,0,0,0,0,44,0,0,0,0,1,0,1,0,0,2,2,68,1,0,33,254]
+    for (let i = 0; i < 2400; i++) out.push(255, ...new Array(255).fill(65))
+    out.push(0, 59)
+    return api.attach([{ name: 'big.gif', type: 'image/gif', data: new Uint8Array(out) }]).then(([r]) => r.h)
+  })()`)
+  await a.ev(`[...document.querySelectorAll('dialog[open] .portrait-pick button')].find((x) => x.textContent.includes('GIF')).click()`)
+  await until('the GIF picker opens', () => a.ev(`!!document.querySelector('dialog.gif-picker[open]')`), 5)
+  await a.ev(`[...document.querySelectorAll('dialog.gif-picker [role=tab]')].find((x) => x.textContent === 'Recent').click()`)
+  await until('its Recent tab has the GIF, playing from the computer', () => a.ev(`!!document.querySelector('dialog.gif-picker .gif-use img[src="eleusinia-file://${gifH}"]')`), 10)
+  await sleep(400), await a.shot('gif-picker')
+  await a.ev(`document.querySelector('dialog.gif-picker .gif-use img[src="eleusinia-file://${gifH}"]').closest('button').click()`)
+  await until("Ann's server picture becomes the GIF, with its first frame as the still", () => a.ev(`api.call('state').then((s) => Object.values(s.servers).some((v) => v.gif?.h === '${gifH}' && v.avatar.startsWith('data:image/jpeg')))`), 15)
+  await until("and Bob's rail shows it, fetched by hash", () => b.ev(`(() => { const i = document.querySelector('.rail-server img[src="eleusinia-file://${gifH}"]'); return !!i && i.complete && i.naturalWidth > 0 })()`), 60)
   await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
 
   console.log('--- Opening the app beside a voice channel, and restarting in one')
@@ -1660,6 +1677,10 @@ try {
   await c.ev(`${channel('Lounge')}.click()`)
   await until('Ann sees Bob and Cy in Lounge', () => inLounge(a, 'Bob', 'Cy'), 30)
   await restartAnn(9235)
+  // Her run before the kill is still in her diagnostics (diagnostics.json), for a crash report or a log pull after it
+  const starts = await diagLines(a, 'started Eleusinia')
+  if (starts.length < 2) throw new Error(`Ann's diagnostics lost her run before the restart: ${JSON.stringify(starts)}`)
+  console.log(`ok   Ann's diagnostics keep her run before the restart (${starts.length} starts)`)
   await until('as soon as she is linked, the freshly opened Ann sees Bob and Cy in Lounge and online, without joining', async () =>
     (await inLounge(a, 'Bob', 'Cy')) && (await a.ev(`!document.querySelector('.voice-bar') && !!document.querySelector('aside.members')?.textContent.includes('Online — 3')`)), 3)
   console.log('     ', (await diagLines(a, 'first person shown'))[0])

@@ -18,6 +18,8 @@ import {
   cleanProfile,
   dmId,
   KEY_SETTINGS,
+  type GifRef,
+  isGifRef,
   isGroupId,
   isHandle,
   isKey,
@@ -1355,6 +1357,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     relayed: (k) => relayedVia.get(k)?.kind === 'friend', // a hosted relay carries files too
     backlog: net.backlog,
     members,
+    everyone: net.keys,
     emit: (file) => emit({ type: 'file', file }),
     limitMB: () => s.settings.cacheMB,
     // Dialled with the next redial (it takes demand), and through a relaying friend if a direct dial fails
@@ -1741,7 +1744,9 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const clean = cleanProfile({ ...p, handle: s.profile.handle })
       if (!clean.name) throw new Error('Please enter a display name')
       // Dropped by the check above only when too large or not a picture: say so rather than lose it quietly
-      if ((p.avatar && !clean.avatar) || (p.banner && 'pic' in p.banner && !(clean.banner && 'pic' in clean.banner))) throw new Error('That picture is too large: pictures and GIFs can be up to about 300 KB')
+      if ((p.avatar && !clean.avatar) || (p.banner && 'pic' in p.banner && !(clean.banner && 'pic' in clean.banner))) throw new Error('That picture is too large to use')
+      // A GIF goes by hash, so it must be here to hand out (the picker added it)
+      for (const g of [clean.gif, clean.banner && 'gif' in clean.banner && clean.banner.gif]) if (g && !files.publish(g.h)) throw new Error('That GIF is not on this computer any more: choose it again')
       const fresh = !clean.handle
       if (fresh) {
         const username = normHandle(String(p.username ?? ''))
@@ -1944,6 +1949,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     // Accepted ops, newest first (at most 500), for the settings page; empty without viewAuditLog
     serverAudit: (id: string) => servers.audit(String(id)),
     serverAct(id: string, kind: string, body: unknown) {
+      if (kind === 'server.edit') for (const g of [(body as any)?.gif, (body as any)?.banner?.gif]) if (isGifRef(g) && !files.publish(g.h)) throw new Error('That GIF is not on this computer any more: choose it again')
       servers.act(String(id), String(kind), body)
       pushSoon()
     },
@@ -2107,6 +2113,20 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     download: (h: string, saveTo?: string) => files.fetch(String(h), saveTo),
     fileStatus: (hs: string[]) => (Array.isArray(hs) ? hs.slice(0, 500).map((h) => files.status(String(h))) : []),
     filePath: (h: string) => files.pathOf(String(h)),
+    // A person's or server's GIF the window shows: fetched by hash (files.ts open entries). by: whose it is.
+    openGif: (g: GifRef, by?: Key) => (isGifRef(g) ? files.openGif(g.h, g.s, [g.by, by].find(isKey) ?? me) : null),
+    // The GIF picker's own GIFs: starred ones, then the most recently used ones here (sent, received, picked)
+    localGifs() {
+      const recent = files.gifs()
+      const stars = (s.settings.gifStars ?? []).map((h) => files.status(h)).filter((f) => f.state === 'done')
+      return { stars: stars.map((f) => ({ h: f.h, n: f.h.slice(0, 12) + '.gif', s: f.size, t: 'image/gif' })), recent }
+    },
+    starGif(h: string, on: boolean) {
+      if (!/^[0-9a-f]{64}$/.test(String(h)) || (on && !files.keep(String(h)))) return
+      const rest = (s.settings.gifStars ?? []).filter((x) => x !== h)
+      s.settings.gifStars = on ? [String(h), ...rest].slice(0, 200) : rest
+      changed()
+    },
     cacheSize: () => files.cacheBytes(),
     clearCache: () => files.clearCache(),
     // What we are playing now, from main/activity.ts (null: nothing).

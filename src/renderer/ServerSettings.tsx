@@ -2,7 +2,8 @@
 // what the replay would refuse (src/shared/server.ts) is disabled here first, with the reason beside it.
 import { type DragEvent, type FormEvent, type KeyboardEvent, useEffect, useState } from 'react'
 import { type Key, type ServerView, type State } from '../shared/protocol'
-import { Avatar, CopyButton, Dialog, GroupEmblem, Icon, ServerBannerArt, WeavePick } from './ui'
+import { Avatar, CopyButton, Dialog, GroupEmblem, Icon, ServerBannerArt, WeavePick, cover, gifPicture } from './ui'
+import { GifPicker, type Picked, gifFile } from './Gifs'
 import { NOBODY, type Run, api, labelOf } from './common'
 import './server-settings.css'
 
@@ -66,20 +67,9 @@ const rankOf = (s: Srv, k: Key) => (k === s.owner ? Infinity : Math.max(0, ...(s
 
 // A centred crop of a chosen picture (square for the server's picture, wide for its banner), small enough for a server
 // op (isPicture: at most 60000 characters).
-async function shrink(file: File, w = 256, h = 256): Promise<string> {
-  const img = await createImageBitmap(file)
-  const scale = Math.min(img.width / w, img.height / h), sw = w * scale, sh = h * scale
-  const c = document.createElement('canvas')
-  c.width = w
-  c.height = h
-  c.getContext('2d')!.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, 0, 0, w, h)
-  img.close()
-  for (let q = 0.85; q > 0.2; q -= 0.15) {
-    const url = c.toDataURL('image/jpeg', q)
-    if (url.length <= 60000) return url
-  }
-  throw new Error('That picture is too detailed to use')
-}
+// Server pictures ride in its signed log, so they stay small; a GIF goes by hash beside its still (protocol.ts GifRef)
+const shrink = (file: Blob, w = 256, h = 256) => cover(file, w, h, 60000)
+const asGif = (g: Picked, w = 256, h = 256) => gifPicture(g, w, h, 60000)
 
 // channel: open on the Channels page with that channel chosen (Edit channel in its right-click menu)
 export function ServerSettings({ st, id, channel, close, run }: { st: State; id: string; channel?: string; close: () => void; run: Run }) {
@@ -151,6 +141,8 @@ function BannerSection({ s, can, act, run }: { s: Srv; can: boolean; act: P['act
     setBusy(true)
     run(act('server.edit', { banner: draft }).finally(() => setBusy(false)))
   }
+  const [gifs, setGifs] = useState(false)
+  const banner = (p: Promise<Picked>) => run(p.then((g) => asGif(g, 600, 360)).then(({ still, gif }) => pick({ pic: still, gif })))
   return (
     <section className="settings-section banner-section">
       <h2>Banner</h2>
@@ -166,16 +158,20 @@ function BannerSection({ s, can, act, run }: { s: Srv; can: boolean; act: P['act
           A picture
           <input
             type="file"
-            accept="image/png,image/jpeg,image/webp"
+            accept="image/png,image/jpeg,image/webp,image/gif"
             className="visually-hidden"
             disabled={!can}
             onChange={(e) => {
               const f = e.target.files?.[0]
               e.target.value = '' // so the same file can be chosen again
-              if (f) run(shrink(f, 600, 220).then((pic) => pick({ pic })))
+              if (f?.type === 'image/gif') banner(gifFile(f))
+              else if (f) run(shrink(f, 600, 360).then((pic) => pick({ pic })))
             }}
           />
         </label>
+        <button type="button" role="radio" aria-checked={false} disabled={!can} onClick={() => setGifs(true)}>
+          A GIF
+        </button>
         <button type="button" role="radio" aria-checked={src === 'game'} className={src === 'game' ? 'on' : ''} disabled={!can} onClick={() => pick({ app: 730 })}>
           A game's art
         </button>
@@ -211,6 +207,7 @@ function BannerSection({ s, can, act, run }: { s: Srv; can: boolean; act: P['act
           </button>
         )}
       </div>
+      {gifs && <GifPicker close={() => setGifs(false)} pick={(g) => banner(Promise.resolve(g))} />}
     </section>
   )
 }
@@ -222,7 +219,9 @@ function Lacks({ what }: { what: string }) {
 function Overview({ s, act, run }: P) {
   const [nm, setNm] = useState(s.name)
   const [busy, setBusy] = useState(false)
+  const [gifs, setGifs] = useState(false)
   const can = has(s, 'manageServer')
+  const picture = (p: Promise<Picked>) => run(p.then((g) => asGif(g)).then(({ still, gif }) => act('server.edit', { avatar: still, gif })))
   const save = (body: object) => {
     setBusy(true)
     act('server.edit', body).finally(() => setBusy(false))
@@ -241,16 +240,21 @@ function Overview({ s, act, run }: P) {
             {s.avatar ? 'Change picture' : 'Choose a picture'}
             <input
               type="file"
-              accept="image/png,image/jpeg,image/webp"
+              accept="image/png,image/jpeg,image/webp,image/gif"
               className="visually-hidden"
               disabled={!can || busy}
               onChange={(e) => {
                 const f = e.target.files?.[0]
                 e.target.value = '' // so the same file can be chosen again
-                if (f) run(shrink(f).then((avatar) => act('server.edit', { avatar })))
+                if (f?.type === 'image/gif') picture(gifFile(f))
+                else if (f) run(shrink(f).then((avatar) => act('server.edit', { avatar })))
               }}
             />
           </label>
+          <button type="button" className="button" disabled={!can || busy} onClick={() => setGifs(true)}>
+            <Icon name="gif" size={16} /> GIF
+          </button>
+          {gifs && <GifPicker close={() => setGifs(false)} pick={(g) => picture(Promise.resolve(g))} />}
           {s.avatar && (
             <button type="button" className="button subtle" disabled={!can || busy} onClick={() => save({ avatar: '' })}>
               Remove picture

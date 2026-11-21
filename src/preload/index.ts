@@ -26,6 +26,7 @@ contextBridge.exposeInMainWorld('api', {
   // Shared files (see main/index.ts): attach takes { path } or { name, type, data } for pasted pictures.
   attach: (items: unknown[]) => ipcRenderer.invoke('attach', items),
   pickFiles: () => ipcRenderer.invoke('pickFiles'),
+  gif: (action: string, arg?: string, offset?: number) => ipcRenderer.invoke('gif', action, arg, offset), // the GIF picker (main/index.ts)
   saveFile: (h: string, name: string) => ipcRenderer.invoke('saveFile', h, name),
   showFile: (h: string) => ipcRenderer.invoke('showFile', h),
   pathOf: (file: File) => webUtils.getPathForFile(file), // a dropped file's path; empty for pasted ones
