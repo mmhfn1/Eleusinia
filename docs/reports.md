@@ -19,7 +19,7 @@ themselves, unless a tester turns that off in the same place. Nobody needs a Git
 Only the installed app sends to the real inbox. Copies run from source (`npm run dev`) send nowhere unless
 `ELEUSINIA_INBOX` names a test inbox, as `npm run smoke` does, so stopping a development run never files a report.
 
-Every report also says how much memory the app was using (`appMemoryMb`, all its processes together). Diagnostics cover the last 15 minutes and live in memory only. A crash report never contains a memory dump. When
+Every report also says how much memory the app was using (`appMemoryMb`, all its processes together). Diagnostics cover the last 15 minutes of this session, plus up to 200 lines from earlier sessions in the last day: those are kept, already scrubbed, in `diagnostics.json` in the app's owner-only data folder, so a crash report or a log pull after a restart or a crash still shows what happened before it (a call that failed and was followed by a restart used to leave nothing to pull). A report over the size limit loses its oldest lines rather than being turned away. A crash report never contains a memory dump. When
 the app itself was ended abruptly (a crash, power loss, ending it in Task Manager; not Windows shutting down or logging off, which `session-end` catches), the next start sends a short
 "closed unexpectedly" report without events, since none survived.
 

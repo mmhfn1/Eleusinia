@@ -77,6 +77,7 @@ function mesh(names: string[], convMembers: string[]) {
       relayed: () => false,
       backlog: () => 0,
       members: (conv) => (conv === 'c' ? convMembers : []),
+      everyone: () => names.filter((k) => k !== me && up.has(k)),
       emit: (f) => (states[me][f.h] = f),
       limitMB: () => undefined,
     })
@@ -149,3 +150,21 @@ test('a picture arrives by itself; a damaged one is thrown away, then taken from
   await until(() => states.c[f.h]?.state === 'done')
   expect(readFileSync(peers.c.pathOf(f.h)!.path).equals(data)).toBe(true)
 }, 20000)
+
+test("a profile's GIF reaches someone in no chat with its owner, but a chat file stays with the chat", async () => {
+  const { peers, states } = mesh(['a', 'b', 'c'], ['a', 'b'])
+  const gif = peers.a.addBytes('me.gif', 'image/gif', randomBytes(CHUNK * 3))
+  expect(peers.a.publish(gif.h)).toBe(true)
+  expect(peers.c.openGif(gif.h, gif.s, 'a').state).not.toBe('done')
+  await until(() => states.c[gif.h]?.state === 'done')
+  // c, who only has it as a profile GIF, hands it on to the next person showing it
+  expect(peers.b.openGif(gif.h, gif.s, 'c').state).not.toBe('done')
+  await until(() => states.b[gif.h]?.state === 'done')
+
+  // A file shared in the chat: naming its hash as a profile GIF does not make it public
+  const secret = peers.a.addBytes('secret.gif', 'image/gif', randomBytes(CHUNK))
+  peers.a.note(msgOf('a', secret))
+  peers.c.openGif(secret.h, secret.s, 'a')
+  await until(() => states.c[secret.h]?.state === 'waiting')
+  expect(peers.c.status(secret.h).got).toBe(0)
+})

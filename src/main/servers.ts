@@ -194,6 +194,7 @@ export function createServers({ dir, keyPair, net, few, changed, order }: Opts) 
       id: s.id,
       name: s.name,
       avatar: s.avatar,
+      ...(s.gif && { gif: s.gif }),
       ...(s.banner && { banner: s.banner }),
       owner: s.owner,
       roles: s.roles,

@@ -1,7 +1,7 @@
 import { cleanWeave } from './mark'
 import { createHash } from 'node:crypto'
 import crypto from 'hypercore-crypto'
-import { type Key, isGroupId, isKey, isPicture } from './protocol'
+import { type GifRef, type Key, gifOf, isGifRef, isGroupId, isKey, isPicture } from './protocol'
 import { EDIT_AHEAD_MS } from './sync'
 
 // A server is an append-only log of signed operations. Every member replays the same ops in one order (`order`) and
@@ -26,12 +26,12 @@ export type Member = { roles: string[]; nick?: string; joinedAt: number }
 export type Invite = { id: string; pub: Key; by: Key; expires?: number; maxUses?: number; uses: number; revoked: boolean }
 // A server's banner: woven from its id (shared/mark.ts), a picture, or a game's art (Steam's, by app id), with how
 // dark it is drawn so the name stays readable. Without one, the weave its id gives.
-export type ServerBanner = ({ kind: number; shift: number } | { pic: string } | { app: number }) & { dark?: number }
+export type ServerBanner = ({ kind: number; shift: number } | { pic: string; gif?: GifRef } | { app: number }) & { dark?: number }
 export const BANNER_GAMES = [730, 570, 1085660] // Counter-Strike 2, Dota 2, Destiny 2
 export function cleanBanner(v: any): ServerBanner | undefined {
   if (!v || typeof v !== 'object') return undefined
   const dark = Number.isInteger(v.dark) && v.dark >= 0 && v.dark <= 90 ? { dark: v.dark as number } : {}
-  if (isPicture(v.pic)) return { pic: v.pic, ...dark }
+  if (isPicture(v.pic)) return { pic: v.pic, ...gifOf(v.gif), ...dark }
   if (BANNER_GAMES.includes(v.app)) return { app: v.app, ...dark }
   const w = cleanWeave(v)
   return w && { ...w, ...dark }
@@ -41,6 +41,7 @@ export type ServerState = {
   owner: Key
   name: string
   avatar: string
+  gif?: GifRef // the picture as a GIF (protocol.ts GifRef); avatar is then its first frame
   banner?: ServerBanner
   roles: Role[] // index = position: @everyone (id = server id) at 0, higher = more power
   members: Record<Key, Member>
@@ -217,9 +218,14 @@ function apply(s: ServerState, o: Op, latest: number): boolean {
       if (!p.has('manageServer') || (b.name !== undefined && !isName(b.name)) || (b.avatar !== undefined && b.avatar !== '' && !isPicture(b.avatar))) return false
       if (b.banner !== undefined && b.banner !== null && !cleanBanner(b.banner)) return false
       s.name = b.name ?? s.name
+      if (b.gif !== undefined && b.gif !== null && !isGifRef(b.gif)) return false
       s.avatar = b.avatar ?? s.avatar
+      // A new picture without a GIF (or from an older copy, which never sends one) drops the old GIF with it
+      if (b.gif) s.gif = { h: b.gif.h, s: b.gif.s, by: a }
+      else if (b.gif === null || b.avatar !== undefined) delete s.gif
       if (b.banner === null) delete s.banner // back to the weave its id gives
       else if (b.banner !== undefined) s.banner = cleanBanner(b.banner)
+      if (s.banner && 'gif' in s.banner && b.banner) s.banner.gif!.by = a
       return true
     }
     case 'role.add': {

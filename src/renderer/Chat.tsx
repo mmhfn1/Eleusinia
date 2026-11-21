@@ -7,6 +7,7 @@ import { type FileState, type Key, type Msg, type Profile, type State, MAX_TEXT,
 import * as call from './call'
 import { Avatar, Dialog, Emblem, GroupEmblem, Icon, VerifiedSeal } from './ui'
 import { type People, type Run, api } from './common'
+import { GifPicker } from './Gifs'
 import { pendingWords, reachOf, routeWords } from '../shared/reach'
 
 const sameDay = (a: number, b: number) => new Date(a).toDateString() === new Date(b).toDateString()
@@ -48,6 +49,7 @@ export function Chat({ st, conv, title, people, run, home, go, menu, stage, head
   const box = useRef<HTMLTextAreaElement>(null)
   const { prof, name, isOnline, show } = people
   const [attached, setAttached] = useState<FileRef[]>([])
+  const [gifs, setGifs] = useState(false)
   const [preparing, setPreparing] = useState(0)
   const [files, setFiles] = useState<Record<string, FileState>>({})
   const asked = useRef(new Set<string>())
@@ -359,6 +361,10 @@ export function Chat({ st, conv, title, people, run, home, go, menu, stage, head
         >
           <Icon name="attach" size={18} />
         </button>
+        <button type="button" className="icon-button attach-button" aria-label="Add a GIF" title="Add a GIF" disabled={attached.length >= MAX_FILES} onClick={() => setGifs(true)}>
+          <Icon name="gif" size={18} />
+        </button>
+        {gifs && <GifPicker close={() => (setGifs(false), box.current?.focus())} pick={(g) => setAttached((a) => [...a, g.ref].slice(0, MAX_FILES))} />}
         <textarea
           ref={box}
           name="text"

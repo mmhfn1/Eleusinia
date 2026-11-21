@@ -532,3 +532,21 @@ test('a server banner: a weave, a picture or a game, checked, and null puts the 
   w.by(w.o, 'server.edit', { banner: null })
   expect(w.state().banner).toBeUndefined()
 })
+
+test("a server's picture and banner can be GIFs by hash, and a new still picture drops the old GIF", () => {
+  const w = world()
+  const still = 'data:image/jpeg;base64,AAAA'
+  const gif = { h: 'ab'.repeat(32), s: 20 * 2 ** 20 }
+  w.by(w.o, 'server.edit', { avatar: still, gif, banner: { pic: still, gif, dark: 30 } })
+  let s = w.state()
+  expect(s.gif).toEqual({ ...gif, by: hex(w.o) })
+  expect(s.banner).toEqual({ pic: still, gif: { ...gif, by: hex(w.o) }, dark: 30 })
+  w.by(w.o, 'server.edit', { gif: { h: 'nothex', s: 1 } }) // refused whole
+  expect(w.state().gif).toEqual({ ...gif, by: hex(w.o) })
+  w.by(w.o, 'server.edit', { avatar: still }) // as an older copy sends it
+  s = w.state()
+  expect(s.gif).toBeUndefined()
+  expect(s.banner).toEqual({ pic: still, gif: { ...gif, by: hex(w.o) }, dark: 30 })
+  w.by(w.o, 'server.edit', { gif: { ...gif, s: 26 * 2 ** 20 } }) // over 25 MB
+  expect(w.state().gif).toBeUndefined()
+})

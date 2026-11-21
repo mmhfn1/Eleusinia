@@ -67,6 +67,9 @@ declare global {
       win(action: 'minimize' | 'maximize' | 'close' | 'state'): Promise<boolean>
       attach(items: ({ path: string } | { name: string; type: string; data: Uint8Array })[]): Promise<import('../shared/media').FileRef[]>
       pickFiles(): Promise<import('../shared/media').FileRef[]>
+      gif(action: 'search?'): Promise<boolean>
+      gif(action: 'search', q: string, offset?: number): Promise<{ id: string; title: string; w: number; h: number; preview: string; gif: string }[]>
+      gif(action: 'pick' | 'data', id: string): Promise<import('./Gifs').Picked>
       saveFile(h: string, name: string): Promise<string | null>
       showFile(h: string): Promise<void>
       pathOf(file: File): string

@@ -1,7 +1,9 @@
 // Small shared pieces of the Eleusinia interface: icons, portraits, emblems, dialogs and ornaments.
 import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 import { type Drawing, type Weave, WEAVES, banner, bytesOf, defaultWeave, picture, tones } from '../shared/mark'
-import { type Banner, type Group, type Key, MAX_MEDIA, type Profile, type ServerView } from '../shared/protocol'
+import { type Banner, type GifRef, type Group, type Key, MAX_MEDIA, type Profile, type ServerView } from '../shared/protocol'
+import { api } from './common'
+import { GifPicker, type Picked, gifFile } from './Gifs'
 
 const ICONS: Record<string, ReactNode> = {
   home: <path d="M3.5 10.5 12 3.5l8.5 7V20a1 1 0 0 1-1 1h-5v-6h-5v6h-5a1 1 0 0 1-1-1z" />,
@@ -110,6 +112,13 @@ const ICONS: Record<string, ReactNode> = {
       <path d="M16 16l4.5 4.5" />
     </>
   ),
+  star: <path d="m12 3.5 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z" />,
+  gif: (
+    <>
+      <rect x="2.5" y="5.5" width="19" height="13" rx="2" />
+      <path d="M10 9.5H8a1.5 1.5 0 0 0-1.5 1.5v2A1.5 1.5 0 0 0 8 14.5h2V12M13 9.5v5M16 14.5v-5h2.5M16 12h2" />
+    </>
+  ),
   attach: <path d="M20 11.5 12.2 19.3a5 5 0 0 1-7.1-7.1l8.1-8.1a3.3 3.3 0 0 1 4.7 4.7l-8.1 8.1a1.7 1.7 0 0 1-2.4-2.4L14.8 7" />,
   file: <path d="M13.5 3.5H7a1.5 1.5 0 0 0-1.5 1.5v14A1.5 1.5 0 0 0 7 20.5h10a1.5 1.5 0 0 0 1.5-1.5V8.5zM13.5 3.5v5h5" />,
   download: <path d="M12 4v11M7 10.5l5 5 5-5M5 19.5h14" />,
@@ -186,14 +195,38 @@ export function Drawn({ d, slice, className }: { d: Drawing; slice?: boolean; cl
 export function Avatar({ k, p, size = 32, online }: { k: Key; p: Profile; size?: number; online?: boolean }) {
   return (
     <span className="avatar" style={{ width: size, height: size }}>
-      {p.avatar ? <img src={p.avatar} alt="" /> : <Drawn d={picture(k)} />}
+      {p.avatar ? p.gif ? <GifImg g={p.gif} by={k} still={p.avatar} /> : <img src={p.avatar} alt="" /> : <Drawn d={picture(k)} />}
       {online !== undefined && <span className={online ? 'presence on' : 'presence'} title={online ? 'Online' : 'Offline'} />}
     </span>
   )
 }
 
+// A person's or server's GIF (protocol.ts GifRef): its still until the GIF itself is here, fetched by hash from its
+// owner or anyone showing it. One listener for all of them, so a member list full of GIFs adds no more.
+const gifWaits = new Map<string, Set<() => void>>()
+let gifEvents: (() => void) | null = null
+export function GifImg({ g, by, still, className }: { g: GifRef; by?: Key; still: string; className?: string }) {
+  const [done, setDone] = useState(false)
+  useEffect(() => {
+    let gone = false
+    const ready = () => !gone && setDone(true)
+    setDone(false)
+    gifEvents ??= api.on((e) => e.type === 'file' && e.file.state === 'done' && gifWaits.get(e.file.h)?.forEach((f) => f()))
+    const waits = gifWaits.get(g.h) ?? new Set()
+    gifWaits.set(g.h, waits.add(ready))
+    api.call('openGif', g, by).then((f) => f?.state === 'done' && ready(), () => {})
+    return () => {
+      gone = true
+      waits.delete(ready)
+      if (!waits.size) gifWaits.delete(g.h)
+    }
+  }, [g.h, by])
+  return <img className={className} src={done ? `eleusinia-file://${g.h}` : still} alt="" />
+}
+
 // A group's (or server's) tile: its picture, or a built form drawn from its id.
-export function GroupEmblem({ g, size = 32 }: { g: Pick<Group, 'id' | 'name' | 'avatar'>; size?: number }) {
+export function GroupEmblem({ g, size = 32 }: { g: Pick<Group, 'id' | 'name' | 'avatar'> & { gif?: GifRef }; size?: number }) {
+  if (g.avatar && g.gif) return <span className="crest" style={{ width: size, height: size }}><GifImg g={g.gif} still={g.avatar} /></span>
   if (g.avatar) return <img className="crest" src={g.avatar} alt="" style={{ width: size, height: size }} />
   return (
     <span className="crest drawn" style={{ width: size, height: size }} aria-hidden="true">
@@ -299,43 +332,41 @@ export function VerifiedSeal() {
 // still: drawn from the first frame, so a GIF banner does not move (call banners, cards on Home)
 export function BannerArt({ id, p, tall, still }: { id: string; p: Profile; tall?: boolean; still?: boolean }) {
   const b = p.banner
-  if (b && 'pic' in b) return still ? <StillImg className="woven banner-pic" src={b.pic} /> : <img className="woven banner-pic" src={b.pic} alt="" />
+  if (b && 'pic' in b) return still ? <StillImg className="woven banner-pic" src={b.pic} /> : b.gif ? <GifImg className="woven banner-pic" g={b.gif} by={id} still={b.pic} /> : <img className="woven banner-pic" src={b.pic} alt="" />
   if ((!b || 'fade' in b) && p.avatar) return still ? <StillImg className="woven banner-fade" src={p.avatar} /> : <img className="woven banner-fade" src={p.avatar} alt="" />
   return <Woven id={id} weave={b && 'kind' in b ? b : undefined} tall={tall} />
 }
 
-// A GIF picture as it is, so it still moves (a cropper would flatten it to one frame)
-export async function gifFrom(file: File): Promise<string> {
-  const url = await new Promise<string>((ok, no) => {
-    const r = new FileReader()
-    r.onload = () => ok(String(r.result))
-    r.onerror = () => no(new Error('That file could not be read'))
-    r.readAsDataURL(file)
-  })
-  if (url.length > MAX_MEDIA) throw new Error('That GIF is too large: pictures can be up to about 300 KB')
-  return url
-}
-
-// A chosen banner picture: a GIF as it is (so it still moves), anything else cut to a wide 1200 x 440 JPEG
-async function bannerFrom(file: File): Promise<string> {
-  if (file.type === 'image/gif') return gifFrom(file)
+// A picture cut to cover w x h, as a JPEG data URL of at most max characters: for a GIF, its first frame, the still
+// a profile or server keeps beside it
+export async function cover(file: Blob, w: number, h: number, max = MAX_MEDIA): Promise<string> {
   const img = await createImageBitmap(file)
-  const w = 1200, h = 440, scale = Math.min(img.width / w, img.height / h)
+  const scale = Math.min(img.width / w, img.height / h), sw = w * scale, sh = h * scale
   const c = document.createElement('canvas')
   c.width = w
   c.height = h
-  c.getContext('2d')!.drawImage(img, (img.width - w * scale) / 2, (img.height - h * scale) / 2, w * scale, h * scale, 0, 0, w, h)
+  c.getContext('2d')!.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, 0, 0, w, h)
   img.close()
   for (let q = 0.85; q > 0.2; q -= 0.1) {
-    const out = c.toDataURL('image/jpeg', q)
-    if (out.length <= MAX_MEDIA) return out
+    const url = c.toDataURL('image/jpeg', q)
+    if (url.length <= max) return url
   }
-  throw new Error('That picture is too detailed to use as a banner')
+  throw new Error('That picture is too detailed to use')
+}
+// A GIF picked or uploaded as a picture or banner: its still at that size, and the GIF itself by hash
+export const gifPicture = async ({ ref, data }: Picked, w: number, h: number, max = MAX_MEDIA) => ({ still: await cover(new Blob([data as BlobPart]), w, h, max), gif: { h: ref.h, s: ref.s } })
+
+// A chosen banner picture: a GIF as it is (so it still moves), anything else cut to a wide 1200 x 440 JPEG
+const bannerFrom = async (file: File): Promise<Banner> => {
+  if (file.type !== 'image/gif') return { pic: await cover(file, 1200, 440) }
+  const { still, gif } = await gifPicture(await gifFile(file), 1200, 440)
+  return { pic: still, gif }
 }
 
 // The banner choices: your picture softened, the four weaves of your key (with their tones), or an upload
 export function BannerPick({ id, p, set }: { id: string; p: Profile; set: (b: Banner) => void }) {
   const [err, setErr] = useState('')
+  const [gifs, setGifs] = useState(false)
   const b = p.banner
   const on = b && 'pic' in b ? 'pic' : b && 'kind' in b ? b.kind : b || p.avatar ? 'fade' : defaultWeave(id).kind
   const weave = b && 'kind' in b ? b : { kind: defaultWeave(id).kind, shift: 0 }
@@ -362,10 +393,14 @@ export function BannerPick({ id, p, set }: { id: string; p: Profile; set: (b: Ba
             onChange={(e) => {
               const f = e.target.files?.[0]
               e.target.value = '' // so the same file can be chosen again
-              if (f) bannerFrom(f).then((pic) => (setErr(''), set({ pic })), (x) => setErr(String(x.message ?? x)))
+              if (f) bannerFrom(f).then((b) => (setErr(''), set(b)), (x) => setErr(String(x.message ?? x)))
             }}
           />
         </label>
+        <button type="button" className="weave-kind upload" onClick={() => setGifs(true)}>
+          <Icon name="gif" size={20} />
+          <span>GIF</span>
+        </button>
       </div>
       {typeof on === 'number' && (
         <label className="weave-tones">
@@ -377,6 +412,7 @@ export function BannerPick({ id, p, set }: { id: string; p: Profile; set: (b: Ba
         </label>
       )}
       {err && <span className="form-error">{err}</span>}
+      {gifs && <GifPicker close={() => setGifs(false)} pick={(g) => gifPicture(g, 1200, 440).then(({ still, gif }) => (setErr(''), set({ pic: still, gif })))} />}
     </div>
   )
 }
@@ -387,7 +423,7 @@ export function ServerBannerArt({ sv, b = sv.banner }: { sv: Pick<ServerView, 'i
   const src = b && 'pic' in b ? b.pic : b && 'app' in b ? `eleusinia-art://steam/${b.app}/header` : null
   return (
     <span className="server-banner" aria-hidden="true" style={{ ['--dark' as string]: b?.dark ?? 45 }}>
-      {src ? <img src={src} alt="" /> : <Woven id={sv.id} weave={b && 'kind' in b ? b : undefined} />}
+      {b && 'pic' in b && b.gif ? <GifImg g={b.gif} still={b.pic} /> : src ? <img src={src} alt="" /> : <Woven id={sv.id} weave={b && 'kind' in b ? b : undefined} />}
     </span>
   )
 }
@@ -442,7 +478,7 @@ export function Dialog({ label, close, children, className = '' }: { label: stri
   return (
     <dialog ref={ref} className={className} onClose={close} onClick={(e) => e.target === ref.current && close()} aria-label={label}>
       <div className="dialog-body" tabIndex={-1}>
-        <button className="icon-button dialog-close" onClick={close} aria-label="Close">
+        <button type="button" className="icon-button dialog-close" onClick={close} aria-label="Close">
           <Icon name="close" />
         </button>
         {children}

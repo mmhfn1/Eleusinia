@@ -30,7 +30,7 @@
 ### Friends and profiles
 - Friend IDs like `name#1234`. Search finds people even while they're offline, and requests wait until they're back.
 - Requests are sealed, so nobody watching can tell who is asking whom.
-- Profiles with a name, about line, picture and a banner. Without an uploaded picture, everyone gets one built from their key (an arch, steps, a split disc), so the same person always looks the same and a copy looks different. Banners can be your picture softened, a pattern woven from your key in tones you pick, or a picture or GIF you upload; pictures can be GIFs too (up to about 300 KB each). While you play, friends see the game's art as your banner unless you turn that off. Click anyone to open their profile beside them, with what they're playing and a box to message them.
+- Profiles with a name, about line, picture and a banner. Without an uploaded picture, everyone gets one built from their key (an arch, steps, a split disc), so the same person always looks the same and a copy looks different. Banners can be your picture softened, a pattern woven from your key in tones you pick, or a picture or GIF you upload; pictures can be GIFs too (up to 25 MB), and so can a server's picture and banner. A GIF picker (KLIPY search, your starred and recent GIFs, or one from your computer) sits in the chat box and everywhere a picture is chosen. While you play, friends see the game's art as your banner unless you turn that off. Click anyone to open their profile beside them, with what they're playing and a box to message them.
 - Nicknames, pins, mutes and blocking, all from a right-click.
 
 ### Chat and files

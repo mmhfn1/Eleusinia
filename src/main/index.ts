@@ -13,7 +13,7 @@ import { type FileRef, inlineKind, mimeOf, safeName } from '../shared/media'
 import { parseForwarders, parseRelays } from '../shared/relays'
 import { isWebUrl } from '../shared/links'
 import { isKey } from '../shared/protocol'
-import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics } from '../shared/reports'
+import { AREAS, BUILD, INBOX_KEY, type Meta, createDiagnostics, previousDiagnostics } from '../shared/reports'
 import { kindOf, shareable } from '../shared/sources'
 import { limiter } from '../shared/invite'
 import { isNewer, verifyUpdate } from '../shared/updatesig'
@@ -29,6 +29,7 @@ import { previewLink } from './links'
 import { type Staged, canInstall, fetchUpdate, install, tidy } from './selfupdate'
 import { createNode } from './node'
 import { createForwarder } from './forwarder'
+import { createKlipy } from './klipy'
 
 // `npm run inbox` runs the developers' inbox (inbox.ts) instead of the app, in a data folder of its own.
 const inboxMode = process.argv.includes('--inbox')
@@ -235,11 +236,11 @@ function startActivity(node: ReturnType<typeof createNode>, dir: string, diag: (
     const url = artUrl(req.url)
     if (!url) return new Response(null, { status: 404 })
     const file = join(cache, createHash('sha256').update(url).digest('hex').slice(0, 32))
-    const type = url.endsWith('.png') ? 'image/png' : 'image/jpeg'
+    const type = url.endsWith('.png') ? 'image/png' : url.endsWith('.webp') ? 'image/webp' : 'image/jpeg'
     if (existsSync(file)) return new Response(readFileSync(file), { headers: { 'content-type': type, 'access-control-allow-origin': '*' } })
     const res = await net.fetch(url, { signal: AbortSignal.timeout(15000) }).catch(() => null)
     const ct = res?.headers.get('content-type') ?? ''
-    if (!res?.ok || !/^image\/(jpeg|png|webp)/.test(ct)) return new Response(null, { status: 404 })
+    if (!res?.ok || !/^image\/(jpeg|png|webp|gif)/.test(ct)) return new Response(null, { status: 404 })
     const body = Buffer.from(await res.arrayBuffer())
     if (body.length > 4e6) return new Response(null, { status: 404 })
     writeFileSync(file, body)
@@ -493,8 +494,23 @@ function startApp() {
     else win.hide()
   })
 
-  // The last few minutes of what happened, scrubbed and in memory only, for problem and crash reports (reports.ts).
-  const diagnostics = createDiagnostics()
+  // The last few minutes of what happened, scrubbed, for problem and crash reports and log pulls (reports.ts), and the
+  // earlier sessions' last lines from diagnostics.json in the owner-only data folder, so a restart or a crash does not
+  // lose what came before it (a failed call, then a restart, used to leave nothing to pull)
+  const diagFile = join(dir, 'diagnostics.json')
+  const stored = (() => {
+    try {
+      return previousDiagnostics(JSON.parse(readFileSync(diagFile, 'utf8')))
+    } catch {
+      return []
+    }
+  })()
+  const diagnostics = createDiagnostics(undefined, stored, (events) => {
+    try {
+      writeFileSync(diagFile + '.tmp', JSON.stringify(events), { mode: 0o600 })
+      renameSync(diagFile + '.tmp', diagFile)
+    } catch {}
+  })
   const appMemoryMb = () => Math.round(app.getAppMetrics().reduce((n, m) => n + m.memory.workingSetSize, 0) / 1024)
   const meta = (): Meta => ({
     version: app.getVersion(),
@@ -573,13 +589,14 @@ function startApp() {
   // Crash reports go to the developers by themselves (unless turned off in Settings), at most 5 an hour so a crash
   // that repeats cannot flood anyone. They carry only what a problem report would: never a memory dump.
   const crashes: number[] = []
-  function crashed(title: string, detail: string, events = true) {
+  function crashed(title: string, detail: string) {
     diagnostics.add('error', `${title}: ${detail}`)
     const hour = crashes.filter((t) => t > Date.now() - 3600e3)
     if (node.state().settings.crashReports === false || hour.length >= 5) return
     crashes.splice(0, crashes.length, ...hour, Date.now())
     try {
-      node.report({ kind: 'crash', title, body: `${detail}\n\nSent automatically; this can be turned off in Settings.`, meta: meta(), events: events ? diagnostics.list() : [] })
+      diagnostics.flush()
+      node.report({ kind: 'crash', title, body: `${detail}\n\nSent automatically; this can be turned off in Settings.`, meta: meta(), events: diagnostics.list() })
     } catch {}
   }
   app.on('render-process-gone', (_e, wc, d) => {
@@ -595,13 +612,13 @@ function startApp() {
   })
   process.on('uncaughtException', (e) => crashed('An error in the background process', e.stack ?? String(e)))
   process.on('unhandledRejection', (e) => diagnostics.add('error', `unhandled: ${e instanceof Error ? e.message : String(e)}`))
-  // A marker that only a normal shutdown removes: still there at start means the last run ended abruptly. Nothing
-  // from that run survives (diagnostics are in memory only), so the report says just that.
+  // A marker that only a normal shutdown removes: still there at start means the last run ended abruptly. Its last lines
+  // come from diagnostics.json (saved within 2 s of each), so the report carries what led up to it.
   const running = join(dir, 'running')
-  if (existsSync(running)) crashed('Eleusinia closed unexpectedly last time', 'It did not shut down normally: a crash, the computer losing power, or the app being ended from Task Manager.', false)
+  if (existsSync(running)) crashed('Eleusinia closed unexpectedly last time', 'It did not shut down normally: a crash, the computer losing power, or the app being ended from Task Manager.')
   writeFileSync(running, '')
   // Windows ends the app at shutdown, restart or logoff without will-quit, which would read as a crash next start
-  win.on('session-end', () => (node.flush(), rmSync(running, { force: true })))
+  win.on('session-end', () => (node.flush(), diagnostics.flush(), rmSync(running, { force: true })))
   // Node methods the page must never reach: they read or reveal local files, or end the node
   const MAIN_ONLY = new Set(['addFile', 'addBytes', 'filePath', 'destroy', 'flush', 'setActivity', 'updateStep'])
   ipcMain.handle('call', async (_e, method: string, ...args: unknown[]) => {
@@ -709,6 +726,23 @@ function startApp() {
     const ref = node.addBytes(name, t, item.data)
     return img ? { ...ref, th: preview(img) } : ref
   }
+  // The GIF picker (renderer/Gifs.tsx): KLIPY search, a picked KLIPY GIF added like a pasted file, and a GIF here as
+  // bytes, for the picker to draw its first frame as the still a profile or server keeps beside it
+  const klipy = createKlipy(import.meta.env.MAIN_VITE_KLIPY_API_KEY, (url) => net.fetch(url, { signal: AbortSignal.timeout(30000) }))
+  ipcMain.handle('gif', async (_e, action: unknown, arg: unknown, offset: unknown) => {
+    if (action === 'search') return klipy.search(String(arg ?? ''), Number(offset) || 0)
+    if (action === 'pick') {
+      const data = await klipy.download(String(arg))
+      return { ref: node.addBytes('klipy.gif', 'image/gif', data), data }
+    }
+    if (action === 'data') {
+      const f = node.filePath(String(arg))
+      if (!f || f.type !== 'image/gif') throw new Error('That GIF is not on this computer')
+      return { ref: { h: String(arg), n: String(arg).slice(0, 12) + '.gif', s: statSync(f.path).size, t: 'image/gif' }, data: readFileSync(f.path) }
+    }
+    if (action === 'search?') return klipy.on
+    throw new Error('Unknown action')
+  })
   ipcMain.handle('attach', (_e, items: unknown) => Promise.all((Array.isArray(items) ? items.slice(0, 10) : []).map(attach)))
   ipcMain.handle('pickFiles', async () => {
     const r = await dialog.showOpenDialog(win, { properties: ['openFile', 'multiSelections'] })
@@ -816,6 +850,7 @@ function startApp() {
     // The marker goes first: closing the network can take seconds, and an installer or Windows shutting down may end
     // the process before that finishes, which would then be reported as a crash
     rmSync(running, { force: true })
+    diagnostics.flush()
     await node.destroy().catch(() => {})
     tray.destroy()
     // macOS and Linux: an update downloaded earlier is put in place as Eleusinia closes, like the installer on Windows

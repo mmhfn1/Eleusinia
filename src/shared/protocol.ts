@@ -34,10 +34,11 @@ export type Have = Record<Key, number> // highest seq held, per author
 // banner: what their banner shows: a weave from their key (shared/mark.ts), their picture softened (`fade`), or a picture
 // or GIF of their own (`pic`); without it, their picture softened, else their key's weave. gameArt: false keeps the
 // banner while they play instead of the game's art.
-export type Banner = Weave | { fade: true } | { pic: string }
+export type Banner = Weave | { fade: true } | { pic: string; gif?: GifRef }
 // status: a line under their name, until a time (unix ms) or until cleared; quiet: no pokes reach them while it is set
 export type Status = { text: string; until?: number; quiet?: true }
-export type Profile = { handle: string; name: string; about: string; avatar: string; banner?: Banner; gameArt?: false; status?: Status; showcase?: Showcase }
+// gif: their picture as a GIF too big for a greeting, fetched by hash; avatar is then its first frame
+export type Profile = { handle: string; name: string; about: string; avatar: string; gif?: GifRef; banner?: Banner; gameArt?: false; status?: Status; showcase?: Showcase }
 // Device labels are kept beside the ids, since an id can change while the name stays (see devices.ts).
 // volumes: how loud each person is played in calls, 0 to 1, kept between sessions.
 // hotkeys: only those the user bound; none by default.
@@ -54,6 +55,7 @@ export type Settings = {
   cam?: string
   camLabel?: string
   outVolume?: number
+  gifStars?: string[] // the GIF picker's starred GIFs, by hash, newest first
   soundVolume?: number // the app's own sounds (mute, joins, ringing, push to talk), 0 to 1 on top of outVolume; default 1
   micGate?: number
   crashReports?: boolean // send crash reports to the developers automatically; on unless turned off
@@ -118,6 +120,7 @@ export type ServerView = {
   id: string
   name: string
   avatar: string
+  gif?: GifRef
   banner?: ServerBanner
   owner: Key
   roles: { id: string; name: string; color: number; hoist: boolean; perms: ServerPerm[] }[]
@@ -213,11 +216,19 @@ export const isPicture = (v: unknown): v is string => typeof v === 'string' && v
 // 1 MiB line (network.ts MAX_LINE).
 export const MAX_MEDIA = 400_000
 export const isMedia = (v: unknown): v is string => typeof v === 'string' && v.length <= MAX_MEDIA && /^data:image\/(jpeg|png|webp|gif);base64,[A-Za-z0-9+/=]+$/.test(v)
+// A picture or banner GIF of any size up to MAX_GIF: fetched by hash like a shared file (main/files.ts, open entries),
+// from its owner or anyone showing it. The still beside it (avatar, pic) is its first frame, which is all that older
+// copies show.
+// by: a server's, who set it (asked first); a person's GIF is asked of them
+export type GifRef = { h: string; s: number; by?: Key }
+export const MAX_GIF = 25 * 2 ** 20
+export const isGifRef = (v: any): v is GifRef => !!v && typeof v.h === 'string' && /^[0-9a-f]{64}$/.test(v.h) && Number.isSafeInteger(v.s) && v.s > 0 && v.s <= MAX_GIF
+export const gifOf = (v: any) => (isGifRef(v) ? { gif: { h: v.h, s: v.s } } : {})
 // Their status while it lasts: one past its time is shown as none
 export const statusOf = (p: Pick<Profile, 'status'> | undefined, now = Date.now()) => (p?.status && (!p.status.until || p.status.until > now) ? p.status : undefined)
 export function cleanBanner(v: any): Banner | undefined {
   if (v?.fade === true) return { fade: true }
-  if (isMedia(v?.pic)) return { pic: v.pic }
+  if (isMedia(v?.pic)) return { pic: v.pic, ...gifOf(v.gif) }
   return cleanWeave(v)
 }
 export function cleanProfile(p: any): Profile {
@@ -228,7 +239,7 @@ export function cleanProfile(p: any): Profile {
   const st = p?.status
   const text = typeof st?.text === 'string' ? st.text.trim().slice(0, 60) : ''
   const status: Status | undefined = text ? { text, ...(Number.isSafeInteger(st.until) && st.until > 0 && { until: st.until }), ...(st.quiet === true && { quiet: true as const }) } : undefined
-  return { handle: isHandle(p?.handle) ? p.handle : '', name: str(p?.name, 40), about: str(p?.about, 200), avatar: ok ? p.avatar : '', ...(banner && { banner }), ...(p?.gameArt === false && { gameArt: false as const }), ...(status && { status }), ...(showcase && { showcase }) }
+  return { handle: isHandle(p?.handle) ? p.handle : '', name: str(p?.name, 40), about: str(p?.about, 200), avatar: ok ? p.avatar : '', ...(ok && gifOf(p.gif)), ...(banner && { banner }), ...(p?.gameArt === false && { gameArt: false as const }), ...(status && { status }), ...(showcase && { showcase }) }
 }
 
 export const isUsername = (s: unknown): s is string => typeof s === 'string' && /^[a-z0-9_.]{2,20}$/.test(s)

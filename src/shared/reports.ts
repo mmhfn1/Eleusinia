@@ -33,7 +33,11 @@ export type Report = {
 }
 
 export const LIMITS = { title: 120, body: 4000, contact: 40, events: 400, event: 300, bytes: 96 * 1024 }
-export const KEEP_EVENTS_MS = 15 * 60000 // diagnostics cover the last 15 minutes, in memory only
+export const KEEP_EVENTS_MS = 15 * 60000 // this session's diagnostics cover its last 15 minutes
+// Earlier sessions' last lines, kept in the data folder (index.ts, diagnostics.json) so a crash report or a log pull
+// after a restart still has what happened before it: for a day, as long as a pull stays valid, and at most this many
+export const KEEP_PREVIOUS_MS = 24 * 3600e3
+export const KEEP_PREVIOUS = 200
 
 // Removes anything that could identify the person or their machine. Keys keep only their last 6 characters, the
 // Unique Key the app already shows, so events about the same peer can still be told apart. Clock times (12:34:56)
@@ -81,19 +85,38 @@ export function cleanReport(r: any): Report | null {
       .filter((e: any) => e && AREAS.includes(e.area) && typeof e.text === 'string')
       .map((e: any) => ({ at: Number(e.at) || 0, area: e.area, text: scrub(e.text) }))
   }
+  // Too big with every line (stored sessions fill the list): the oldest lines go first, so the report still arrives
+  while (out.events?.length && JSON.stringify(out).length > LIMITS.bytes) out.events.splice(0, Math.ceil(out.events.length / 10))
   return JSON.stringify(out).length <= LIMITS.bytes ? out : null
 }
 
-// The last few minutes of diagnostic events, kept in memory only and scrubbed as they arrive.
-export function createDiagnostics(now = () => Date.now()) {
+// The last few minutes of diagnostic events, scrubbed as they arrive, and with a store, earlier sessions' last lines.
+// What a stored file held, checked again: only well-formed lines, scrubbed once more, from the last day, the newest 200
+export function previousDiagnostics(stored: unknown, now = Date.now()): Diag[] {
+  if (!Array.isArray(stored)) return []
+  const ok = stored.filter((e) => Number.isSafeInteger(e?.at) && e.at > now - KEEP_PREVIOUS_MS && e.at <= now && AREAS.includes(e.area) && typeof e.text === 'string')
+  return ok.slice(-KEEP_PREVIOUS).map((e) => ({ at: e.at, area: e.area, text: scrub(e.text).slice(0, LIMITS.event) }))
+}
+
+// save: called (soon after each change) with everything list() gives, for the next start to load as `previous`
+export function createDiagnostics(now = () => Date.now(), previous: Diag[] = [], save?: (events: Diag[]) => void) {
   const events: Diag[] = []
+  let saving: ReturnType<typeof setTimeout> | null = null
+  const list = (areas: Area[] = AREAS) => [...previous, ...events].filter((e) => areas.includes(e.area)).slice(-LIMITS.events)
+  const flush = () => {
+    if (saving) clearTimeout(saving)
+    saving = null
+    save?.(list())
+  }
   return {
     add(area: Area, text: string) {
       events.push({ at: now(), area, text: scrub(text) })
       const cutoff = now() - KEEP_EVENTS_MS
       while (events.length && (events[0].at < cutoff || events.length > LIMITS.events)) events.shift()
+      if (save) saving ??= setTimeout(flush, 2000)
     },
-    list: (areas: Area[] = AREAS) => events.filter((e) => areas.includes(e.area)),
+    list,
+    flush, // at a normal quit, and before a crash report goes out
   }
 }
 
