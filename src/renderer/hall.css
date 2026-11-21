@@ -414,7 +414,7 @@ body {
 .person-tile .seam {
   max-height: 60%;
 }
-.person-name {
+.person-tile .person-name {
   color: var(--silver);
   font-weight: 600;
 }
@@ -2080,7 +2080,7 @@ aside.members {
   gap: 4px;
   padding: 48px 16px 8px;
 }
-.person-name {
+.person-body .person-name {
   color: var(--silver);
   font-size: 20px;
   font-weight: 650;

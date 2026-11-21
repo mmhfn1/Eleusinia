@@ -660,6 +660,8 @@ try {
   const bobRow = `[...document.querySelectorAll('.online .row-button')].find((x) => x.textContent.includes('Bob'))`
   await a.ev(`${bobRow}.click()`)
   await until("A's chat with Bob shows Ann (you) playing Counter-Strike 2, and Bob playing Destiny 2", () => a.ev(`${dmSide('(you)', 'Counter-Strike 2')} && ${dmSide('Bob', 'Destiny 2')}`))
+  // The person panel's name sits in the panel: the call tiles' label rule once pulled it to the bottom of the chat
+  await until("A's person panel shows Bob's name inside the right column", () => a.ev(`(() => { const n = document.querySelector('aside.members .person-body .person-name'), s = document.querySelector('aside.members'); if (!n || !s) return false; const r = n.getBoundingClientRect(), o = s.getBoundingClientRect(); return n.textContent.includes('Bob') && r.left >= o.left && r.right <= o.right + 1 && r.top >= o.top && r.bottom <= o.bottom })()`), 5)
   for (const p of [a, b]) await p.ev(`document.querySelector('.home.back').click()`)
 
   console.log('--- Activity: a CS2 match, through Game State Integration')
@@ -1064,6 +1066,7 @@ try {
   await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Turn on camera').click()`)
   await until("Ann's camera plays in her tile under the stream on B", () => b.ev(`[...${peopleRow}.querySelectorAll('.person-tile')].some((t) => t.querySelector('video')?.videoHeight > 0)`), 30)
   await b.shot('people-row')
+  if ((await b.ev(`getComputedStyle(document.querySelector('.person-tile .person-name')).fontSize`)) !== '11px') throw new Error("a call tile's name label is not the tile's small label")
   await until('sharing with a camera on, A can see its Turn off camera control', () =>
     a.ev(`(() => { const b = [...document.querySelectorAll('.voice-bar button')].find((x) => x.textContent.includes('Turn off camera')); if (!b) return false; const r = b.getBoundingClientRect(), p = document.querySelector('.bars').getBoundingClientRect(); return r.width > 0 && r.left >= p.left && r.right <= p.right })()`), 5)
   await a.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent.includes('Turn off camera')).click()`)

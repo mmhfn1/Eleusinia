@@ -4020,7 +4020,8 @@ button.member:hover .user {
 .person-tile .avatar {
   margin-bottom: 12px;
 }
-.person-name {
+/* the call tile's label only: the DM person panel's title uses the same class (Person.tsx) */
+.person-tile .person-name {
   position: absolute;
   right: 6px;
   bottom: 4px;
