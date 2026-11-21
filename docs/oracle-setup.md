@@ -233,9 +233,12 @@ let in what it uses: its DHT port, UDP 49738, and the WebRTC ports, UDP 32768–
    address, one per streamer key, 12 Mbit/s in a stream (a faster one is closed), and no new streams once the
    forwarder and relay together sent 80 % of the month's 10 TB.
 6. The key from step 3 goes into `HOSTED_FORWARDERS` in `src/shared/relays.ts`; from the next release on, a streamer
-   whose call mates cannot carry everyone uses it. Test it first with `npm run dev`: three copies in a group call, one
-   sharing, and check a viewer's tile says "through an Eleusinia server" (`ELEUSINIA_FORWARDERS` cannot stand in: it is
-   read only on a local test DHT).
+   whose call mates cannot carry everyone uses it. Test it first from your PC: a streamer and a viewer link to it over
+   the public DHT, and it should say 180 of 180 frames came back.
+
+   ```bash
+   ELEUSINIA_LIVE_FORWARDER=<key> npx vitest run test/liveforwarder.test.ts --silent=false
+   ```
 7. Updating it later: `npm run forwarder:build` and the `scp` of `forwarder.cjs`, then
    `sudo mv ~/forwarder.cjs /var/lib/eleusinia/relay-app/ && sudo systemctl restart eleusinia-forwarder`. Streams
    through it fall back to call mates and direct copies, and come back on the streamer's next plan.
