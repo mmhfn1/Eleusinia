@@ -52,7 +52,7 @@
 - Streams are offered, not pushed: viewers join when they want to watch, and get nothing until they do.
 - Cameras with a preview, and a row of people along the bottom of a stream.
 - An upload check warns before a stream would strain the call.
-- **Forwarding:** when your upload runs short, call mates pass your stream on, and an Eleusinia server does as a last resort. Forwarders only ever handle encrypted frames. The tile says who it came through.
+- **Forwarding:** when your upload runs short, call mates pass your stream on, and an Eleusinia server does as a last resort. Forwarders only ever handle encrypted frames, and resend what a viewer loses from the last 2 seconds, so a far or patchy viewer doesn't freeze. The tile says who it came through.
 
 ### Servers
 - Text and voice channels in categories, roles with colours and permissions, channels limited to some roles.
