@@ -1,18 +1,20 @@
-// The Home column's own lists: what friends are doing (the activity feed) and the direct messages. The rail holds only
-// servers and groups; these show on Home and beside an open DM or group, so a conversation is one click away.
-import { type MouseEvent, useState } from 'react'
+// The Home column's direct messages, and the activity notices: what friends start doing flashes for a few seconds in
+// the bottom left corner and is gone, rather than piling up in a list, which read like keeping tabs on people.
+import { type MouseEvent, useEffect, useState } from 'react'
 import { type Key, type State, dmId, mutedNow, statusOf } from '../shared/protocol'
 import * as call from './call'
 import { ActivityLine } from './Activity'
 import { type People, groupName } from './common'
-import { ContextMenu, type Item, otherIn, railDms } from './Rail'
+import { otherIn, railDms } from './Rail'
 import { Avatar, Icon } from './ui'
 
-// What happened, newest first, for this session only: a friend starting a game, joining a call, coming online.
-export type FeedItem = { id: number; at: number; k: Key; kind: 'game' | 'voice' | 'online'; game?: string; conv?: string }
-let feed: FeedItem[] = []
+// A friend starting a game, joining a group or server call, coming online: this session only, never stored
+export type Notice = { id: number; k: Key; kind: 'game' | 'voice' | 'online'; game?: string; conv?: string }
+export const NOTICE_MS = 3000
 let seen: { games: Map<Key, string>; calls: Map<string, Set<Key>>; online: Set<Key> } | null = null
 let nextId = 0
+const shown = new Map<string, number>() // the same news within 15 minutes is not told again
+const listeners = new Set<(n: Notice) => void>()
 
 // Compared with what was seen last time, after every render of the app; what was already so at start is not news.
 export function observe(st: State) {
@@ -22,23 +24,18 @@ export function observe(st: State) {
   const online = new Set(st.online)
   if (seen) {
     const now = Date.now()
-    // The same news again within 15 minutes moves the old line to the top instead of adding another
-    const add = (i: Omit<FeedItem, 'id' | 'at'>) => {
-      feed = feed.filter((x) => !(x.k === i.k && x.kind === i.kind && x.game === i.game && x.conv === i.conv && now - x.at < 15 * 60000))
-      feed.unshift({ ...i, id: nextId++, at: now })
+    const tell = (n: Omit<Notice, 'id'>) => {
+      const same = [n.k, n.kind, n.game, n.conv].join('|')
+      if (now - (shown.get(same) ?? -Infinity) < 15 * 60000) return
+      shown.set(same, now)
+      for (const l of listeners) l({ ...n, id: nextId++ })
     }
-    for (const [k, g] of games) if (seen.games.get(k) !== g) add({ k, kind: 'game', game: g })
+    for (const [k, g] of games) if (seen.games.get(k) !== g) tell({ k, kind: 'game', game: g })
     // Group and server calls only: a direct call rings, and is ours
-    for (const [c, ks] of calls) if (st.groups[c] || st.servers[c.split('.')[0]]) for (const k of ks) if (k !== st.me && !seen.calls.get(c)?.has(k)) add({ k, kind: 'voice', conv: c })
-    for (const k of online) if (!seen.online.has(k) && st.friends[k] === 'friend') add({ k, kind: 'online' })
-    feed = feed.slice(0, 30)
+    for (const [c, ks] of calls) if (st.groups[c] || st.servers[c.split('.')[0]]) for (const k of ks) if (k !== st.me && !seen.calls.get(c)?.has(k)) tell({ k, kind: 'voice', conv: c })
+    for (const k of online) if (!seen.online.has(k) && st.friends[k] === 'friend') tell({ k, kind: 'online' })
   }
   seen = { games, calls, online }
-}
-
-const ago = (t: number) => {
-  const m = Math.floor((Date.now() - t) / 60000)
-  return m < 1 ? 'now' : m < 60 ? `${m} min` : `${Math.floor(m / 60)} h`
 }
 
 // Where a call is, in words: a group, a server's voice channel, or a direct call
@@ -49,55 +46,46 @@ export function callName(st: State, name: (k: Key) => string, c: string) {
   return name(otherIn(c, st.me))
 }
 
-type Props = { st: State; people: People; go: (c: string) => void; join: (c: string) => void }
-
-// Left click opens what it is about (their DM, or the call's place); right click offers to join them.
-export function ActivityFeed({ st, people, go, join, max = 8 }: Props & { max?: number }) {
-  const [menu, setMenu] = useState<{ x: number; y: number; items: Item[][] } | null>(null)
+// The notices, stacked above the user bar (and the call bar while in a call), newest at the bottom, at most three;
+// each fades out over NOTICE_MS. A click opens what it is about, as the list's rows did.
+export function ActivityNotices({ st, people, go }: { st: State; people: People; go: (c: string) => void }) {
+  const [notices, setNotices] = useState<Notice[]>([])
+  const [bottom, setBottom] = useState(72)
+  useEffect(() => {
+    const add = (n: Notice) => {
+      setBottom((document.querySelector('.app > .bars') as HTMLElement | null)?.offsetHeight ?? 72)
+      setNotices((ns) => [...ns, n].slice(-3))
+      setTimeout(() => setNotices((ns) => ns.filter((x) => x.id !== n.id)), NOTICE_MS)
+    }
+    listeners.add(add)
+    return () => void listeners.delete(add)
+  }, [])
+  if (!notices.length) return null
   const { name, prof, show } = people
-  if (!feed.length) return null
-  const callOf = (k: Key) => [...call.active].find(([, ks]) => ks.has(k))?.[0]
-  const words = (i: FeedItem) =>
-    i.kind === 'game' ? (
+  const words = (n: Notice) =>
+    n.kind === 'game' ? (
       <>
-        started playing <b>{i.game}</b>
+        started playing <b>{n.game}</b>
       </>
-    ) : i.kind === 'voice' ? (
+    ) : n.kind === 'voice' ? (
       <>
-        joined <b>{callName(st, name, i.conv!)}</b>
+        joined <b>{callName(st, name, n.conv!)}</b>
       </>
     ) : (
       'came online'
     )
-  const open = (i: FeedItem) => (i.kind === 'voice' ? go(i.conv!) : st.friends[i.k] === 'friend' ? go(dmId(st.me, i.k)) : show(i.k))
-  const items = (i: FeedItem): Item[][] => {
-    const c = i.conv ?? callOf(i.k)
-    return [
-      c && c !== call.conv ? [{ label: `Join ${callName(st, name, c)}`, act: () => join(c) }] : [],
-      [
-        ...(st.friends[i.k] === 'friend' ? [{ label: 'Message', act: () => go(dmId(st.me, i.k)) }] : []),
-        { label: 'Profile', act: () => show(i.k) },
-      ],
-    ]
-  }
-  const right = (i: FeedItem) => (e: MouseEvent<HTMLElement>) => {
-    e.preventDefault()
-    setMenu({ x: e.clientX, y: e.clientY, items: items(i) })
-  }
+  const open = (n: Notice) => (n.kind === 'voice' ? go(n.conv!) : st.friends[n.k] === 'friend' ? go(dmId(st.me, n.k)) : show(n.k))
   return (
-    <section className="feed" aria-label="Activity">
-      <div className="side-cat">Activity</div>
-      {feed.slice(0, max).map((i) => (
-        <button key={i.id} className={`feed-row ${i.kind}`} onClick={() => open(i)} onContextMenu={right(i)}>
-          <Avatar k={i.k} p={prof(i.k)} size={24} />
-          <span className="feed-text">
-            <b>{name(i.k)}</b> {words(i)}
+    <div className="notices" role="status" aria-live="polite" style={{ bottom: bottom + 12 }}>
+      {notices.map((n) => (
+        <button key={n.id} className={`notice ${n.kind}`} onClick={() => open(n)}>
+          <Avatar k={n.k} p={prof(n.k)} size={24} />
+          <span className="notice-text">
+            <b>{name(n.k)}</b> {words(n)}
           </span>
-          <time>{ago(i.at)}</time>
         </button>
       ))}
-      {menu && <ContextMenu x={menu.x} y={menu.y} sections={menu.items} close={() => setMenu(null)} />}
-    </section>
+    </div>
   )
 }
 

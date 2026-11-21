@@ -14,7 +14,7 @@ import { type Modal, NOBODY, type People, type Run, api, card, groupName, labelO
 import { REACH_WORDS, callWords, forwardingWords, reachOf, routeWords } from '../shared/reach'
 import { ContextMenu, type Item, Rail, otherIn, railDms, useMenus } from './Rail'
 import { Splash, StillConnecting } from './Splash'
-import { ActivityFeed, DmList, observe as observeFeed } from './Lists'
+import { ActivityNotices, DmList, observe as observeFeed } from './Lists'
 import { PersonPanel, ShowcaseView, WeekBars } from './Person'
 import { TOGETHER_TICK, tick as tickTogether } from './together'
 
@@ -199,6 +199,7 @@ function App({ loaded }: { loaded: () => void }) {
       ) : (
         <Home st={st} people={people} run={run} open={go} ring={(c) => (go(c), run(call.join(c)))} showModal={setModal} />
       )}
+      <ActivityNotices st={st} people={people} go={go} />
       <Bars st={st} people={people} where={call.conv ? callWhere(call.conv) : ''} back={() => call.conv && go(call.conv)} show={setModal} />
       <div className="pip-layer">
         <Pip st={st} name={people.name} back={() => call.conv && go(call.conv)} />
@@ -405,7 +406,6 @@ function Home({ st, people, run, open, ring, showModal }: { st: State; people: P
             <Icon name="userPlus" size={18} />
             <span className="row-title">Friends</span>
           </button>
-          <ActivityFeed st={st} people={people} go={open} join={ring} />
           <DmList st={st} people={people} here={null} go={open} menu={menus.open} />
         </nav>
         <FriendId st={st} />
@@ -1390,7 +1390,6 @@ function Conversation({ st, conv, people, run, go, show: showModal }: ConvProps)
           )}
         </section>
         <div className="side-list">
-          <ActivityFeed st={st} people={people} go={go} join={(c) => (go(c), run(call.join(c)))} max={4} />
           <DmList st={st} people={people} here={conv} go={go} menu={menus.open} />
         </div>
       </aside>

@@ -636,6 +636,10 @@ try {
   const bobSees = (test) => `api.call('state').then((s) => { const g = s.activity['${annMe}']?.game; return ${test} })`
   // On by default: Ann's game reaches Bob without her touching Settings, but not the store details
   await until('B gets what Ann plays by default, without store details', () => b.ev(bobSees('!!g && g.played > 0 && g.developer === undefined')))
+  // No list of what people did: the news flashes in the bottom left corner and fades (Lists.tsx ActivityNotices)
+  await until('B sees a passing notice that Ann started playing', () => b.ev(`[...document.querySelectorAll('.notices .notice.game')].some((n) => n.textContent.includes('Ann started playing Counter-Strike 2'))`), 5)
+  await b.shot('activity-notice')
+  await until('and it is gone a few seconds later, with no activity list anywhere', () => b.ev(`!document.querySelector('.notices') && !document.querySelector('[aria-label=Activity]')`), 8)
   await a.ev(`api.call('setSettings', { activity: { games: false } })`)
   await until('turning it off reaches B', () => b.ev(bobSees('!g')))
   await a.ev(`api.call('setSettings', { activity: { games: true, details: true } })`)
