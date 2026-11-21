@@ -1,5 +1,5 @@
-import { expect, test } from 'vitest'
-import { KEEP_EVENTS_MS, LIMITS, cleanReport, createDiagnostics, describe, scrub } from '../src/shared/reports'
+import { expect, test, vi } from 'vitest'
+import { KEEP_EVENTS_MS, KEEP_PREVIOUS, KEEP_PREVIOUS_MS, LIMITS, cleanReport, createDiagnostics, describe, previousDiagnostics, scrub } from '../src/shared/reports'
 
 const key = 'ab'.repeat(29) + 'a3f9c2'
 
@@ -54,4 +54,57 @@ test("a report keeps the app's memory use only as a plain number", () => {
   expect(r({ appMemoryMb: 812.4 })?.appMemoryMb).toBe(812)
   expect(r({ appMemoryMb: 'lots' })).toEqual(meta)
   expect(r({})).toEqual(meta) // older copies send none
+})
+
+test("earlier sessions' stored lines are checked again, kept a day, and come before this session's", () => {
+  const now = 10 * KEEP_PREVIOUS_MS
+  const stored = [
+    { at: now - KEEP_PREVIOUS_MS - 1, area: 'call', text: 'too old' },
+    { at: now - 60000, area: 'call', text: `call to ${key} failed` },
+    { at: now - 50000, area: 'nope', text: 'unknown area' },
+    { at: 'soon', area: 'app', text: 'bad time' },
+    { at: now + 60000, area: 'app', text: 'from the future' },
+    { at: now - 40000, area: 'app', text: 'x'.repeat(5000) },
+  ]
+  const prev = previousDiagnostics(stored, now)
+  expect(prev.map((e) => e.text.slice(0, 20))).toEqual(['call to …A3F9C2 fail', 'x'.repeat(20)]) // scrubbed again
+  expect(prev[1].text).toHaveLength(LIMITS.event)
+  expect(previousDiagnostics('not a list', now)).toEqual([])
+  const many = Array.from({ length: KEEP_PREVIOUS + 50 }, (_, i) => ({ at: now - 1000 + i, area: 'app', text: String(i) }))
+  expect(previousDiagnostics(many, now)).toHaveLength(KEEP_PREVIOUS)
+  expect(previousDiagnostics(many, now)[0].text).toBe('50') // the newest are kept
+
+  const d = createDiagnostics(() => now, prev)
+  d.add('app', 'started again')
+  expect(d.list().map((e) => e.text.slice(0, 13))).toEqual(['call to …A3F9', 'x'.repeat(13), 'started again'])
+  expect(d.list(['call']).map((e) => e.text)).toEqual(['call to …A3F9C2 failed'])
+})
+
+test('diagnostics are saved shortly after a change, all at once, and at once on flush', () => {
+  vi.useFakeTimers()
+  try {
+    const saves: string[][] = []
+    const d = createDiagnostics(() => 0, [{ at: 0, area: 'app', text: 'before' }], (e) => saves.push(e.map((x) => x.text)))
+    d.add('app', 'one')
+    d.add('app', 'two')
+    expect(saves).toEqual([])
+    vi.advanceTimersByTime(2000)
+    expect(saves).toEqual([['before', 'one', 'two']]) // one write for the burst
+    d.add('call', 'three')
+    d.flush()
+    expect(saves[1]).toEqual(['before', 'one', 'two', 'three'])
+    vi.advanceTimersByTime(5000)
+    expect(saves).toHaveLength(2) // the flush took the pending write
+  } finally {
+    vi.useRealTimers()
+  }
+})
+
+test('a report too big with every line loses its oldest lines rather than being turned away', () => {
+  const events = Array.from({ length: LIMITS.events }, (_, i) => ({ at: i, area: 'call', text: `${i} `.padEnd(LIMITS.event, 'x') }))
+  const r = cleanReport({ id: '0123456789abcdef', at: 1, kind: 'logs', title: 'Logs for pull abcdef', events })
+  expect(r).not.toBeNull()
+  expect(JSON.stringify(r).length).toBeLessThanOrEqual(LIMITS.bytes)
+  expect(r!.events!.length).toBeLessThan(LIMITS.events)
+  expect(r!.events!.at(-1)!.text.startsWith(`${LIMITS.events - 1} `)).toBe(true) // the newest stay
 })
