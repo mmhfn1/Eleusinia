@@ -454,6 +454,64 @@ async function largeRun(ownTitles) {
   const lines = await forwardLines()
   console.log('      Ann:', lines.join(' | '))
   if (!lines.some((l) => / via /.test(l))) throw new Error('Ann did not log a second-level forwarder')
+  await forwardTrouble()
+}
+
+// Bad lines and overload on forwarders (testFwd, local test DHT only: ELEUSINIA_TEST_NET cannot reach werift's own UDP).
+// 1. 10 % loss from Dee's forwarder to Eve: Eve gets the lost packets resent and keeps playing; Cy, fed by Bob, loses
+//    nothing. 2. Nothing reaches Dee's forwarder from Bob: Eve leaves Dee within 15 s of silence and plays on. 3. Bob's
+//    main process busy 80 ms of every 100: he drops out by himself, Ann benches him, and everyone plays on without him.
+async function forwardTrouble() {
+  const seen = (p) => p.ev(`(async () => { const o = { lost: 0, nack: 0, resent: 0, frames: 0 }; for (const pc of window.__pcs.filter((p) => p.connectionState === 'connected' && p.getTransceivers().length === 2)) (await pc.getStats()).forEach((r) => { if (r.type === 'inbound-rtp' && r.kind === 'video') { o.lost += r.packetsLost ?? 0; o.nack += r.nackCount ?? 0; o.resent += r.retransmittedPacketsReceived ?? 0; o.frames += r.framesDecoded ?? 0 } }); return o })()`)
+  const watchers = [[b, 'Bob'], [c, 'Cy'], [dee, 'Dee'], [eve, 'Eve']]
+  const allPlay = async (what) => {
+    const before = []
+    for (const [p] of watchers) before.push(await p.ev(framesShown))
+    await sleep(3000)
+    const stalled = []
+    for (const [i, [p, n]] of watchers.entries()) if (!(await p.ev(plays)) || (await p.ev(framesShown)) <= before[i]) stalled.push(n)
+    if (stalled.length) throw new Error(`${stalled.join(', ')} stopped playing ${what}`)
+  }
+
+  console.log('--- Forwarding on a bad line: 10 % loss from Dee to Eve')
+  const [eve0, cy0] = [await seen(eve), await seen(c)]
+  await dee.ev(`api.call('testFwd', { outbound: 10 })`)
+  await sleep(8000)
+  const [eve1, cy1] = [await seen(eve), await seen(c)]
+  await dee.ev(`api.call('testFwd', {})`)
+  console.log(`      Eve: ${eve1.frames - eve0.frames} frames, ${eve1.nack - eve0.nack} resend requests, ${eve1.resent - eve0.resent} resent, ${eve1.lost - eve0.lost} lost; Cy: ${cy1.frames - cy0.frames} frames, ${cy1.lost - cy0.lost} lost`)
+  if (eve1.nack - eve0.nack < 5 || eve1.resent - eve0.resent < 5) throw new Error("Eve's lost packets were not asked for and resent by Dee's forwarder")
+  if (eve1.frames - eve0.frames < 100) throw new Error('Eve stalled on a lossy line')
+  if (cy1.lost - cy0.lost > 5 || cy1.frames - cy0.frames < 100) throw new Error("Cy was hurt by loss on Eve's line")
+  if (!(await eve.ev(stageSays('through Dee')))) throw new Error('Eve left Dee over 10 % loss, which resends handle')
+  console.log('ok   Eve kept playing through Dee on resends, and Cy lost nothing')
+
+  console.log("--- A forwarder's upstream goes dead: nothing from Bob reaches Dee's forwarder")
+  await dee.ev(`api.call('testFwd', { inbound: 100 })`)
+  const t = Date.now()
+  await until('Eve leaves Dee and plays on', async () => !(await eve.ev(stageSays('through Dee'))) && (await eve.ev(plays)), 30)
+  console.log(`      after ${Date.now() - t} ms, Eve's tile: ${await eve.ev(`document.querySelector('.stage .screen.big figcaption')?.textContent`)}`)
+  await dee.ev(`api.call('testFwd', {})`)
+  await allPlay('after Eve moved')
+  console.log("ok   Eve moved off Dee's dead feed and everyone plays")
+
+  console.log('--- A forwarder overloaded: Bob\'s main process busy 80 ms of every 100 for 25 s')
+  await b.ev(`api.call('testFwd', { busy: 80, ms: 25000 })`)
+  const t2 = Date.now()
+  await until('Bob says his computer cannot keep up', () => b.ev(`api.diagnostics().then((d) => d.events.some((e) => e.text.includes('cannot keep up: no longer forwarding')))`), 30)
+  await until('Ann benches Bob, and nobody watches through him', async () => {
+    if (!(await a.ev(`api.diagnostics().then((d) => d.events.some((e) => e.text.includes('cannot keep up forwarding; their viewers move')))`))) return false
+    for (const [p] of watchers) if (await p.ev(stageSays('through Bob'))) return false
+    return true
+  }, 30)
+  console.log(`      Bob dropped out ${Date.now() - t2} ms after his process got busy; tiles: ${(await Promise.all(watchers.map(([p, n]) => p.ev(`document.querySelector('.stage .screen.big figcaption')?.textContent ?? ''`).then((x) => `${n}: ${x}`)))).join(' | ')}`)
+  await sleep(Math.max(0, 26000 - (Date.now() - t2))) // until Bob's process is back
+  await until('everyone plays again', async () => {
+    for (const [p] of watchers) if (!(await p.ev(plays))) return false
+    return true
+  }, 20)
+  await allPlay('after Bob dropped out')
+  console.log('ok   Bob dropped out by himself, Ann benched him, and all four play on')
 }
 
 // Ann's game stands in for what main/activity.ts would find (ELEUSINIA_TEST_ACTIVITY), shared once she turns it on.

@@ -294,7 +294,9 @@ async function openUp(f: Key, viewers: Record<Key, Layer>) {
     notify()
   }
   await pc.setLocalDescription(await pc.createOffer())
-  if (ups.get(f) === up) fwdSend(f, { k: 'open', sdp: pc.localDescription!.sdp, viewers })
+  // The newest list: one made while the offer was being built went out as `viewers`, which the forwarder drops before
+  // the stream exists
+  if (ups.get(f) === up) fwdSend(f, { k: 'open', sdp: pc.localDescription!.sdp, viewers: JSON.parse(up.sent) })
 }
 
 function closeUp(f: Key) {
