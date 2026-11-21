@@ -454,6 +454,64 @@ async function largeRun(ownTitles) {
   const lines = await forwardLines()
   console.log('      Ann:', lines.join(' | '))
   if (!lines.some((l) => / via /.test(l))) throw new Error('Ann did not log a second-level forwarder')
+  await forwardTrouble()
+}
+
+// Bad lines and overload on forwarders (testFwd, local test DHT only: ELEUSINIA_TEST_NET cannot reach werift's own UDP).
+// 1. 10 % loss from Dee's forwarder to Eve: Eve gets the lost packets resent and keeps playing; Cy, fed by Bob, loses
+//    nothing. 2. Nothing reaches Dee's forwarder from Bob: Eve leaves Dee within 15 s of silence and plays on. 3. Bob's
+//    main process busy 80 ms of every 100: he drops out by himself, Ann benches him, and everyone plays on without him.
+async function forwardTrouble() {
+  const seen = (p) => p.ev(`(async () => { const o = { lost: 0, nack: 0, resent: 0, frames: 0 }; for (const pc of window.__pcs.filter((p) => p.connectionState === 'connected' && p.getTransceivers().length === 2)) (await pc.getStats()).forEach((r) => { if (r.type === 'inbound-rtp' && r.kind === 'video') { o.lost += r.packetsLost ?? 0; o.nack += r.nackCount ?? 0; o.resent += r.retransmittedPacketsReceived ?? 0; o.frames += r.framesDecoded ?? 0 } }); return o })()`)
+  const watchers = [[b, 'Bob'], [c, 'Cy'], [dee, 'Dee'], [eve, 'Eve']]
+  const allPlay = async (what) => {
+    const before = []
+    for (const [p] of watchers) before.push(await p.ev(framesShown))
+    await sleep(3000)
+    const stalled = []
+    for (const [i, [p, n]] of watchers.entries()) if (!(await p.ev(plays)) || (await p.ev(framesShown)) <= before[i]) stalled.push(n)
+    if (stalled.length) throw new Error(`${stalled.join(', ')} stopped playing ${what}`)
+  }
+
+  console.log('--- Forwarding on a bad line: 10 % loss from Dee to Eve')
+  const [eve0, cy0] = [await seen(eve), await seen(c)]
+  await dee.ev(`api.call('testFwd', { outbound: 10 })`)
+  await sleep(8000)
+  const [eve1, cy1] = [await seen(eve), await seen(c)]
+  await dee.ev(`api.call('testFwd', {})`)
+  console.log(`      Eve: ${eve1.frames - eve0.frames} frames, ${eve1.nack - eve0.nack} resend requests, ${eve1.resent - eve0.resent} resent, ${eve1.lost - eve0.lost} lost; Cy: ${cy1.frames - cy0.frames} frames, ${cy1.lost - cy0.lost} lost`)
+  if (eve1.nack - eve0.nack < 5 || eve1.resent - eve0.resent < 5) throw new Error("Eve's lost packets were not asked for and resent by Dee's forwarder")
+  if (eve1.frames - eve0.frames < 100) throw new Error('Eve stalled on a lossy line')
+  if (cy1.lost - cy0.lost > 5 || cy1.frames - cy0.frames < 100) throw new Error("Cy was hurt by loss on Eve's line")
+  if (!(await eve.ev(stageSays('through Dee')))) throw new Error('Eve left Dee over 10 % loss, which resends handle')
+  console.log('ok   Eve kept playing through Dee on resends, and Cy lost nothing')
+
+  console.log("--- A forwarder's upstream goes dead: nothing from Bob reaches Dee's forwarder")
+  await dee.ev(`api.call('testFwd', { inbound: 100 })`)
+  const t = Date.now()
+  await until('Eve leaves Dee and plays on', async () => !(await eve.ev(stageSays('through Dee'))) && (await eve.ev(plays)), 30)
+  console.log(`      after ${Date.now() - t} ms, Eve's tile: ${await eve.ev(`document.querySelector('.stage .screen.big figcaption')?.textContent`)}`)
+  await dee.ev(`api.call('testFwd', {})`)
+  await allPlay('after Eve moved')
+  console.log("ok   Eve moved off Dee's dead feed and everyone plays")
+
+  console.log('--- A forwarder overloaded: Bob\'s main process busy 80 ms of every 100 for 25 s')
+  await b.ev(`api.call('testFwd', { busy: 80, ms: 25000 })`)
+  const t2 = Date.now()
+  await until('Bob says his computer cannot keep up', () => b.ev(`api.diagnostics().then((d) => d.events.some((e) => e.text.includes('cannot keep up: no longer forwarding')))`), 30)
+  await until('Ann benches Bob, and nobody watches through him', async () => {
+    if (!(await a.ev(`api.diagnostics().then((d) => d.events.some((e) => e.text.includes('cannot keep up forwarding; their viewers move')))`))) return false
+    for (const [p] of watchers) if (await p.ev(stageSays('through Bob'))) return false
+    return true
+  }, 30)
+  console.log(`      Bob dropped out ${Date.now() - t2} ms after his process got busy; tiles: ${(await Promise.all(watchers.map(([p, n]) => p.ev(`document.querySelector('.stage .screen.big figcaption')?.textContent ?? ''`).then((x) => `${n}: ${x}`)))).join(' | ')}`)
+  await sleep(Math.max(0, 26000 - (Date.now() - t2))) // until Bob's process is back
+  await until('everyone plays again', async () => {
+    for (const [p] of watchers) if (!(await p.ev(plays))) return false
+    return true
+  }, 20)
+  await allPlay('after Bob dropped out')
+  console.log('ok   Bob dropped out by himself, Ann benched him, and all four play on')
 }
 
 // Ann's game stands in for what main/activity.ts would find (ELEUSINIA_TEST_ACTIVITY), shared once she turns it on.
@@ -578,6 +636,10 @@ try {
   const bobSees = (test) => `api.call('state').then((s) => { const g = s.activity['${annMe}']?.game; return ${test} })`
   // On by default: Ann's game reaches Bob without her touching Settings, but not the store details
   await until('B gets what Ann plays by default, without store details', () => b.ev(bobSees('!!g && g.played > 0 && g.developer === undefined')))
+  // No list of what people did: the news flashes in the bottom left corner and fades (Lists.tsx ActivityNotices)
+  await until('B sees a passing notice that Ann started playing', () => b.ev(`[...document.querySelectorAll('.notices .notice.game')].some((n) => n.textContent.includes('Ann started playing Counter-Strike 2'))`), 5)
+  await b.shot('activity-notice')
+  await until('and it is gone a few seconds later, with no activity list anywhere', () => b.ev(`!document.querySelector('.notices') && !document.querySelector('[aria-label=Activity]')`), 8)
   await a.ev(`api.call('setSettings', { activity: { games: false } })`)
   await until('turning it off reaches B', () => b.ev(bobSees('!g')))
   await a.ev(`api.call('setSettings', { activity: { games: true, details: true } })`)
@@ -598,6 +660,8 @@ try {
   const bobRow = `[...document.querySelectorAll('.online .row-button')].find((x) => x.textContent.includes('Bob'))`
   await a.ev(`${bobRow}.click()`)
   await until("A's chat with Bob shows Ann (you) playing Counter-Strike 2, and Bob playing Destiny 2", () => a.ev(`${dmSide('(you)', 'Counter-Strike 2')} && ${dmSide('Bob', 'Destiny 2')}`))
+  // The person panel's name sits in the panel: the call tiles' label rule once pulled it to the bottom of the chat
+  await until("A's person panel shows Bob's name inside the right column", () => a.ev(`(() => { const n = document.querySelector('aside.members .person-body .person-name'), s = document.querySelector('aside.members'); if (!n || !s) return false; const r = n.getBoundingClientRect(), o = s.getBoundingClientRect(); return n.textContent.includes('Bob') && r.left >= o.left && r.right <= o.right + 1 && r.top >= o.top && r.bottom <= o.bottom })()`), 5)
   for (const p of [a, b]) await p.ev(`document.querySelector('.home.back').click()`)
 
   console.log('--- Activity: a CS2 match, through Game State Integration')
@@ -1002,6 +1066,7 @@ try {
   await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Turn on camera').click()`)
   await until("Ann's camera plays in her tile under the stream on B", () => b.ev(`[...${peopleRow}.querySelectorAll('.person-tile')].some((t) => t.querySelector('video')?.videoHeight > 0)`), 30)
   await b.shot('people-row')
+  if ((await b.ev(`getComputedStyle(document.querySelector('.person-tile .person-name')).fontSize`)) !== '11px') throw new Error("a call tile's name label is not the tile's small label")
   await until('sharing with a camera on, A can see its Turn off camera control', () =>
     a.ev(`(() => { const b = [...document.querySelectorAll('.voice-bar button')].find((x) => x.textContent.includes('Turn off camera')); if (!b) return false; const r = b.getBoundingClientRect(), p = document.querySelector('.bars').getBoundingClientRect(); return r.width > 0 && r.left >= p.left && r.right <= p.right })()`), 5)
   await a.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent.includes('Turn off camera')).click()`)
@@ -1330,14 +1395,15 @@ try {
     return out
   })()`)
   await sleep(300)
-  const after = await a.ev(`[document.querySelector('aside.voice').getBoundingClientRect().width, document.querySelector('aside.members').getBoundingClientRect().width, localStorage.getItem('width-conv-left'), localStorage.getItem('width-conv-right')]`)
+  const after = await a.ev(`[document.querySelector('aside.voice').getBoundingClientRect().width, document.querySelector('aside.members').getBoundingClientRect().width, localStorage.getItem('width-left'), localStorage.getItem('width-right')]`)
   console.log('     ', JSON.stringify(widths), '->', JSON.stringify(after))
-  if (!(after[0] === 316 && after[1] === 336 && after[2] === '316' && after[3] === '336')) throw new Error('sidebars did not resize and persist')
+  const [left0, right0] = Object.entries(widths).sort(([l]) => (l.includes('voice') ? -1 : 1)).map(([, w]) => w[0])
+  if (!(after[0] === left0 + 16 && after[1] === right0 + 16 && after[2] === String(after[0]) && after[3] === String(after[1]))) throw new Error('sidebars did not resize and persist')
   console.log('ok   voice and members sidebars grew by 16px and the widths were saved')
   await a.ev(`document.querySelector('.rail-mark').click()`)
   const home = await a.ev(`(() => { const s = document.querySelector('.splitter'); s.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })); return new Promise(r => setTimeout(() => r(document.querySelector('aside').getBoundingClientRect().width), 200)) })()`)
-  if (home !== 316) throw new Error('home sidebar did not resize: ' + home)
-  console.log('ok   home sidebar resized independently (300 -> 316)')
+  if (home !== after[0] + 16) throw new Error('home sidebar did not resize from the shared width: ' + home)
+  console.log(`ok   home shares the conversation's left width and resizes it (${after[0]} -> ${home})`)
 
   console.log('--- Bob goes offline (process killed)')
   b.child.kill()

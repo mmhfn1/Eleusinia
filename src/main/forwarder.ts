@@ -3,10 +3,13 @@
 // imports, like node.ts: the same code runs in the app's main process and, later, headless on a server.
 // Shape from the phase 0 spike: the streamer's Chromium offers and werift answers; to viewers werift offers sendonly.
 import {
+  GenericNack,
   MediaStreamTrack,
   RTCPeerConnection,
   RTCRtpCodecParameters,
   type RTCRtpReceiver,
+  type RTCRtpSender,
+  RtcpTransportLayerFeedback,
   type RtpPacket,
   useAbsSendTime,
   useOPUS,
@@ -33,6 +36,10 @@ export type ForwarderOptions = {
 
 const MAX_SDP = 32 * 1024
 const KEY_GAP = 1000 // ms between key-frame requests to a streamer: one broken viewer forced them twice a second
+// werift resends only from its last 128 packets per viewer (RTP_HISTORY_SIZE), under 0.2 s at 1080p60: a viewer far
+// from us, or losing a burst, asks for packets already gone and freezes until the next key frame. We keep this much more
+const HISTORY_MS = 2000
+const WERIFT_HISTORY = 128
 const isStreamId = (s: unknown): s is string => typeof s === 'string' && /^[\w-]{1,64}$/.test(s)
 
 function checkSdp(sdp: unknown): string {
@@ -57,6 +64,8 @@ type Viewer = {
   layer: Layer
   ready: boolean
   sent: number
+  history: Map<number, { rtp: RtpPacket; at: number }> // video sent, by its sequence number, for HISTORY_MS
+  resent: number // packets resent from our history that werift no longer had
 }
 
 type Stream = {
@@ -98,6 +107,23 @@ export function createForwarder({ iceServers, log = () => {}, maxViewers = 3, pu
   const trickle = (pc: RTCPeerConnection, onIce?: (c: Ice) => void) => {
     if (onIce) pc.onIceCandidate.subscribe((c) => c?.candidate && onIce({ candidate: c.candidate, sdpMid: c.sdpMid, sdpMLineIndex: c.sdpMLineIndex }))
     return (c: unknown) => pc.addIceCandidate(checkIce(c))
+  }
+
+  // Testing only (index.ts allows it on a local test DHT): loss on this forwarder's own lines, in from the streamer and out
+  // to viewers, dropped by werift below its send history so resends work as on a real line. werift 0.27 passes p % of
+  // packets (and 0 means no loss), hence 100 - loss, and a sliver for a dead line.
+  const loss = { inbound: 0, outbound: 0 }
+  const pass = (l: number) => (l > 0 ? Math.max(100 - l, 1e-6) : 0)
+  const lossy = (pc: RTCPeerConnection, dir: 'inbound' | 'outbound') => {
+    pc.config.debug = { ...pc.config.debug, [dir + 'PacketLoss']: pass(loss[dir]) }
+    return pc
+  }
+  function testLoss(o: { inbound?: number; outbound?: number }) {
+    Object.assign(loss, o)
+    for (const s of streams.values()) {
+      lossy(s.pc, 'inbound')
+      for (const v of s.viewers.values()) lossy(v.pc, 'outbound')
+    }
   }
 
   const stream = (id: string) => {
@@ -147,14 +173,43 @@ export function createForwarder({ iceServers, log = () => {}, maxViewers = 3, pu
       c.payload = Buffer.alloc(0)
     } else c.payload = Buffer.isBuffer(o.payload) ? o.payload : Buffer.from(o.payload.buffer, o.payload.byteOffset, o.payload.byteLength)
     track.writeRtp(c)
+    if (track === v.video && !('padding' in o)) keep(v, c)
     v.sent++
     out += c.payload.length + 12
+  }
+
+  function keep(v: Viewer, rtp: RtpPacket) {
+    const now = Date.now()
+    v.history.set(rtp.header.sequenceNumber, { rtp, at: now })
+    for (const [seq, h] of v.history) {
+      if (now - h.at <= HISTORY_MS) break // a Map keeps insertion order: the oldest come first
+      v.history.delete(seq)
+    }
+  }
+
+  // A NACK werift could not answer: ours goes into its cache slot for one synchronous call, so its own path (RTX,
+  // pacing, congestion control) resends it, and the slot gets its packet back at once
+  function resendOld(v: Viewer, sender: RTCRtpSender, nack: GenericNack) {
+    const cache = (sender as unknown as { rtpCache: RtpPacket[] }).rtpCache
+    for (const seq of nack.lost) {
+      const slot = seq % WERIFT_HISTORY
+      const ours = v.history.get(seq)?.rtp
+      if (!ours || cache[slot]?.header.sequenceNumber === seq) continue
+      const was = cache[slot]
+      cache[slot] = ours
+      try {
+        sender.handleRtcpPacket(new RtcpTransportLayerFeedback({ feedback: new GenericNack({ lost: [seq], senderSsrc: nack.senderSsrc, mediaSourceSsrc: nack.mediaSourceSsrc }) }))
+      } finally {
+        cache[slot] = was
+      }
+      v.resent++
+    }
   }
 
   function addStream(id: string, { onIce }: { onIce?: (c: Ice) => void } = {}) {
     if (!isStreamId(id)) throw new Error('bad stream id')
     if (streams.has(id)) throw new Error('stream exists')
-    const pc = peer()
+    const pc = lossy(peer(), 'inbound')
     const s: Stream = { id, pc, viewers: new Map(), lastKey: 0, received: 0, bytes: 0, keyRequests: 0 }
     streams.set(id, s)
     pc.onTrack.subscribe((track) => {
@@ -176,18 +231,29 @@ export function createForwarder({ iceServers, log = () => {}, maxViewers = 3, pu
     }
   }
 
-  async function addViewer(streamId: string, key: Key, { onIce }: { onIce?: (c: Ice) => void } = {}) {
+  // onGone: the viewer's side closed or failed (it went direct, or reloaded) while we still served it
+  async function addViewer(streamId: string, key: Key, { onIce, onGone }: { onIce?: (c: Ice) => void; onGone?: () => void } = {}) {
     const s = stream(streamId)
     if (!isKey(key)) throw new Error('bad viewer key')
     if (s.viewers.has(key)) removeViewer(streamId, key) // a reconnect replaces the old peer
     if (viewerCount() >= maxViewers) throw new Error('viewer limit')
-    const pc = peer()
+    const pc = lossy(peer(), 'outbound')
     const video = new MediaStreamTrack({ kind: 'video' })
     const audio = new MediaStreamTrack({ kind: 'audio' })
     const vt = pc.addTransceiver(video, { direction: 'sendonly' })
     pc.addTransceiver(audio, { direction: 'sendonly' })
-    const v: Viewer = { key, pc, video, audio, filter: createLayerFilter(), layer: 'full', ready: false, sent: 0 }
+    const v: Viewer = { key, pc, video, audio, filter: createLayerFilter(), layer: 'full', ready: false, sent: 0, history: new Map(), resent: 0 }
     s.viewers.set(key, v)
+    let ours = false // our own call into handleRtcpPacket raises onGenericNack again
+    vt.sender.onGenericNack.subscribe((nack) => {
+      if (ours) return
+      ours = true
+      try {
+        resendOld(v, vt.sender, nack)
+      } finally {
+        ours = false
+      }
+    })
     // Retransmissions to this viewer come from werift's own send history (128 packets); key frames from upstream
     vt.sender.onKeyFrameRequest.subscribe(() => requestKey(s))
     // connected includes DTLS: packets written before it would leave holes the viewer cannot get back
@@ -196,6 +262,11 @@ export function createForwarder({ iceServers, log = () => {}, maxViewers = 3, pu
       if (st === 'connected' && !v.ready) {
         v.ready = true
         requestKey(s)
+      }
+      if ((st === 'closed' || st === 'failed') && s.viewers.get(key) === v) {
+        s.viewers.delete(key)
+        v.pc.close().catch(() => {})
+        onGone?.()
       }
     })
     const add = trickle(pc, onIce)
@@ -245,7 +316,7 @@ export function createForwarder({ iceServers, log = () => {}, maxViewers = 3, pu
       received: s.received,
       bytes: s.bytes, // in, RTP payload plus header
       keyRequests: s.keyRequests,
-      viewers: [...s.viewers.values()].map((v) => ({ key: v.key, layer: v.layer, connected: v.ready, sent: v.sent })),
+      viewers: [...s.viewers.values()].map((v) => ({ key: v.key, layer: v.layer, connected: v.ready, sent: v.sent, resent: v.resent })),
     }))
 
   return {
@@ -256,6 +327,7 @@ export function createForwarder({ iceServers, log = () => {}, maxViewers = 3, pu
     removeStream,
     stats,
     bytesOut: () => out,
+    testLoss,
     lagging: () => overloaded(false, lagged, Date.now()),
     close: () => {
       for (const id of [...streams.keys()]) removeStream(id)

@@ -3,7 +3,7 @@ import { type Offset, clampOffset, cropRect } from '../shared/crop'
 import { usable } from '../shared/devices'
 import { type Group, type Key, type Profile, type State, dmId, keyTail, mutedNow, statusOf } from '../shared/protocol'
 import * as call from './call'
-import { Avatar, BannerArt, BannerPick, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Splitter, VerifiedSeal, fit, Wordmark, gifFrom, useAccent, useWidth } from './ui'
+import { Avatar, BannerArt, BannerPick, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Splitter, VerifiedSeal, leftWidth, rightWidth, Wordmark, gifFrom, useAccent, useWidth } from './ui'
 import { Chat } from './Chat'
 import { CameraDialog, Oculus, PersonVolume, Pip, RingBar, ShareDialog, Stage, VoiceMark, VoiceSignal } from './Media'
 import { DeleteAccount, ReportDialog, SettingsDialog } from './Settings'
@@ -14,7 +14,7 @@ import { type Modal, NOBODY, type People, type Run, api, card, groupName, labelO
 import { REACH_WORDS, callWords, forwardingWords, reachOf, routeWords } from '../shared/reach'
 import { ContextMenu, type Item, Rail, otherIn, railDms, useMenus } from './Rail'
 import { Splash, StillConnecting } from './Splash'
-import { ActivityFeed, DmList, observe as observeFeed } from './Lists'
+import { ActivityNotices, DmList, observe as observeFeed } from './Lists'
 import { PersonPanel, ShowcaseView, WeekBars } from './Person'
 import { TOGETHER_TICK, tick as tickTogether } from './together'
 
@@ -199,6 +199,7 @@ function App({ loaded }: { loaded: () => void }) {
       ) : (
         <Home st={st} people={people} run={run} open={go} ring={(c) => (go(c), run(call.join(c)))} showModal={setModal} />
       )}
+      <ActivityNotices st={st} people={people} go={go} />
       <Bars st={st} people={people} where={call.conv ? callWhere(call.conv) : ''} back={() => call.conv && go(call.conv)} show={setModal} />
       <div className="pip-layer">
         <Pip st={st} name={people.name} back={() => call.conv && go(call.conv)} />
@@ -338,7 +339,7 @@ function TitleBar({ place, call: live, nav }: { place: string; call?: { name: st
 // Home (design/mockups/hall.html, A): the column lists Friends, direct messages and groups; the page opens on friends
 // in game as art, then live calls, then everyone online and offline, with friend requests and the search on top.
 function Home({ st, people, run, open, ring, showModal }: { st: State; people: People; run: Run; open: (conv: string) => void; ring: (conv: string) => void; showModal: (m: Modal) => void }) {
-  const [width, setWidth] = useWidth('home', fit(0.2, 300, 420))
+  const [width, setWidth] = useWidth('left', leftWidth())
   const menus = useMenus({ st, people, open: null, go: (c) => c && open(c), show: showModal, run })
   const searchRef = useRef<HTMLDivElement>(null)
   const { prof, name, user, isOnline, show } = people
@@ -405,7 +406,6 @@ function Home({ st, people, run, open, ring, showModal }: { st: State; people: P
             <Icon name="userPlus" size={18} />
             <span className="row-title">Friends</span>
           </button>
-          <ActivityFeed st={st} people={people} go={open} join={ring} />
           <DmList st={st} people={people} here={null} go={open} menu={menus.open} />
         </nav>
         <FriendId st={st} />
@@ -1256,8 +1256,8 @@ function Conversation({ st, conv, people, run, go, show: showModal }: ConvProps)
   const [picking, setPicking] = useState<File | null>(null)
   const menus = useMenus({ st, people, open: conv, go, show: showModal, run })
   const home = () => go(null)
-  const [left, setLeft] = useWidth('conv-left', fit(0.22, 300, 520))
-  const [right, setRight] = useWidth('conv-right', fit(0.24, 320, 560))
+  const [left, setLeft] = useWidth('left', leftWidth())
+  const [right, setRight] = useWidth('right', rightWidth())
   const { prof, name, isOnline, show } = people
   const group = st.groups[conv]
   const other = conv.split('_').find((k) => k !== st.me)!
@@ -1390,7 +1390,6 @@ function Conversation({ st, conv, people, run, go, show: showModal }: ConvProps)
           )}
         </section>
         <div className="side-list">
-          <ActivityFeed st={st} people={people} go={go} join={(c) => (go(c), run(call.join(c)))} max={4} />
           <DmList st={st} people={people} here={conv} go={go} menu={menus.open} />
         </div>
       </aside>

@@ -32,6 +32,7 @@ import DHT from 'hyperdht'
 import { idSeed, readClaims, signClaim, withClaim, writeClaims } from '../shared/idcard'
 import { type FileRef, validFiles } from '../shared/media'
 import { cleanLink } from '../shared/links'
+import { num } from '../shared/clean'
 import { type Area, type Pull, type Report, PULL_EVERY, cleanReport, pullFor, pullsIn } from '../shared/reports'
 import { EDIT_AHEAD_MS, groupIdOf, heldFrom, mergeGroup, missing, ownerOf, signAdd, signEdit, signLeft, signMsg, profileVersion, signRemoved, validGroup, verifyAdd, verifyMsg, withLink } from '../shared/sync'
 import { openRequest, requestSeed, sealRequest } from '../shared/sealed'
@@ -780,7 +781,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   type Viewing = { layer: Layer; accept?: (sdp: string) => Promise<unknown>; addIce?: (c: unknown) => Promise<unknown> }
   // Streams we forward, by streamer. feed: a second level's upstream forwarder, which offers us the stream as to a
   // viewer (take); otherwise the streamer itself offers it (open)
-  type Carried = { addIce: (c: unknown) => Promise<unknown>; viewers: Map<Key, Viewing>; feed?: Key; take?: (sdp: string) => Promise<void> }
+  type Carried = { addIce: (c: unknown) => Promise<unknown>; viewers: Map<Key, Viewing>; feed?: Key; take?: (sdp: string) => Promise<void>; queue?: Promise<void>; list?: Record<Key, Layer> }
   const carried = new Map<Key, Carried>()
   const early = new Map<Key, { from: Key; sdp: string; at: number }>() // an upstream offer that beat the streamer's feed
   const mate = (k: Key) => !!callOf.get(me) && callOf.get(k) === callOf.get(me)
@@ -822,8 +823,10 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const st = forwarder.addStream(from, { onIce: (c) => sendFwd(from, { k: 'ice', to: 'src', c }) })
       const answered = st.answer(m.sdp)
       carried.set(from, { addIce: (c) => answered.then(() => st.addIce(c)), viewers: new Map() })
+      // Queued before we wait for the answer, so a viewers list sent after this open is applied after it, not before
+      const served = serveViewers(from, m.viewers)
       sendFwd(from, { k: 'answer', sdp: await answered })
-      return serveViewers(from, m.viewers)
+      return served
     }
     if (m.k === 'feed') return feedFrom(from, m.via, m.viewers)
     if (m.k === 'viewers') return serveViewers(from, m.viewers)
@@ -869,12 +872,23 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     done.catch((e) => diag('call', `forwarding feed from …${from.slice(-6)} failed: ${(e as Error)?.message ?? e}`))
     return true
   }
-  async function serveViewers(s: Key, list: Record<Key, Layer>) {
+  // One list at a time per stream: lists arrive faster than peers are made, and two runs at once lost a viewer
+  function serveViewers(s: Key, list: Record<Key, Layer>) {
+    const c = carried.get(s)
+    if (!c) return
+    c.list = list
+    const run = (c.queue ?? Promise.resolve()).then(() => serveNow(s, list))
+    c.queue = run.catch(() => {})
+    return run
+  }
+  async function serveNow(s: Key, list: Record<Key, Layer>) {
     const c = carried.get(s)
     if (!c || !forwarder) return
     for (const v of [...c.viewers.keys()]) if (!(v in list) || !mate(v)) c.viewers.delete(v), forwarder.removeViewer(s, v)
     const was = c.viewers.size
     for (const [v, layer] of Object.entries(list)) {
+      // A new open replaced the stream under the same id: our peers would land in it and close its own
+      if (carried.get(s) !== c) return
       const had = c.viewers.get(v)
       if (v === s || !mate(v) || had?.layer === layer) continue
       if (had) {
@@ -885,12 +899,21 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const entry: Viewing = { layer }
       c.viewers.set(v, entry)
       try {
-        const h = await forwarder.addViewer(s, v, { onIce: (ice) => sendFwd(v, { k: 'ice', to: 'view', s, c: ice }) })
+        // A viewer that closed its side gets a fresh offer while still listed: it may have dropped us for a moment
+        const onGone = () => {
+          if (carried.get(s) !== c || c.viewers.get(v) !== entry) return
+          c.viewers.delete(v)
+          diag('call', `…${v.slice(-6)} closed its copy of …${s.slice(-6)}'s stream; offering again`)
+          setTimeout(() => carried.get(s) === c && c.list && serveViewers(s, c.list), 1000)
+        }
+        const h = await forwarder.addViewer(s, v, { onIce: (ice) => sendFwd(v, { k: 'ice', to: 'view', s, c: ice }), onGone })
         if (carried.get(s) !== c || c.viewers.get(v) !== entry) continue // closed or replaced meanwhile
         Object.assign(entry, { accept: h.accept, addIce: h.addIce })
         forwarder.setLayer(s, v, entry.layer)
         sendFwd(v, { k: 'offer', s, sdp: h.offer })
       } catch (e) {
+        // A newer list may have replaced this viewer while we waited (its peer closed under us): leave the new entry be
+        if (c.viewers.get(v) !== entry) continue
         c.viewers.delete(v)
         diag('call', `could not forward …${s.slice(-6)}'s stream to …${v.slice(-6)}: ${(e as Error)?.message ?? e}`)
       }
@@ -2124,6 +2147,17 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     fwdLink: (to: Key) => void (isKey(to) && fwdServer(to) && net.dial(to)),
     // Whether our main process lags too long to forward well (forwarder.ts): the window then asks to drop out
     fwdLagging: () => !!forwarder?.lagging(),
+    // Testing only (index.ts: local test DHT): loss on our forwarder's lines in percent, or this process kept busy (`busy`
+    // ms of every 100 ms for `ms`), which makes the forwarder lag for real: the smoke run's bad lines and overload
+    testFwd(o: { inbound?: number; outbound?: number; busy?: number; ms?: number }) {
+      forwarder?.testLoss({ inbound: num(o?.inbound, 100) ?? 0, outbound: num(o?.outbound, 100) ?? 0 })
+      const busy = num(o?.busy, 95)
+      if (!busy) return
+      // Atomics.wait blocks the thread like real work would; an empty busy loop is dropped by the bundler
+      const cell = new Int32Array(new SharedArrayBuffer(4))
+      const t = setInterval(() => Atomics.wait(cell, 0, 0, busy), 100)
+      setTimeout(() => clearInterval(t), num(o?.ms, 120000) ?? 0)
+    },
     async destroy() {
       stopped = true
       forwarder?.close()

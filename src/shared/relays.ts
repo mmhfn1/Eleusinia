@@ -12,9 +12,9 @@ export function parseRelays(env: string | undefined): Key[] {
   return [...new Set(env.split(/[\s,]+/).filter(isKey))]
 }
 
-// The project's server forwarders (design/plan-stream-forwarding.md, phase 5), used last by forward.ts. One goes here
-// once it runs: `node forwarder.cjs --data … --print-key` on the server (docs/oracle-setup.md, part F).
-export const HOSTED_FORWARDERS: Key[] = []
+// The project's server forwarders (design/plan-stream-forwarding.md, phase 5), used last by forward.ts: `node forwarder.cjs
+// --data … --print-key` on the server (docs/oracle-setup.md, part F). The Oracle server, beside the relay.
+export const HOSTED_FORWARDERS: Key[] = ['c87b676f72d1cee9cc4b453c3b18350531aaca00e432be9286430828a3c8ca6b']
 
 // ELEUSINIA_FORWARDERS (testing only), read like ELEUSINIA_RELAYS: set but empty means none
 export const parseForwarders = (env: string | undefined): Key[] => (env === undefined ? HOSTED_FORWARDERS : parseRelays(env))

@@ -1,6 +1,6 @@
 // The forwarder end to end in plain Node, werift on every side: a synthetic VP8 L1T3 sender at 60 fps, the forwarder,
 // and two receiving viewers at different layers. Local host candidates only (no STUN).
-import { MediaStreamTrack, RTCPeerConnection, RTCRtpCodecParameters, RtpHeader, RtpPacket, useOPUS, useVP8 } from 'werift'
+import { GenericNack, MediaStreamTrack, RTCPeerConnection, RTCRtpCodecParameters, RtcpTransportLayerFeedback, RtpHeader, RtpPacket, useOPUS, useVP8 } from 'werift'
 import { afterAll, expect, test } from 'vitest'
 import { createForwarder } from '../src/main/forwarder'
 import { parseVp8 } from '../src/shared/vp8layers'
@@ -118,4 +118,50 @@ test('forwards VP8 L1T3 per layer, answers NACKs, rate-limits PLI, caps viewers'
   expect(b.seqs.size).toBe(before)
   expect(a.seqs.size).toBeGreaterThan(236 + 40)
   expect(fwd.stats()[0].viewers.map((v) => v.key)).toEqual([A])
+})
+
+test('resends a packet older than werift keeps, from its own 2 s history', { timeout: 15000 }, async () => {
+  const f = createForwarder({ iceServers: [], maxViewers: 1 })
+  const sender = new RTCPeerConnection({ iceServers: [], iceUseDefaultStunServer: false, iceUseIpv6: false, codecs: codecs() })
+  const pc = new RTCPeerConnection({ iceServers: [], iceUseDefaultStunServer: false, iceUseIpv6: false, codecs: codecs() })
+  pcs.push(sender, pc)
+  try {
+    const video = new MediaStreamTrack({ kind: 'video' })
+    sender.addTransceiver(video, { direction: 'sendonly' })
+    sender.addTransceiver(new MediaStreamTrack({ kind: 'audio' }), { direction: 'sendonly' })
+    const ingest = f.addStream('s2', { onIce: (c) => sender.addIceCandidate(c) })
+    sender.onIceCandidate.subscribe((c) => c?.candidate && ingest.addIce(c.toJSON()))
+    await sender.setLocalDescription(await sender.createOffer())
+    await sender.setRemoteDescription({ type: 'answer', sdp: await ingest.answer(sender.localDescription!.sdp) })
+
+    const resent: number[] = []
+    let ssrc = 0
+    pc.onTrack.subscribe((t) =>
+      t.onReceiveRtp.subscribe((rtp, _e, info) => {
+        if (t.kind !== 'video') return
+        ssrc = rtp.header.ssrc
+        if (info?.type === 'retransmission') resent.push(rtp.header.sequenceNumber)
+      }),
+    )
+    const v = await f.addViewer('s2', A, { onIce: (c) => pc.addIceCandidate(c) })
+    pc.onIceCandidate.subscribe((c) => c?.candidate && v.addIce(c.toJSON()))
+    await pc.setRemoteDescription({ type: 'offer', sdp: v.offer })
+    await pc.setLocalDescription(await pc.createAnswer())
+    await v.accept(pc.localDescription!.sdp)
+    await until(() => sender.connectionState === 'connected' && f.stats()[0]?.viewers[0]?.connected)
+
+    // 200 frames, 2 packets each: 400 packets, so the first ones left werift's 128 long ago
+    const pkts = l1t3(200, { keyEvery: 1000 })
+    for (const p of pkts) video.writeRtp(new RtpPacket(new RtpHeader({ payloadType: 96, sequenceNumber: p.seq, timestamp: p.frame * 1500, ssrc: 77, marker: !p.start }), Buffer.from(p.payload)))
+    await until(() => ssrc !== 0 && f.stats()[0].viewers[0].sent >= 400)
+    await wait(200)
+    // The viewer asks again for its 10th packet, about 390 packets back
+    const tenth = (f.stats()[0].viewers[0].sent - 390 + 65536) % 65536
+    const nack = new RtcpTransportLayerFeedback({ feedback: new GenericNack({ senderSsrc: 1, mediaSourceSsrc: ssrc, lost: [tenth] }) })
+    await (pc.getTransceivers()[0].receiver as any).dtlsTransport.sendRtcp([nack])
+    await until(() => resent.length > 0, 3000)
+    expect(f.stats()[0].viewers[0].resent).toBe(1)
+  } finally {
+    f.close()
+  }
 })

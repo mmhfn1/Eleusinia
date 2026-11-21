@@ -2015,6 +2015,37 @@ test('forwarding: a forwarder takes a stream only from a call mate, serves only 
   await raw.destroy()
 }, 120000)
 
+test('forwarding: lists apply in the order sent, even one sent while the open is still being answered', async () => {
+  // A slow answer and slow peers, as werift's are: the streamer's next list arrives before the open's list is applied
+  const calls: string[] = []
+  const later = <T,>(v: T, ms: number) => new Promise<T>((r) => setTimeout(() => r(v), ms))
+  const fake = {
+    addStream: (id: string) => (calls.push(`stream ${id}`), { answer: () => later('v=0 answer', 400), addIce: async () => {} }),
+    addViewer: async (_s: string, v: string) => (calls.push(`viewer ${v}`), later({ offer: 'v=0 offer', accept: async () => {}, addIce: async () => {} }, 200)),
+    setLayer: () => {},
+    removeViewer: (_s: string, v: string) => calls.push(`remove ${v}`),
+    removeStream: (s: string) => calls.push(`unstream ${s}`),
+    stats: () => [],
+    close() {},
+  }
+  const a = start()
+  const b = start(undefined, undefined, { forwarder: fake as any })
+  const c = start()
+  const d = start()
+  for (const x of [a, c, d]) await befriend(b, x)
+  const gid = b.node.createGroup('fwd order', [a.key, c.key, d.key])
+  await until(() => [a, c, d].every((x) => !!x.node.state().groups[gid]))
+  await until(() => a.node.state().canForward.includes(b.key))
+  for (const x of [a, b, c, d]) x.node.signal(gid, null, { k: 'join' })
+  await new Promise((r) => setTimeout(r, 1000)) // the joins reach b
+  a.node.fwd(b.key, { k: 'open', sdp: 'v=0 offer', viewers: { [c.key]: 'full' } })
+  a.node.fwd(b.key, { k: 'viewers', viewers: { [c.key]: 'full', [d.key]: 'full' } })
+  await until(() => b.node.state().forwarding[a.key] === 2)
+  await new Promise((r) => setTimeout(r, 1000)) // a stale list applied last would remove d now
+  expect(b.node.state().forwarding[a.key]).toBe(2)
+  expect(calls).not.toContain(`remove ${d.key}`)
+}, 120000)
+
 test('a server forwarder: the streamer and its viewers dial it, it serves only listed viewers, and its rtt reaches the window', async () => {
   const calls: string[] = []
   const fake = {
