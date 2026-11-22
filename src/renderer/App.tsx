@@ -3,7 +3,7 @@ import { type Offset, clampOffset, cropRect } from '../shared/crop'
 import { usable } from '../shared/devices'
 import { type Group, type Key, type Profile, type State, dmId, keyTail, mutedNow, statusOf } from '../shared/protocol'
 import * as call from './call'
-import { Avatar, BannerArt, BannerPick, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Splitter, VerifiedSeal, leftWidth, rightWidth, Wordmark, gifPicture, useAccent, useWidth } from './ui'
+import { Avatar, BannerArt, BannerPick, CopyButton, Dialog, Emblem, GroupEmblem, Icon, Splitter, ThemeLayer, VerifiedSeal, leftWidth, rightWidth, Wordmark, gifPicture, useAccent, useWidth } from './ui'
 import { GifPicker, type Picked, gifFile } from './Gifs'
 import { Chat } from './Chat'
 import { CameraDialog, Oculus, PersonVolume, Pip, RingBar, ShareDialog, Stage, VoiceMark, VoiceSignal } from './Media'
@@ -790,7 +790,9 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
     e.preventDefault()
     const f = new FormData(e.currentTarget)
     setBusy(true)
-    api.call('setProfile', { username: f.get('username'), name: f.get('name'), about: f.get('about'), avatar, ...(gif && { gif }), ...(banner && { banner }), ...(!gameArt && { gameArt: false }) }).then(done, (x) => {
+    // What this form does not edit (status, showcase, theme) is kept: setProfile replaces the whole profile
+    const { status, showcase, theme } = st.profile
+    api.call('setProfile', { username: f.get('username'), name: f.get('name'), about: f.get('about'), avatar, ...(gif && { gif }), ...(banner && { banner }), ...(!gameArt && { gameArt: false }), ...(status && { status }), ...(showcase && { showcase }), ...(theme && { theme }) }).then(done, (x) => {
       setErr(String(x.message ?? x).replace(/^.*Error: /, ''))
       setBusy(false)
     })
@@ -920,6 +922,7 @@ function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
   }
   return (
     <Dialog label={`Profile of ${p.name}`} close={close} className="card-dialog">
+      <ThemeLayer k={k} theme={p.theme} />
       <ProfileBanner st={st} k={k} p={p} />
       <div className="card" style={{ ['--person' as string]: accent }}>
         <div className="card-portrait">

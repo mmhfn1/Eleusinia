@@ -2477,3 +2477,204 @@ dialog.gif-picker[open] > .dialog-body {
 .gif-credit {
   margin-left: auto;
 }
+
+/* ---------- A profile theme (design/mockups/court-profile.html, 3) ---------- */
+/* Behind the whole card: the weave at --op under a scrim of the card's colour (--scrim, themeScrim in mark.ts), so text
+   keeps AA contrast. It moves only by transform (Drift) or opacity (Breathe), and is still under reduced motion. */
+/* The small card is already fixed, which holds the layer; the others need a position for it */
+.profile-pop {
+  isolation: isolate;
+}
+.card-dialog .dialog-body,
+.preview-card {
+  position: relative;
+  isolation: isolate;
+}
+.profile-pop:has(> .profile-theme),
+.preview-card:has(> .profile-theme) {
+  overflow: hidden;
+}
+.profile-theme {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.profile-theme::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--obsidian-2) var(--scrim), transparent);
+}
+.theme-weave {
+  position: absolute;
+  inset: -20%;
+  opacity: var(--op);
+}
+.theme-weave .woven {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* One keyframes per Depth step (theme.depth / 10), holding only numbers: keyframes reading a variable can keep an
+   animation on the main thread, these run on the compositor. Duration is the only variable (Speed). */
+/* Stepped about twice a second: it moves well under a pixel a second, so 60 frames would only cost the GPU */
+.profile-theme.fx-drift .theme-move {
+  animation: calc(60s / var(--spd)) steps(120) infinite alternate;
+}
+.profile-theme.fx-breathe .theme-move {
+  animation: calc(12s / var(--spd)) steps(24) infinite alternate;
+}
+.profile-theme.paused .theme-move {
+  animation-play-state: paused;
+}
+.theme-move {
+  position: absolute;
+  inset: 0;
+}
+/* Its own layer, drawn once and then only moved or faded */
+.profile-theme.fx-drift:not(.paused) .theme-move {
+  will-change: transform;
+}
+.profile-theme.fx-breathe:not(.paused) .theme-move {
+  will-change: opacity;
+}
+.fx-drift.d-1 .theme-move { animation-name: theme-drift-1; }
+@keyframes theme-drift-1 { from { transform: translate3d(-1.2%, 0, 0); } to { transform: translate3d(1.2%, 0.48%, 0); } }
+.fx-breathe.d-1 .theme-move { animation-name: theme-breathe-1; }
+@keyframes theme-breathe-1 { from { opacity: 0.9; } to { opacity: 1; } }
+.fx-drift.d-2 .theme-move { animation-name: theme-drift-2; }
+@keyframes theme-drift-2 { from { transform: translate3d(-2.4%, 0, 0); } to { transform: translate3d(2.4%, 0.96%, 0); } }
+.fx-breathe.d-2 .theme-move { animation-name: theme-breathe-2; }
+@keyframes theme-breathe-2 { from { opacity: 0.8; } to { opacity: 1; } }
+.fx-drift.d-3 .theme-move { animation-name: theme-drift-3; }
+@keyframes theme-drift-3 { from { transform: translate3d(-3.6%, 0, 0); } to { transform: translate3d(3.6%, 1.44%, 0); } }
+.fx-breathe.d-3 .theme-move { animation-name: theme-breathe-3; }
+@keyframes theme-breathe-3 { from { opacity: 0.7; } to { opacity: 1; } }
+.fx-drift.d-4 .theme-move { animation-name: theme-drift-4; }
+@keyframes theme-drift-4 { from { transform: translate3d(-4.8%, 0, 0); } to { transform: translate3d(4.8%, 1.92%, 0); } }
+.fx-breathe.d-4 .theme-move { animation-name: theme-breathe-4; }
+@keyframes theme-breathe-4 { from { opacity: 0.6; } to { opacity: 1; } }
+.fx-drift.d-5 .theme-move { animation-name: theme-drift-5; }
+@keyframes theme-drift-5 { from { transform: translate3d(-6.0%, 0, 0); } to { transform: translate3d(6.0%, 2.4%, 0); } }
+.fx-breathe.d-5 .theme-move { animation-name: theme-breathe-5; }
+@keyframes theme-breathe-5 { from { opacity: 0.5; } to { opacity: 1; } }
+.fx-drift.d-6 .theme-move { animation-name: theme-drift-6; }
+@keyframes theme-drift-6 { from { transform: translate3d(-7.2%, 0, 0); } to { transform: translate3d(7.2%, 2.88%, 0); } }
+.fx-breathe.d-6 .theme-move { animation-name: theme-breathe-6; }
+@keyframes theme-breathe-6 { from { opacity: 0.4; } to { opacity: 1; } }
+.fx-drift.d-7 .theme-move { animation-name: theme-drift-7; }
+@keyframes theme-drift-7 { from { transform: translate3d(-8.4%, 0, 0); } to { transform: translate3d(8.4%, 3.36%, 0); } }
+.fx-breathe.d-7 .theme-move { animation-name: theme-breathe-7; }
+@keyframes theme-breathe-7 { from { opacity: 0.3; } to { opacity: 1; } }
+.fx-drift.d-8 .theme-move { animation-name: theme-drift-8; }
+@keyframes theme-drift-8 { from { transform: translate3d(-9.6%, 0, 0); } to { transform: translate3d(9.6%, 3.84%, 0); } }
+.fx-breathe.d-8 .theme-move { animation-name: theme-breathe-8; }
+@keyframes theme-breathe-8 { from { opacity: 0.2; } to { opacity: 1; } }
+.fx-drift.d-9 .theme-move { animation-name: theme-drift-9; }
+@keyframes theme-drift-9 { from { transform: translate3d(-10.8%, 0, 0); } to { transform: translate3d(10.8%, 4.32%, 0); } }
+.fx-breathe.d-9 .theme-move { animation-name: theme-breathe-9; }
+@keyframes theme-breathe-9 { from { opacity: 0.1; } to { opacity: 1; } }
+.fx-drift.d-10 .theme-move { animation-name: theme-drift-10; }
+@keyframes theme-drift-10 { from { transform: translate3d(-12.0%, 0, 0); } to { transform: translate3d(12.0%, 4.8%, 0); } }
+.fx-breathe.d-10 .theme-move { animation-name: theme-breathe-10; }
+@keyframes theme-breathe-10 { from { opacity: 0.0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .profile-theme .theme-move {
+    animation: none !important;
+  }
+}
+/* What lies over it lets it through: the card's own panels were opaque */
+.profile-pop:has(> .profile-theme) .pop-body,
+.card-dialog .dialog-body:has(> .profile-theme) .card,
+.preview-card:has(> .profile-theme) .preview-body {
+  background: transparent;
+}
+
+/* Settings, My profile, Profile theme */
+.theme-edit {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+.theme-edit h3 {
+  margin: 0;
+  font: var(--type-section);
+  color: var(--silver);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.theme-hint {
+  margin: 0 0 6px;
+  font: var(--type-meta);
+  color: var(--mist);
+  max-width: 60ch;
+}
+.theme-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 10px;
+  font: var(--type-label);
+  color: var(--silver-2);
+}
+.theme-label output {
+  margin-left: auto;
+  font: var(--type-stat);
+  font-variant-numeric: tabular-nums;
+  color: var(--mist);
+}
+.theme-weaves {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.theme-weaves .weave-kind {
+  height: 58px;
+}
+.theme-weaves .weave-kind.none {
+  display: grid;
+  place-items: center;
+  background: var(--obsidian-3);
+}
+.theme-weaves .weave-kind.none span {
+  position: static;
+  color: var(--silver-2);
+  text-shadow: none;
+}
+.theme-slider {
+  display: grid;
+  gap: 4px;
+}
+.theme-slider input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.theme-slider.off,
+.theme-off {
+  opacity: 0.45;
+}
+.theme-tones {
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, oklch(0.7 0.1 0), oklch(0.7 0.1 60), oklch(0.7 0.1 120), oklch(0.7 0.1 180), oklch(0.7 0.1 240), oklch(0.7 0.1 300), oklch(0.7 0.1 360));
+}
+.theme-edit .segmented {
+  justify-self: start;
+}
+/* The full card aligns its children to the start, which would shrink the grid to nothing */
+.card-dialog .card .play-days,
+.person-panel .play-days,
+.preview-body .play-days {
+  justify-self: stretch;
+  width: 100%;
+}
+.settings-section .theme-edit h3 {
+  font: var(--type-section);
+  color: var(--silver);
+}
+.theme-weaves .weave-kind {
+  width: auto;
+  min-width: 0;
+}

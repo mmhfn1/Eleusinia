@@ -1528,10 +1528,10 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   function publishCard() {
     if (!s.profile.handle) return
     published = Math.max(published + 1, Math.floor(Date.now() / 1000))
-    const { name, handle, banner, gameArt, status } = s.profile
+    const { name, handle, banner, gameArt, status, theme } = s.profile
     const thumb = s.profile.avatar ? thumbnail?.(s.profile.avatar) : null
     if (thumb) net.putShared(thumbSeed, thumb, published)
-    const card = (about: string) => Buffer.from(JSON.stringify({ name, handle, about, nat: ourNat(), ...(banner && !('pic' in banner) && { banner }), ...(gameArt === false && { gameArt }), ...(status && { status }), // a picture banner comes with the greeting, too big for a card
+    const card = (about: string) => Buffer.from(JSON.stringify({ name, handle, about, nat: ourNat(), ...(banner && !('pic' in banner) && { banner }), ...(gameArt === false && { gameArt }), ...(status && { status }), ...(theme && { theme }), // a picture banner comes with the greeting, too big for a card
       ...(thumb && { thumb: DHT.keyPair(thumbSeed).publicKey.toString('hex') }) }))
     let about = s.profile.about
     while (card(about).length > 1000) about = about.slice(0, -10) // records hold 1000 bytes; friends get it whole

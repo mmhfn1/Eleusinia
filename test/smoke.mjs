@@ -730,6 +730,89 @@ try {
     clearInterval(posting)
   }
 
+  console.log('--- Two weeks of play and a profile theme (design/mockups/court-profile.html), seen by a friend')
+  const annTheme = { kind: 2, shift: 40, op: 30, fx: 'drift', speed: 1, depth: 40 }
+  await a.ev(`api.call('state').then((s) => api.call('setProfile', { ...s.profile, theme: ${JSON.stringify(annTheme)} }))`)
+  // Oldest first: cell 13 is today (95 min, level 2), 12 yesterday (185, 3), 10 three days ago (260, 4), 0 two weeks ago (300, 4)
+  const cells = (root) => `[...${root}.querySelectorAll('.play-cell')].map((c) => c.dataset.l).join('')`
+  const annCells = '40000001004032'
+  await b.ev(`${annRow}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+  await until("B sees Ann's two weeks under her status in her small card: 14 days, today ringed, her strengths", () => b.ev(pop((p) => p.querySelectorAll('.play-cell').length === 14 && p.querySelector('.play-cell.today') === p.querySelectorAll('.play-cell')[13] && [...p.querySelectorAll('.play-cell')].map((c) => c.dataset.l).join('') === '40000001004032')), 20)
+  if (await b.ev(pop((p) => !!p.querySelector('.play-days .week-legend, .play-days small')))) throw new Error('the grid still has a key under it')
+  await until("and her theme behind the card, drifting", () => b.ev(pop((p) => !!p.querySelector(':scope > .profile-theme.fx-drift .woven'))), 10)
+  if (!(await b.ev(pop((p) => getComputedStyle(p).position === 'fixed' && p.getBoundingClientRect().top >= 0 && p.getBoundingClientRect().bottom <= innerHeight + 1)))) throw new Error('the themed card is not floating inside the window')
+  // Each cell says what it holds; focus shows the same as hover
+  await until('each cell is labelled with its day, games and hours', () => b.ev(pop((p) => /Counter-Strike 2 2\.3 h, Dota 2 45 min/.test(p.querySelectorAll('.play-cell')[12].getAttribute('aria-label')) && /no play/.test(p.querySelectorAll('.play-cell')[11].getAttribute('aria-label')))), 5)
+  await b.ev(`document.querySelector('.profile-pop .play-cell[tabindex="0"]').focus()`)
+  await b.ev(`document.querySelector('.profile-pop .play-cells').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))`)
+  await until('the arrow keys move between days, and the focused one shows its date, games and hours', () => b.ev(pop((p) => document.activeElement === p.querySelectorAll('.play-cell')[12] && /Dota 2\s*45 min/.test(p.querySelector('.play-tip')?.textContent ?? ''))), 5)
+  const tipInside = await b.ev(pop((p) => { const t = p.querySelector('.play-tip').getBoundingClientRect(), r = p.getBoundingClientRect(); return t.left >= r.left - 1 && t.right <= r.right + 1 }))
+  if (!tipInside) throw new Error("the day's details run off the card")
+  await b.shot('play-grid-mini')
+  await b.ev(expandPop)
+  await until('her full card shows the same two weeks and the same theme', () => b.ev(`(() => { const d = document.querySelector('dialog[open].card-dialog'); return !!d && ${cells("d")} === '${annCells}' && !!d.querySelector('.profile-theme.fx-drift') })()`), 10)
+  await sleep(500) // past the dialog's opening
+  await b.shot('play-grid-full')
+  await b.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
+  // Her own view: Settings, My profile, Profile theme, with the preview as friends see it
+  await a.ev(`document.querySelector('.user-bar button[title="Settings"]').click()`)
+  await until("Ann's settings show her theme chosen, and the preview draws it", () => a.ev(`(() => { const t = document.querySelector('.theme-edit'); return !!t && t.querySelector('.theme-weaves [aria-checked="true"] span')?.textContent === 'Bands' && !!document.querySelector('.preview-card > .profile-theme') && ${cells("document.querySelector('.preview-card')")} === '${annCells}' })()`), 10)
+  await a.ev(`[...document.querySelectorAll('.theme-weaves button')].find((x) => x.textContent === 'Lattice').click()`)
+  await until('a change shows in the preview at once, playing, before it is saved', () => a.ev(`!!document.querySelector('.preview-card > .profile-theme.fx-drift:not(.paused)') && !document.querySelector('.theme-edit .button.primary').disabled`), 5)
+  await a.ev(`document.querySelector('.theme-edit').scrollIntoView()`)
+  await sleep(300)
+  await a.shot('settings-theme')
+  await until('the preview stops playing a few seconds after the last touch', () => a.ev(`!!document.querySelector('.preview-card > .profile-theme.paused')`), 8)
+  await a.ev(`[...document.querySelectorAll('.theme-edit button')].find((x) => x.textContent === 'Reset').click()`)
+  await until('Reset puts the saved theme back', () => a.ev(`document.querySelector('.theme-weaves [aria-checked="true"] span')?.textContent === 'Bands' && document.querySelector('.theme-edit .button.primary').disabled`), 5)
+  await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
+  await a.ev(`document.querySelector('.user-bar-me').click()`)
+  await until('her own full card shows her theme and two weeks too', () => a.ev(`(() => { const d = document.querySelector('dialog[open].card-dialog'); return !!d && !!d.querySelector('.profile-theme.fx-drift') && ${cells("d")} === '${annCells}' })()`), 10)
+  await sleep(400)
+  await a.shot('theme-owner')
+  await a.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
+  const fonts = await b.ev(`document.fonts.ready.then(() => JSON.stringify({ bodoni: document.fonts.check('italic 400 15px "Bodoni Moda Variable"') && document.fonts.check('600 22px "Bodoni Moda Variable"'), alegreya: document.fonts.check('500 15px "Alegreya Sans"'), google: performance.getEntriesByType('resource').filter((e) => /fonts\.(googleapis|gstatic)\.com/.test(e.name)).length, local: performance.getEntriesByType('resource').filter((e) => /bodoni-moda|alegreya-sans/.test(e.name) && !/^https?:/.test(e.name)).length }))`)
+  const f = JSON.parse(fonts)
+  if (!f.bodoni || !f.alegreya || f.google) throw new Error('court type is not loaded from the app: ' + fonts)
+  console.log(`ok   Bodoni Moda and Alegreya Sans load from the app (${f.local} font files), none from Google`)
+  console.log('ok   the grid and the theme crossed the wire: Bob drew both from what Ann shares')
+  // ELEUSINIA_SMOKE_PERF=1 (Windows): what an open themed card costs Bob's renderer and GPU processes, against none open
+  if (process.env.ELEUSINIA_SMOKE_PERF && process.platform === 'win32') {
+    // The app's child processes by type once, then their processor time from Get-Process before and after each wait
+    const ps = (cmd) => new Promise((done) => { let out = ''; spawn('powershell', ['-NoProfile', '-Command', cmd]).on('exit', () => done(out.trim())).stdout.on('data', (d) => (out += d)) })
+    const kids = (await ps(`Get-CimInstance Win32_Process -Filter "ParentProcessId=${b.child.pid}" | ForEach-Object { '{0}|{1}' -f $_.ProcessId, ([regex]::Match($_.CommandLine, '--type=([a-z-]+)').Groups[1].Value) }`))
+      .split(/\r?\n/).map((l) => l.split('|')).filter(([, type]) => type === 'renderer' || type === 'gpu-process')
+    const times = async () => Object.fromEntries((await ps(`${kids.map(([pid]) => pid).join(',')} | ForEach-Object { '{0}|{1}' -f $_, (Get-Process -Id $_).TotalProcessorTime.TotalMilliseconds }`)).split(/\r?\n/).map((l) => l.split('|')).map(([pid, ms]) => [pid, Number(ms)]))
+    const measure = async (label, ms = 10000) => {
+      const t0 = await times(), start = Date.now()
+      await sleep(ms)
+      const t1 = await times(), took = Date.now() - start
+      const pct = (type) => (kids.filter(([, t]) => t === type).reduce((n, [pid]) => n + (t1[pid] - t0[pid]), 0) / took * 100).toFixed(1)
+      console.log(`     perf ${label}: renderer ${pct('renderer')} % of a core, GPU process ${pct('gpu-process')} %`)
+    }
+    // Each motion between two readings of the same card held still, so whatever else the run left going shows in both
+    const themed = (fx) => a.ev(`api.call('state').then((s) => api.call('setProfile', { ...s.profile, theme: { ...s.profile.theme, fx: ${fx ? `'${fx}'` : 'undefined'} } }))`)
+    const showing = (fx) => {
+      const sel = fx ? `:scope > .profile-theme.fx-${fx}:not(.paused)` : ':scope > .profile-theme:not(.fx-drift):not(.fx-breathe)'
+      return until(`Bob's card shows ${fx ?? 'no motion'}`, () => b.ev(`(() => { const p = document.querySelector('.profile-pop.placed'); return !!p?.querySelector('${sel}') })()`), 20)
+    }
+    await themed(undefined)
+    await b.ev(`${annRow}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+    await showing(undefined)
+    await sleep(20000)
+    for (const fx of ['drift', 'breathe', 'drift']) {
+      await measure('her card open, held still')
+      await themed(fx)
+      await showing(fx)
+      await measure(`her card open, ${fx === 'drift' ? 'Drift' : 'Breathe'}`)
+      await themed(undefined)
+      await showing(undefined)
+    }
+    await measure('her card open, held still')
+    await themed('drift') // as the checks after this expect
+    await b.ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`)
+  }
+
   console.log('--- Activity: a Dota 2 match, through the same Game State Integration server')
   await a.ev(`document.querySelector('.user-bar button[title="Settings"]').click()`)
   await until('Settings shows the Steam tile with CS2 live', () => a.ev(`document.querySelector('.connection[data-k="steam"] .connection-state')?.textContent === 'CS2'`), 10)
