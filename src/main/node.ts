@@ -47,7 +47,7 @@ import type { Layer } from '../shared/vp8layers'
 import { type InviteCard, type InviteLink, type JoinReason, askOrder, checkJoinAsk, cleanInviteCard, inviteCard, isJoinAnswer, isJoinAsk, joinTopic, limiter, makeInvite, newInvite, parseInvite, serverTopic } from '../shared/invite'
 import { type ServerState, joinProof, verifyJoin } from '../shared/server'
 import { createFiles } from './files'
-import { type Activity, type Game, cleanActivity, dayKey, shareable, weekOf } from '../shared/activity'
+import { type Activity, type Game, cleanActivity, dayKey, daysBack, prunePlayed, shareable, sharing as activityOn, weekOf } from '../shared/activity'
 import { type RelayLimits, RELAY_LIMITS, createNet } from './network'
 import { pickRelays } from '../shared/relaypick'
 import { type Hop, nearest, routeFor } from '../shared/relays'
@@ -56,7 +56,7 @@ import { isNewer } from '../shared/updatesig'
 import { type Check, type StartupEvent, type StepId, startupEvent } from '../shared/startup'
 
 type Saved = {
-  played?: Record<string, Record<string, number>> // our minutes per game per day (YYYY-MM-DD), the last 7 days, for the week we share
+  played?: Record<string, Record<string, number>> // our minutes per game per day (YYYY-MM-DD), the last 14 days, for the two weeks we share
   unread?: Record<string, number> // per conversation: messages from others and missed calls since it was last read
   lastAt?: Record<string, number> // per conversation: when its newest message arrived here
   blocked?: Record<Key, number> // people we blocked, and when: no friend requests, no links, their messages uncounted
@@ -113,6 +113,7 @@ type Opts = {
   appMemory?: () => number // the app's memory in MB, logged once startup has tidied up (index.ts: every process)
   forwarder?: Forwarder // passes call mates' streams on (main/forwarder.ts, from index.ts); without one we never forward
   testUploadKbps?: number // testing, local test DHT only (index.ts): what probe reports, so a smoke run forces forwarding
+  testPlayed?: Record<string, Record<string, number>> // testing, local test DHT only: minutes per game per days ago, as if played
 }
 
 // Conversations whose messages stay in memory; the open one and a couple being synced.
@@ -125,7 +126,7 @@ const CATCHUP_BACKLOG = 1 << 20 // no new round while this much is still unsent 
 const FLOOD = { burst: 400, perSecond: 20 }
 
 // Everything except the window: friends, groups, message logs and their sync. No Electron imports, so tests can run it.
-export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, pullLogs, diag = () => {}, version = '0.0.0', newerApp, links, strict, relayLimits, noRelay = false, hostedRelays = [], hostedForwarders = [], maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8, keepMsgs = 50000, startupMs = 20000, appMemory = () => process.memoryUsage().rss / 2 ** 20, forwarder, testUploadKbps }: Opts) {
+export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect = false, inbox, pullLogs, diag = () => {}, version = '0.0.0', newerApp, links, strict, relayLimits, noRelay = false, hostedRelays = [], hostedForwarders = [], maxRequests = 200, netsim, thumbnail, forwardTo = 3, groupLinks = 8, keepMsgs = 50000, startupMs = 20000, appMemory = () => process.memoryUsage().rss / 2 ** 20, forwarder, testUploadKbps, testPlayed }: Opts) {
   const me: Key = keyPair.publicKey.toString('hex')
   const file = join(dir, 'state.json')
   mkdirSync(join(dir, 'msgs'), { recursive: true })
@@ -237,14 +238,14 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   let mine: Game | null = null
   const theirs = new Map<Key, Activity>()
   const sentActivity = new Map<Key, string>()
+  if (testPlayed) for (const [d, games] of Object.entries(testPlayed)) (s.played ??= {})[dayKey(daysBack(Date.now(), +d))] = games
   const ourActivity = () => shareable({ now: Date.now(), ...(mine && { game: mine }), week: weekOf(s.played ?? {}) }, s.settings.activity)
-  // Each minute of a game counts toward today; days older than a week are dropped
+  // Each minute of a game counts toward today, unless activity is off; days older than two weeks are dropped
   const playClock = setInterval(() => {
-    if (!mine) return
+    if (!mine || !activityOn(s.settings.activity)) return
     const day = dayKey(Date.now())
-    const played = (s.played ??= {})
-    played[day] = { ...played[day], [mine.name]: (played[day]?.[mine.name] ?? 0) + 1 }
-    for (const d of Object.keys(played)) if (d < dayKey(Date.now() - 7 * 864e5)) delete played[d]
+    const played = prunePlayed((s.played ??= {}))
+    played[day] = { ...played[day], [mine.name]: Math.min(1440, (played[day]?.[mine.name] ?? 0) + 1) }
     saveSoon()
     shareActivity()
   }, 60000)

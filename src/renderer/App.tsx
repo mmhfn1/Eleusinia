@@ -16,7 +16,7 @@ import { REACH_WORDS, callWords, forwardingWords, reachOf, routeWords } from '..
 import { ContextMenu, type Item, Rail, otherIn, railDms, useMenus } from './Rail'
 import { Splash, StillConnecting } from './Splash'
 import { ActivityNotices, DmList, observe as observeFeed } from './Lists'
-import { PersonPanel, ShowcaseView, WeekBars } from './Person'
+import { PersonPanel, PlayDays, ShowcaseView } from './Person'
 import { TOGETHER_TICK, tick as tickTogether } from './together'
 
 type Poke = { from: Key; server: string; channel: string }
@@ -929,6 +929,7 @@ function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
           {p.name} {st.settings.verified?.includes(k) && <VerifiedSeal />}
         </h1>
         {statusOf(p) && <p className="card-status">{statusOf(p)!.text}</p>}
+        <PlayDays st={st} k={k} />
         {k !== st.me && (
           <p className="row-sub">
             {st.hostedRelayed.includes(k) ? 'Online through an Eleusinia relay' : st.relayed.includes(k) ? 'Online through a friend: voice and text only' : REACH_WORDS[reachOf(st, k)]}
@@ -938,7 +939,6 @@ function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
         {p.about && <p className="about">{p.about}</p>}
         <ProfileActivity st={st} k={k} />
         <ShowcaseView items={p.showcase} />
-        <WeekBars week={st.activity[k]?.week} />
         <dl className="identity">
           <dt>Friend ID</dt>
           <dd>

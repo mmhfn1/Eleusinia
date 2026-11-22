@@ -526,7 +526,9 @@ const annGame = {
 }
 // And a folder standing in for CS2's cfg folder, where Settings → Set up writes the game's file.
 const annGsiCfg = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-gsi-')) // one subfolder per game
-const annEnv = { ...strictEnv, ...uploadEnv(3000), ELEUSINIA_TEST_ACTIVITY: JSON.stringify(annGame), ELEUSINIA_TEST_GSI_CFG: annGsiCfg }
+// Two weeks of Ann's play, as if counted day by day (ELEUSINIA_TEST_PLAYED: minutes per game per days ago)
+const annPlayed = { 0: { 'Counter-Strike 2': 95 }, 1: { 'Counter-Strike 2': 140, 'Dota 2': 45 }, 3: { 'Destiny 2': 260 }, 6: { 'Dota 2': 30 }, 13: { 'Dota 2': 300 } }
+const annEnv = { ...strictEnv, ...uploadEnv(3000), ELEUSINIA_TEST_ACTIVITY: JSON.stringify(annGame), ELEUSINIA_TEST_GSI_CFG: annGsiCfg, ELEUSINIA_TEST_PLAYED: JSON.stringify(annPlayed) }
 let a = await launch(9231, undefined, annEnv)
 // Bob plays Destiny 2 and links a stand-in for bungie.net (test/fake-bungie.mjs) that approves at once.
 const bobGame = { name: 'Destiny 2', source: 'steam', app: 1085660, played: 211683 }

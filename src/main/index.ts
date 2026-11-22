@@ -540,6 +540,7 @@ function startApp() {
     forwarder: process.env.ELEUSINIA_BOOTSTRAP && process.env.ELEUSINIA_TEST_NO_FORWARD === '1' ? undefined : createForwarder({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }], log: (...a) => diagnostics.add('call', a.map((x) => String(x).replace(/[0-9a-f]{64}/g, (k) => '…' + k.slice(-6))).join(' ')) }),
     // testing, local test DHT only: the upload probe reports this (smoke's forwarding mode)
     ...(process.env.ELEUSINIA_BOOTSTRAP && Number(process.env.ELEUSINIA_TEST_UPLOAD_KBPS) > 0 && { testUploadKbps: Number(process.env.ELEUSINIA_TEST_UPLOAD_KBPS) }),
+    ...(process.env.ELEUSINIA_BOOTSTRAP && process.env.ELEUSINIA_TEST_PLAYED && { testPlayed: JSON.parse(process.env.ELEUSINIA_TEST_PLAYED) }), // testing, local test DHT only: two weeks of play to show
     // The project's hosted relays; ELEUSINIA_RELAYS replaces them only on a local test DHT
     hostedRelays: parseRelays(process.env.ELEUSINIA_BOOTSTRAP ? process.env.ELEUSINIA_RELAYS : undefined),
     hostedForwarders: parseForwarders(process.env.ELEUSINIA_BOOTSTRAP ? process.env.ELEUSINIA_FORWARDERS : undefined),

@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom'
 import type React from 'react'
 import { type Key, type Profile, type State, MAX_TEXT, dmId, statusOf } from '../shared/protocol'
 import { routeWords } from '../shared/reach'
+import { PlayDays } from './Person'
 import { GameGlance } from './Activity'
 import * as call from './call'
 import { type People, type Run, api } from './common'
@@ -112,6 +113,7 @@ export function ProfilePop({ k, from, st, people, run, close, expand, chat, edit
           {name} {st.settings.verified?.includes(k) && <VerifiedSeal />}
         </h2>
         {statusOf(p) && <p className="pop-status">{statusOf(p)!.text}</p>}
+        <PlayDays st={st} k={k} />
         <p className="pop-handle">
           {p.handle || 'No friend ID yet'}
           {me && ' (you)'}

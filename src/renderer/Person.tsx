@@ -1,9 +1,9 @@
 // The right column of a DM: who the other person is, beside the conversation. Their banner and picture, status, what
 // they play now, whether we verified their key, our time together, what we share, and the pictures sent between us.
-import { useEffect, useState } from 'react'
+import { type KeyboardEvent, useEffect, useState } from 'react'
 import { inlineKind } from '../shared/media'
 import { type Key, type Msg, type State, statusOf } from '../shared/protocol'
-import type { Showcase, Week } from '../shared/activity'
+import { type Showcase, PLAY_DAYS, daysBack, playLevel, sharing } from '../shared/activity'
 import { GameGlance } from './Activity'
 import { type People, api, groupName } from './common'
 import { ProfileBanner } from './Profile'
@@ -45,6 +45,7 @@ export function PersonPanel({ st, k, conv, people }: { st: State; k: Key; conv: 
             {status.until && <span className="row-sub"> · until {new Date(status.until).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}</span>}
           </p>
         )}
+        <PlayDays st={st} k={k} />
         {p.about && <p className="person-about">{p.about}</p>}
         {game && (
           <button className="pop-glance" onClick={() => show(k)}>
@@ -52,7 +53,6 @@ export function PersonPanel({ st, k, conv, people }: { st: State; k: Key; conv: 
           </button>
         )}
         <ShowcaseView items={p.showcase} />
-        <WeekBars week={st.activity[k]?.week} />
         {t && (t.calls > 0 || Object.keys(t.games).length > 0) && (
           <section className="person-section">
             <h3>Together</h3>
@@ -114,39 +114,84 @@ export function ShowcaseView({ items }: { items?: Showcase }) {
   )
 }
 
-const GAME_TONES = ['var(--accent)', 'var(--cyan)', 'var(--online)', 'var(--danger)', 'var(--mist)']
-// A week of play: a bar per day, stacked by game, from what their own app counted and shares (Activity.week)
-export function WeekBars({ week }: { week?: Week }) {
-  if (!week?.length) return null
-  const games = [...new Set(week.map((w) => w.g))]
-  const total = (d: number) => week.filter((w) => w.d === d).reduce((n, w) => n + w.m, 0)
-  const top = Math.max(60, ...[0, 1, 2, 3, 4, 5, 6].map(total))
-  const day = (d: number) => (d === 0 ? 'Today' : new Date(Date.now() - d * 864e5).toLocaleDateString(undefined, { weekday: 'short' }))
+// Two weeks of play (design/mockups/court-profile.html, 2): a cell a day, oldest first, today ringed, each in the
+// person's accent at a fixed strength (playLevel). No key under it, so each cell says it all in its label, and the
+// same words show on hover or focus. One tab stop: the arrow keys move between days.
+export function PlayDays({ st, k }: { st: State; k: Key }) {
+  const a = st.activity[k]
+  const [at, setAt] = useState<number | null>(null)
+  const [focus, setFocus] = useState(PLAY_DAYS - 1)
+  const mine = k === st.me
+  if (mine && !sharing(st.settings.activity))
+    return (
+      <section className="play-days">
+        <h3>Two weeks of play</h3>
+        <p className="play-empty">Activity is off. Turn it on in Settings, Activity.</p>
+      </section>
+    )
+  if (!a?.week)
+    return (
+      <section className="play-days">
+        <h3>Two weeks of play</h3>
+        <p className="play-empty">Not shared</p>
+      </section>
+    )
+  const week = a.week
+  const now = Date.now()
+  const games = (d: number) => week.filter((w) => w.d === d)
+  const total = (d: number) => games(d).reduce((n, w) => n + w.m, 0)
   const sum = week.reduce((n, w) => n + w.m, 0)
+  const date = (d: number) => new Date(daysBack(now, d)).toLocaleDateString(undefined, { weekday: 'long', day: 'numeric', month: 'long' })
+  const label = (d: number) => `${date(d)}${d === 0 ? ', today' : ''}: ${total(d) ? games(d).map((w) => `${w.g} ${hours(w.m * 60000)}`).join(', ') : 'no play'}`
+  const cells = [...Array(PLAY_DAYS).keys()].reverse() // d, oldest first
+  const move = (e: KeyboardEvent<HTMLDivElement>) => {
+    const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : e.key === 'Home' ? -PLAY_DAYS : e.key === 'End' ? PLAY_DAYS : 0
+    if (!step) return
+    e.preventDefault()
+    const i = Math.min(PLAY_DAYS - 1, Math.max(0, focus + step))
+    setFocus(i)
+    setAt(i)
+    ;(e.currentTarget.children[i] as HTMLElement | undefined)?.focus()
+  }
   return (
-    <section className="person-section week">
-      <h3>This week · {hours(sum * 60000)}</h3>
-      <div className="week-bars" role="img" aria-label={`Played ${hours(sum * 60000)} this week`}>
-        {[6, 5, 4, 3, 2, 1, 0].map((d) => (
-          <div key={d} className="week-day" title={`${day(d)}: ${hours(total(d) * 60000 || 0)}`}>
-            <span className="week-stack">
-              {week
-                .filter((w) => w.d === d)
-                .map((w) => (
-                  <i key={w.g} style={{ height: `${(w.m / top) * 100}%`, background: GAME_TONES[games.indexOf(w.g) % GAME_TONES.length] }} />
-                ))}
+    <section className="play-days">
+      <h3>
+        Two weeks of play <span className="play-sum">{sum ? hours(sum * 60000) : 'none'}</span>
+      </h3>
+      <div className="play-cells" role="list" aria-label={`${sum ? `Played ${hours(sum * 60000)}` : 'Nothing played'} in the last two weeks`} onKeyDown={move} onPointerLeave={() => setAt(null)}>
+        {cells.map((d, i) => (
+          <span
+            key={d}
+            role="listitem"
+            tabIndex={i === focus ? 0 : -1}
+            className={`play-cell ${d === 0 ? 'today' : ''}`}
+            data-l={playLevel(total(d))}
+            aria-label={label(d)}
+            onPointerEnter={() => setAt(i)}
+            onFocus={() => (setFocus(i), setAt(i))}
+            onBlur={() => setAt(null)}
+          />
+        ))}
+        {at !== null && (
+          <>
+            <span className="play-tip" aria-hidden="true" style={{ ['--at' as string]: (at + 0.5) / PLAY_DAYS }}>
+              <b>{date(cells[at])}</b>
+              {total(cells[at]) ? (
+                games(cells[at]).map((w) => (
+                  <span key={w.g}>
+                    <span>{w.g}</span>
+                    <span>{hours(w.m * 60000)}</span>
+                  </span>
+                ))
+              ) : (
+                <span>No play</span>
+              )}
             </span>
-            <small>{day(d).slice(0, 2)}</small>
-          </div>
-        ))}
+            <span className="play-tip-arrow" aria-hidden="true" style={{ ['--at' as string]: (at + 0.5) / PLAY_DAYS }} />
+          </>
+        )}
       </div>
-      <p className="week-legend">
-        {games.slice(0, 3).map((g, i) => (
-          <span key={g}>
-            <i style={{ background: GAME_TONES[i] }} /> {g}
-          </span>
-        ))}
-      </p>
+      {!sum && <p className="play-empty">No play in the last 14 days</p>}
     </section>
   )
 }

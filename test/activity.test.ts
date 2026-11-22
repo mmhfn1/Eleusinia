@@ -71,16 +71,16 @@ test('pictures only ever come from Steam, built from ids', () => {
     expect(artUrl(bad)).toBeNull()
 })
 
-test('the week we share: the 3 games played most each day, rounded to 5 minutes, and only what is valid from a friend', () => {
+test('the two weeks we share: the 3 games played most each day, rounded to 5 minutes, and only what is valid from a friend', () => {
   const now = new Date(2026, 10, 20, 15).getTime()
-  const played: Record<string, Record<string, number>> = { [dayKey(now)]: { A: 62, B: 3, C: 20, D: 10, E: 40 }, [dayKey(now - 864e5)]: { A: 30 }, [dayKey(now - 9 * 864e5)]: { A: 500 } }
+  const played: Record<string, Record<string, number>> = { [dayKey(now)]: { A: 62, B: 3, C: 20, D: 10, E: 40 }, [dayKey(now - 864e5)]: { A: 30 }, [dayKey(now - 15 * 864e5)]: { A: 500 } }
   expect(weekOf(played, now)).toEqual([
     { d: 0, g: 'A', m: 60 },
     { d: 0, g: 'E', m: 40 },
     { d: 0, g: 'C', m: 20 },
     { d: 1, g: 'A', m: 30 },
   ])
-  expect(cleanWeek([{ d: 0, g: 'A', m: 60 }, { d: 7, g: 'B', m: 5 }, { d: 1, g: '', m: 5 }, { d: 2, g: 'C', m: 99999 }, 'x'])).toEqual([{ d: 0, g: 'A', m: 60 }])
+  expect(cleanWeek([{ d: 0, g: 'A', m: 60 }, { d: 14, g: 'B', m: 5 }, { d: 1, g: '', m: 5 }, { d: 2, g: 'C', m: 99999 }, 'x'])).toEqual([{ d: 0, g: 'A', m: 60 }])
   expect(cleanActivity({ now, week: [{ d: 0, g: 'A', m: 60 }] }, now)).toEqual({ now, week: [{ d: 0, g: 'A', m: 60 }] })
   // turned off with playtime, kept with a game or without one
   expect(shareable({ now, week: [{ d: 0, g: 'A', m: 60 }] }, { playtime: false }).week).toBeUndefined()

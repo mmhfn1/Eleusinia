@@ -2179,52 +2179,99 @@ h2.in-chat {
   margin-top: 8px;
 }
 
-/* ---------- The week of play ---------- */
-.week-bars {
+/* ---------- Two weeks of play (design/mockups/court-profile.html, 2) ---------- */
+.play-days {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
   gap: 6px;
-  height: 72px;
+  margin: 10px 0 4px;
+  --play: var(--person, var(--accent));
 }
-.week-day {
+.play-days h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font: var(--type-label);
+  color: var(--silver-2, var(--mist));
+  letter-spacing: 0;
+  text-transform: none;
+}
+.play-sum {
+  margin-left: auto;
+  font: var(--type-stat);
+  font-variant-numeric: tabular-nums;
+  color: var(--mist);
+}
+.play-cells {
+  position: relative;
   display: grid;
-  grid-template-rows: 1fr auto;
+  grid-template-columns: repeat(14, 1fr);
   gap: 3px;
-  justify-items: center;
 }
-.week-stack {
-  display: flex;
-  flex-direction: column-reverse;
-  justify-content: flex-start;
-  width: 100%;
-  max-width: 18px;
-  height: 100%;
-  overflow: hidden;
-  border-radius: 3px;
-  background: var(--obsidian-2);
-}
-.week-stack i {
-  display: block;
-  width: 100%;
-  min-height: 2px;
-  transition: height 600ms var(--ease);
-}
-.week-day small {
-  color: var(--mist-2);
-  font-size: 10.5px;
-}
-.week-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  font-size: 12px;
-}
-.week-legend i {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 4px;
+.play-cell {
+  aspect-ratio: 1;
   border-radius: 2px;
+  background: var(--lvl);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--silver) 10%, transparent);
+  outline: none;
+}
+.play-cell[data-l='0'] { --lvl: color-mix(in oklab, var(--line) 80%, transparent); }
+.play-cell[data-l='1'] { --lvl: color-mix(in oklab, var(--play) 32%, transparent); }
+.play-cell[data-l='2'] { --lvl: color-mix(in oklab, var(--play) 56%, transparent); }
+.play-cell[data-l='3'] { --lvl: color-mix(in oklab, var(--play) 78%, transparent); }
+.play-cell[data-l='4'] { --lvl: var(--play); }
+.play-cell.today {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--silver) 10%, transparent), 0 0 0 1.5px var(--abyss-2), 0 0 0 3px color-mix(in srgb, var(--silver) 40%, transparent);
+}
+.play-cell:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+/* Above the cells, kept inside them so it never runs off a narrow card */
+.play-tip {
+  position: absolute;
+  z-index: 5;
+  bottom: calc(100% + 10px);
+  width: 200px;
+  left: clamp(0px, calc(var(--at) * 100% - 24px), calc(100% - 200px));
+  display: grid;
+  gap: 2px;
+  padding: 9px 12px;
+  background: var(--obsidian-2);
+  color: var(--silver);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-1);
+  font: var(--type-meta);
+  pointer-events: none;
+}
+.play-tip b {
+  font: var(--type-tip);
+  margin-bottom: 2px;
+}
+.play-tip > span {
+  display: flex;
+  gap: 10px;
+}
+.play-tip > span > span:last-child {
+  margin-left: auto;
+  color: var(--mist);
+  font-variant-numeric: tabular-nums;
+}
+.play-tip-arrow {
+  position: absolute;
+  z-index: 6;
+  bottom: calc(100% + 4px);
+  left: calc(var(--at) * 100% - 6px);
+  width: 12px;
+  height: 6px;
+  background: var(--obsidian-2);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  pointer-events: none;
+}
+.play-empty {
+  margin: 0;
+  font: var(--type-quiet);
+  color: var(--mist);
 }
 
 /* ---------- The showcase ---------- */

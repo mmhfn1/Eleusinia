@@ -12,7 +12,7 @@ import * as theme from './theme'
 import { NOBODY, api, labelOf } from './common'
 import { ActivitySettingsSection, GameGlance } from './Activity'
 import { ProfileBanner } from './Profile'
-import { ShowcaseView, WeekBars } from './Person'
+import { PlayDays, ShowcaseView } from './Person'
 
 // Microphone, speakers and voice quality, in Settings.
 function AudioSettings({ st }: { st: State }) {
@@ -430,10 +430,10 @@ function Preview({ st }: { st: State }) {
           <b className="preview-name">{st.profile.name}</b>
           <span className="row-sub">{st.profile.handle}</span>
           {statusOf(st.profile) && <p className="pop-status">{statusOf(st.profile)!.text}</p>}
+          <PlayDays st={st} k={st.me} />
           {st.profile.about && <p className="preview-about">{st.profile.about}</p>}
           {game && <GameGlance g={game} />}
           <ShowcaseView items={st.profile.showcase} />
-          <WeekBars week={st.activity[st.me]?.week} />
         </div>
       </div>
     </div>
