@@ -4,13 +4,14 @@
 
 | File | What |
 |---|---|
-| `tokens.css` | The token file: type, colour, space, size, radius, shadow, motion; Ink and Ivory; the three gold directions. Moves into `src/renderer/` unchanged once approved |
+| `tokens.css` | The token file: type, colour, space, size, radius, shadow, motion; Ink and Ivory; Leaf gold. Moves into `src/renderer/` unchanged once approved |
 | `ui.css` | The components: buttons and every clickable variant, rows, fields, menus, tooltips, pictures |
 | `screens.css`, `draw.js`, `screens.js` | Every screen of the app, built only from the two files above. Pictures and weaves are drawn exactly as `src/shared/mark.ts` draws them |
-| `screen.html?s=<id>&t=ink\|ivory&g=leaf\|brass\|line` | One screen. `index.html` lists them all |
-| `capture.cjs` | `npx electron design/system/capture.cjs [--gold]` photographs every screen into `shots/` |
-| `contrast.mjs` | `node design/system/contrast.mjs` measures every text token on every surface, both themes, every gold |
-| `shots/`, `sheets/` | The pictures, four screens to a sheet; `sheets/gold-*.png` set the three gold directions side by side |
+| `screen.html?s=<id>&t=ink\|ivory` | One screen. `index.html` lists them all |
+| `effects.js` | The profile theme's six effects and their stylesheet, as the build ships it |
+| `capture.cjs` | `npx electron design/system/capture.cjs` photographs every screen into `shots/` |
+| `contrast.mjs` | `node design/system/contrast.mjs` measures every text token on every surface, in both themes |
+| `shots/`, `sheets/` | The pictures, four screens to a sheet |
 
 ## Type
 
@@ -20,9 +21,9 @@ One display face, one text face, one mono.
 |---|---|---|
 | **Bodoni Moda** (500, 600) | Titles, section headings, names on cards, the wordmark | Kept from court: the display face gives the app its character. It only appears from 20 px, where its hairlines hold; no italics (the first review found 15 px italic labels shimmering) |
 | **Alegreya Sans** (400, 500, 700) | Everything you read and press | Kept: a humanist sans that sits with Bodoni without fighting it, and covers Latin, Cyrillic, Greek and Vietnamese |
-| **IBM Plex Mono** (500) | Friend IDs, keys, codes | Replaces Cascadia Mono, which is a Windows system font and is not bundled at all today. Plex Mono is humanist like Alegreya, so an ID beside a name doesn't look like a terminal |
+| **Cascadia Mono** (500) | Friend IDs, keys, codes | The friend ID has always been Cascadia Mono; now it is bundled (`@fontsource/cascadia-mono`) instead of borrowed from Windows, and it is the only mono, for every mono role |
 
-**Seven sizes:** 11, 12.5, 13.5, 15, 20, 26 and 44 px. **Weights:** 2 for Bodoni, 3 for Alegreya and 1 for Plex Mono, with nothing in between (no 550 or 650). Measured on the mockups (`npx electron design/system/type-audit.cjs`): 6130 text elements on 51 screens in both themes, 3 families, 7 sizes, 12 combinations, every one a role.
+**Seven sizes:** 11, 12.5, 13.5, 15, 20, 26 and 44 px. **Weights:** 2 for Bodoni, 3 for Alegreya and 1 for Cascadia Mono, with nothing in between (no 550 or 650). Measured on the mockups (`npx electron design/system/type-audit.cjs`): 6130 text elements on 51 screens in both themes, 3 families, 7 sizes, 12 combinations, every one a role.
 
 ### Every job from `design/audit/type-roles.md` maps to one role token
 
@@ -47,7 +48,7 @@ One display face, one text face, one mono.
 | tooltip and popover | `--type-meta` | Alegreya 13.5 / 1.35, 400 | its first line in `--ink` |
 | timestamp and delivery state | `--type-time` | Alegreya 12.5 / 1.3, 400 | tabular |
 | badge count | `--type-badge` | Alegreya 11 / 1, 700 | tabular |
-| code, keys and IDs | `--type-mono` | Plex Mono 12.5 / 1.4, 500 | |
+| code, keys and IDs | `--type-mono` | Cascadia Mono 12.5 / 1.4, 500 | |
 
 The specimen, made of real app content: `screen.html?s=specimen` (`shots/specimen-*.png`).
 
@@ -96,6 +97,14 @@ Measured on the mockups (`npx electron design/system/click-audit.cjs`): 4 radii 
 
 **Colour has one meaning each.** Gold is what is chosen or speaking. Red is errors, muted, LIVE and destroying things; unread counts are ink, not red. Green is online and allow. Blue is voice, links and focus. Meters are ink.
 
+## Fonts and their licences
+
+Every font is bundled from `@fontsource`, nothing comes from the web and nothing from the system: `@fontsource-variable/bodoni-moda`, `@fontsource/alegreya-sans` and `@fontsource/cascadia-mono`, all under the SIL Open Font License 1.1. The build copies each package's `LICENSE` into `resources/licenses/fonts/`. The mockups load the same files from `node_modules`.
+
+## The logo
+
+The logo stays the koi in its ring, unchanged: `build/icon.png` for the window, taskbar and installer, and `src/renderer/assets/emblem.png` in the app, shaded by the colour it stands in (gold on the rail and the splash, ink elsewhere), as the app shades it today. A minimalist version was tried and dropped: the original is minimalist enough.
+
 ## Gold without the glow
 
 These are gone, in all three directions:
@@ -106,19 +115,14 @@ These are gone, in all three directions:
 
 The one light left is a **2 px line**, `--lit`: a speaker's card edge and the seam that runs down from its top as long as their voice is loud. The seam has a 1 px `--surface` keyline so it reads on any banner art. It never blurs.
 
-| Direction | Gold is | Primary button |
-|---|---|---|
-| **Leaf** | a flat metallic gold | gold fill, dark text |
-| **Brass** | deeper and browner | brass fill |
-| **Line** | never a fill: only lines, marks and text | ink on ink (light on Ink, dark on Ivory), and so are switches; gold marks only what is chosen or speaking |
+Gold is **Leaf**: a flat metallic gold, a fill only on a surface's one primary action, and otherwise a line, a mark or text for what is chosen or speaking.
 
-The reviewer's pick is **Line**: in Leaf and Brass the khaki fills are what dates the look, and under Line the speaker's edge is the one gold thing that moves. Leaf and Brass are close to each other in Ink. `--lit` is its own colour in every direction (brighter in Ink, a darker amber in Ivory), so speaking never reads as chosen.
+`--lit` is its own colour (brighter in Ink, a darker amber in Ivory), so speaking never reads as chosen.
 
-Compare them in `sheets/gold-home.png`, `gold-call-talking.png` (a lit speaker), `gold-settings-profile.png` and `gold-card-small.png`.
 
 ## Contrast, measured
 
-`node design/system/contrast.mjs` checks every text token on every surface in both themes and all three gold directions. The lowest is 4.77:1 (Ink, brass, text on a pressed button) and 4.78:1 (Ivory, hint text on a raised row). Every pair meets AA.
+`node design/system/contrast.mjs` checks every text token on every surface in both themes. The lowest is 5.00:1 in Ink and 4.78:1 in Ivory (hint text on a raised row). Every pair meets AA.
 
 Names and labels on the call's user cards sit on `--surface` below the banner, never on the art. Text on art (game cards, the server banner, the stream's caption) sits on `--scrim-art`.
 
@@ -139,6 +143,21 @@ The audit's 64 build screens (`design/audit/screens/`), and the mockup that cove
 | `menu-channel`, `menu-person`, `menu-add`, `tooltips`, `toasts`, `gif-picker`, `poke-picker`, `update-banner`, `crash` | menu-channel, menu-person, rail-add-menu, tooltips, activity-notice, poke-toast, the still-connecting toast, gif-picker, poke-picker, invite-card, link-preview, the update banner, the crash dialog |
 | `specimen`, `buttons` | the type specimen, and every button in every state |
 
+## The profile theme's effects
+
+Six effects (`effects.js`), each with one set of fixed keyframes per depth step, moving by transform and opacity only, stepped about four times a second, a layer of its own only while moving, and still under reduced motion, in a hidden window and off screen:
+
+| Effect | Motion | Cycle at 1× |
+|---|---|---|
+| Drift | the weave slides slowly corner to corner and back | 24 s |
+| Breathe | it fades and swells | 6 s |
+| Orbit | it circles slowly round | 16 s |
+| Tide | it sways from side to side | 8 s |
+| Shimmer | a soft band of the weave's tone passes across | 5 s |
+| Parallax | two layers of it move against each other | 24 s |
+
+**Why they are now visible.** The weave behind a card moves only away from the text's luminance: darker than the card in Ink (light text), lighter in Ivory (dark text), in the weave's own hues. Every pixel behind text then has at least the plain card's contrast, so the pattern can be strong (default strength 45 %, depth 60 %) without a scrim dimming it. In Phase 2 the AA test in `mark.test.ts` measures this weave, and `themeScrim` keeps guarding any pixel that would move toward the text. An effect an older copy doesn't know is shown still. See `shots/effects-ink.png` and `effects-ivory.png`: each effect at 0, 25, 50 and 75 % of its cycle.
+
 ## Kept as features, restyled
 
 | Feature | What changes |
@@ -146,7 +165,7 @@ The audit's 64 build screens (`design/audit/screens/`), and the mockup that cove
 | The call | Tall user cards side by side above the chat; under a share, the stage and the people row (foldable). The speaker's glow becomes the 2 px `--lit` edge and seam |
 | The column server banner | 172 px, fading into the column. Its scrim now stops before the fade, so Ivory has no grey band. The name is now 20 px (`--type-section`), and the menu is its own icon button, so the banner isn't one tall button |
 | Two weeks of play | No foot row |
-| The profile theme | Its controls now use the system's switches, segments and sliders |
+| The profile theme | Its controls now use the system's switches, segments and sliders, and it has six effects you can see (below) |
 
 ## The first review (a fresh-context reviewer, no stake in the design)
 
@@ -184,8 +203,18 @@ It found most of the ten fixed, two new layout breaks and some leftovers. All we
 
 It left as acceptable: two saves on My profile (Save and Set status do different things), and green for "Voice connected" and online.
 
+## Round three (your changes after sign-off)
+
+| Change | Where |
+|---|---|
+| Leaf only; Brass and Line removed | `tokens.css`, this README |
+| The real logo (the koi) back in every mockup, shaded as in the app | `ui.css` `.logo`, every screen with the logo |
+| Six theme effects, visible, contrast-safe | `effects.js`, `s=effects`, `s=settings-theme` |
+| Every font bundled; the mono is Cascadia Mono | `screen.html`, `tokens.css` |
+| Run as administrator moved from Hotkeys to My profile | `s=settings-profile`, `s=settings-hotkeys` |
+| "Your friend ID" is now "Friend ID" | Home's friend ID card |
+
 ## Waiting on you
 
-- **The gold direction:** Leaf, Brass or Line (the reviewer picks Line). Leaf and Brass are close; if you want one of them, say whether further apart.
 - **Recently played** on the full card (`s=card-full-recent`, framed as a decision): yes or no.
-- **IBM Plex Mono** as the mono.
+- **The theme's effects** (`shots/effects-*.png`).
