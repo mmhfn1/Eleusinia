@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import createTestnet from 'hyperdht/testnet.js'
 import { fakeBungie } from './fake-bungie.mjs'
+import { audit, auditDir, writeAudit } from './audit.mjs'
 
 // ELEUSINIA_SMOKE_EXE runs the packaged app instead (for example dist/win-unpacked/Eleusinia.exe after npm run dist).
 const packaged = process.env.ELEUSINIA_SMOKE_EXE
@@ -19,7 +20,7 @@ const app = packaged ? [] : [process.argv[2]]
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const t0 = Date.now()
 const children = []
-setTimeout(() => (console.error('FAIL overall timeout'), children.forEach((c) => c.kill()), process.exit(2)), 420000)
+setTimeout(() => (console.error('FAIL overall timeout'), children.forEach((c) => c.kill()), process.exit(2)), auditDir ? 1800000 : 420000) // the audit photographs as it goes
 
 const publicDht = process.env.ELEUSINIA_SMOKE_PUBLIC === '1'
 // 10 nodes, not 3: for two copies on one machine hyperdht races a LAN shortcut against hole punching, and the side
@@ -152,8 +153,10 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
   // Crashes the page as a real renderer crash would (Chromium's own command for it).
   const crash = () => ws.send(JSON.stringify({ id: ++id, method: 'Page.crash' }))
   // ELEUSINIA_SMOKE_SHOTS=<folder>: screenshots of a few views, to look at by eye.
-  const shot = (name) =>
-    process.env.ELEUSINIA_SMOKE_SHOTS &&
+  // ELEUSINIA_SMOKE_AUDIT=<folder> (test/audit.mjs): every screen photographed here is also audited
+  const cdp = (method, params = {}) => new Promise((resolve, reject) => (pending.set(++id, (m) => (m.error ? reject(new Error(m.error.message)) : resolve(m.result))), ws.send(JSON.stringify({ id, method, params }))))
+  const shot = async (name) =>
+    (await audit(port, name, ev, cdp), process.env.ELEUSINIA_SMOKE_SHOTS) &&
     new Promise((resolve) => {
       pending.set(++id, (m) => (m.result?.data && writeFileSync(join(process.env.ELEUSINIA_SMOKE_SHOTS, name + '.png'), Buffer.from(m.result.data, 'base64')), resolve()))
       ws.send(JSON.stringify({ id, method: 'Page.captureScreenshot' }))
@@ -552,6 +555,7 @@ try {
   await c.ev(`document.title = ${JSON.stringify(ownTitles[1])}`)
   for (const [p, n] of everyone) {
     await until(`${n} sees setup first, with a generated picture`, () => p.ev(`${body('Create your account')} && !document.querySelector('aside') && !!document.querySelector('.portrait-pick .avatar svg rect')`))
+    if (n === 'Ann') await p.shot('setup')
     // Cy keeps the generated picture; Ann and Bob upload one.
     await p.ev(`(async () => {
       const f = document.querySelector('form.profile')
@@ -1813,6 +1817,35 @@ try {
   await b.ev(`document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`)
   for (const p of [a, b, c]) await p.ev(press('Disconnect'))
   }
+  // The audit's extra stops: every Settings section, and the main screens again in Ivory (data-theme, as theme.ts sets it)
+  if (auditDir && !forwardMode && !relayedMode) {
+    console.log('--- Audit: Settings section by section, and the main screens in Ivory')
+    const openSettings = () => a.ev(`document.querySelector('.user-bar button[title="Settings"]').click()`)
+    const walk = async (theme) => {
+      await openSettings()
+      await sleep(400)
+      const rows = await a.ev(`[...document.querySelectorAll('.settings-index-row')].map((r) => r.textContent)`)
+      for (const [i, label] of rows.entries()) {
+        await a.ev(`document.querySelectorAll('.settings-index-row')[${i}].click()`)
+        await sleep(700)
+        await a.shot(`settings-${label.toLowerCase().replace(/[^a-z]+/g, '-')}-${theme}`)
+      }
+      await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
+      await sleep(300)
+    }
+    await walk('ink')
+    await a.ev(`document.documentElement.dataset.theme = 'light'`)
+    await sleep(500)
+    await a.shot('server-ivory')
+    await a.ev(`document.querySelector('.rail-home, .rail .emblem, .rail button')?.click()`)
+    await sleep(500)
+    await a.shot('home-ivory-end')
+    await walk('ivory')
+    await a.ev(`document.querySelector('.user-bar-me').click()`)
+    await sleep(500)
+    await a.shot('card-own-ivory')
+    await a.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close')?.click()`)
+  }
 } catch (e) {
   failed = true
   console.error('FAIL', e.message)
@@ -1820,6 +1853,7 @@ try {
   for (const [n, p] of all) console.error(n, (await p.ev(`document.body.innerText`).catch(String)).replace(/\n+/g, ' | '))
   for (const [n, p] of all) console.error(n, 'DIAG', JSON.stringify(await p.ev(`api.diagnostics().then((d) => d.events.filter((e) => e.area === 'network' || e.area === 'call').map((e) => e.area[0] + ' ' + e.text).slice(-40))`).catch(String)))
 } finally {
+  writeAudit(process.env.ELEUSINIA_SMOKE_AUDIT_NAME || 'before')
   children.forEach((ch) => ch.kill())
   await testnet?.destroy().catch(() => {})
 }
