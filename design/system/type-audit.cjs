@@ -4,7 +4,7 @@ const { app, BrowserWindow } = require('electron')
 const { pathToFileURL } = require('url')
 const { join } = require('path')
 // The approved roles' family, size and weight (tokens.css)
-const ROLES = new Set(['Bodoni Moda Variable 44px 600', 'Bodoni Moda Variable 26px 600', 'Bodoni Moda Variable 20px 500', 'Alegreya Sans 26px 700', 'Alegreya Sans 15px 400', 'Alegreya Sans 15px 500', 'Alegreya Sans 13.5px 700', 'Alegreya Sans 13.5px 500', 'Alegreya Sans 13.5px 400', 'Alegreya Sans 12.5px 400', 'Alegreya Sans 11px 700', 'IBM Plex Mono 12.5px 500'])
+const ROLES = new Set(['Bodoni Moda Variable 44px 600', 'Bodoni Moda Variable 26px 600', 'Bodoni Moda Variable 20px 500', 'Alegreya Sans 26px 700', 'Alegreya Sans 15px 400', 'Alegreya Sans 15px 500', 'Alegreya Sans 13.5px 700', 'Alegreya Sans 13.5px 500', 'Alegreya Sans 13.5px 400', 'Alegreya Sans 12.5px 400', 'Alegreya Sans 11px 700', 'Cascadia Mono 12.5px 500'])
 app.whenReady().then(async () => {
   const w = new BrowserWindow({ width: 1320, height: 900, show: false, webPreferences: { offscreen: true } })
   const page = pathToFileURL(join(__dirname, 'screen.html')).href
