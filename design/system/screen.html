@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-gold="leaf">
+<head>
+<meta charset="utf-8">
+<title>Eleusinia mockup</title>
+<!-- One screen of design/system: screen.html?s=<id>&t=ink|ivory&g=leaf|brass|line. Bodoni Moda and Alegreya Sans from the
+     project's own font packages; IBM Plex Mono (proposed) from Google Fonts for the mockup only, bundled once approved. -->
+<link rel="stylesheet" href="../../node_modules/@fontsource-variable/bodoni-moda/standard.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource-variable/bodoni-moda/standard-italic.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource/alegreya-sans/400.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource/alegreya-sans/400-italic.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource/alegreya-sans/500.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource/alegreya-sans/700.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&display=swap">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="screens.css">
+<style>body { padding: 0; background: #2b2a28; } #out { display: inline-block; }</style>
+</head>
+<body>
+<div id="out"></div>
+<script src="draw.js"></script>
+<script src="screens.js"></script>
+<script>
+  const q = new URLSearchParams(location.search)
+  document.documentElement.dataset.theme = q.get('t') === 'ivory' ? 'light' : 'dark'
+  document.documentElement.dataset.gold = q.get('g') ?? 'leaf'
+  const s = q.get('s') ?? 'home'
+  document.getElementById('out').innerHTML = SCREENS[s] ? SCREENS[s]() : `<p style="color:#fff">No screen ${s}</p>`
+  // gold: the same Home in each direction, each frame scoped to its own direction
+  document.querySelectorAll('[data-gold-frame]').forEach((f) => { f.firstElementChild.dataset.goldScope = f.dataset.goldFrame })
+</script>
+</body>
+</html>
