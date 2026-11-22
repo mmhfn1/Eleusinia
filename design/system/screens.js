@@ -44,8 +44,19 @@ function days(o = {}) {
   const tip = o.tip !== undefined ? `<span class="float tip days-tip" style="left:clamp(0px, calc(${(o.tip + 0.5) / 14 * 100}% - 24px), calc(100% - 200px))"><b>${date(o.tip)}</b><span><span>Counter-Strike 2</span><span>2.3 h</span></span><span><span>Dota 2</span><span>45 min</span></span></span>` : ''
   return `<section class="days"><h3>Two weeks of play <span class="t-time">${sum ? (sum / 60).toFixed(1) + ' h' : 'none'}</span></h3><div class="cells" role="list">${cells}${tip}</div></section>`
 }
-const themeLayer = (k, th) => (th ? `<span class="theme-layer" style="--op:${th.op / 100};--scrim:${Math.round((0.3 + 0.6 * th.op / 100) * 100)}%"><span class="wv">${weave(K[k], th.kind, th.shift, false)}</span></span>` : '')
-const MIRA_THEME = { kind: 2, shift: 40, op: 10 }
+// The weave behind a card moves only away from the text's luminance: darker than the card in Ink (light text), lighter
+// in Ivory (dark text). Every pixel then has at least the plain card's contrast, however strong the weave.
+const THEME_FLAT = () => (document.documentElement.dataset.theme === 'light' ? { L: 0.995, C: 0.018 } : { L: 0.12, C: 0.06 })
+// The theme layer, as ThemeLayer in the build draws it: the weave (and for Parallax a second one, for Shimmer a band of
+// the weave's lightest tone) under a scrim of the card's colour, moving by an effect from effects.js
+const themeLayer = (k, th) => {
+  if (!th) return ''
+  const fx = th.fx && FX.includes(th.fx) ? th.fx : null, d = Math.round((th.depth ?? 60) / 10), f = THEME_FLAT(), light = `oklch(${f.L} ${f.C} ${+tones(bytesOf(K[k]), th.shift)[2].match(/(\d+)\)$/)[1]})`
+  const delay = th.at !== undefined && fx ? `animation-delay:${-(FX_TIME[fx][0] / (th.speed ?? 1)) * th.at}s;animation-play-state:paused` : ''
+  const mv = (n) => `<span class="wv${n ? ' wv2' : ''}"><span class="mv" style="${delay}">${weave(K[k], th.kind, th.shift + (n ? 25 : 0), false, THEME_FLAT())}</span></span>`
+  return `<span class="theme-layer ${fx ? `fx-${fx} d-${d}` : ''} ${th.at !== undefined ? 'paused' : ''}" style="--op:${th.op / 100};--scrim:0%;--spd:${th.speed ?? 1};--band:${light}">${mv(0)}${fx === 'parallax' ? mv(1) : ''}${fx === 'shimmer' ? `<span class="band" style="${delay}"></span>` : ''}</span>`
+}
+const MIRA_THEME = { kind: 2, shift: 40, op: 30, depth: 60, fx: 'drift' }
 function smallCard(k, o = {}) {
   return `<div class="pop float" role="dialog" aria-label="${NAME[k]}'s profile" style="--person:${accentOf(K[k])};${o.pos ?? ''}">${themeLayer(k, o.theme)}<div class="bnr">${o.art ? `<span class="art ${o.art}"></span>` : weave(K[k], o.weave ?? 0)}</div><button class="icon-btn icon-btn--sm icon-btn--on-art expand" aria-label="Open full profile">${ico('expand')}</button>
     <span class="face">${av(k, 'av--xl', 'on')}</span><div class="body"><h2 class="t-title">${NAME[k]}</h2><p class="t-mono handle">${HANDLE[k]}</p>${o.status === false ? '' : `<p class="status">${o.status ?? 'Ranked tonight, quiet after eleven'}</p>`}${days(o.days ?? {})}
@@ -96,8 +107,8 @@ const PANE = {
     <div class="block"><h3>Banner</h3><div class="weaves">${['Your picture', 'Arcade', 'Skyline', 'Bands', 'Lattice'].map((n, i) => `<button class="tile-choice" role="radio" aria-checked="${i === 3}">${i ? weave(K.ann, i - 1) : picture(K.ann)}<span>${n}</span></button>`).join('')}</div>${sw(true, "Show the game's art as my banner while I play")}</div>`,
   theme: () => `<h2>My profile</h2><div class="block"><h3>Profile theme</h3><p class="hint">A weave behind your whole card, small and full. Everyone who opens your profile sees it.</p>
     <span class="t-label">Weave</span><div class="weaves"><button class="tile-choice none" role="radio" aria-checked="false"><span>None</span></button>${['Arcade', 'Skyline', 'Bands', 'Lattice'].map((n, i) => `<button class="tile-choice" role="radio" aria-checked="${i === 0}">${weave(K.ann, i, 40)}<span>${n}</span></button>`).join('')}</div>
-    ${slider('Tones', 11, '40°')}${slider('Strength', 31, '22 %')}<div class="field"><span class="t-label">Motion</span><div class="seg" role="radiogroup"><button role="radio" aria-checked="false">Off</button><button role="radio" aria-checked="true">Drift</button><button role="radio" aria-checked="false">Breathe</button></div></div>
-    <div class="grid-2">${slider('Speed', 33, '1×')}${slider('Depth', 33, '40 %')}</div><p class="hint">Held still for anyone who asks their system for less motion.</p><div class="btn-row"><button class="btn btn--primary">Save theme</button><button class="btn">Reset</button></div></div>`,
+    ${slider('Tones', 11, '40°')}${slider('Strength', 73, '45 %')}<div class="field"><span class="t-label">Motion</span><div class="seg" role="radiogroup"><button role="radio" aria-checked="false">Off</button>${FX.map((f) => `<button role="radio" aria-checked="${f === 'drift'}">${FX_NAMES[f]}</button>`).join('')}</div></div>
+    <div class="grid-2">${slider('Speed', 33, '1×')}${slider('Depth', 56, '60 %')}</div><p class="hint">Held still for anyone who asks their system for less motion.</p><div class="btn-row"><button class="btn btn--primary">Save theme</button><button class="btn">Reset</button></div></div>`,
   activity: () => `<h2>Activity</h2><div class="block">${sw(true, "Share what I'm playing", 'Friends and group members see the game, never anyone else')}${sw(true, 'Playtime', 'Hours played, and your two weeks of play')}${sw(true, 'Achievements')}${sw(false, 'Genre, developer and release date')}</div>
     <div class="block"><h3>Connections</h3><div class="connections"><button class="row row--two conn"><span class="logo">S</span><span class="what"><span class="t-name">Steam</span><span class="t-meta online-text">CS2 live</span></span>${ico('chev')}</button><button class="row row--two conn"><span class="logo">B</span><span class="what"><span class="t-name">Bungie.net</span><span class="t-meta">Linked as Rivensbane#1990</span></span>${ico('chev')}</button></div></div>
     <div class="block"><h3>Hidden from</h3><p class="hint">Nobody. Hide your activity from someone in their profile's menu.</p><div class="btn-row"><button class="btn">Add a game…</button></div></div>`,
@@ -117,7 +128,7 @@ const PANE = {
 }
 function settings(pane, o = {}) {
   const idx = PANES.map(([g, rows]) => `${label(g)}${rows.map(([id, n]) => `<button class="row" ${id === (pane === 'theme' ? 'profile' : pane) ? 'aria-current="true"' : ''}><span class="who"><span class="nm">${n}</span></span></button>`).join('')}`).join('')
-  return win({ place: 'Settings', rail: 'home', side: homeSide(), main: chatMain('<h1>Friends</h1>', '', 'Mira'), over: `<div class="backdrop"><div class="dialog float settings" role="dialog" aria-label="Settings"><header class="dlg-bar"><h1>Settings</h1><button class="icon-btn" aria-label="Close">${ico('close')}</button></header><nav class="index">${idx}</nav><div class="pane">${PANE[pane]()}</div>${preview(pane === 'theme' ? { kind: 2, shift: 40, op: 14 } : null)}</div></div>` })
+  return win({ place: 'Settings', rail: 'home', side: homeSide(), main: chatMain('<h1>Friends</h1>', '', 'Mira'), over: `<div class="backdrop"><div class="dialog float settings" role="dialog" aria-label="Settings"><header class="dlg-bar"><h1>Settings</h1><button class="icon-btn" aria-label="Close">${ico('close')}</button></header><nav class="index">${idx}</nav><div class="pane">${PANE[pane]()}</div>${preview(pane === 'theme' ? { kind: 0, shift: 40, op: 45, depth: 60, fx: 'drift' } : null)}</div></div>` })
 }
 
 // ---------- Server settings ----------
@@ -225,5 +236,7 @@ S.buttons = () => settings('profile').replace('<div class="pane">', `<div class=
   <div class="tr" style="grid-template-columns:90px 1fr 1fr 1fr"><span class="t-meta">Row</span><button class="row">${av('mira', 'av--sm')}<span class="who"><span class="nm">Mira</span></span></button><button class="row is-hover">${av('mira', 'av--sm')}<span class="who"><span class="nm">Mira</span></span></button><button class="row" aria-current="true">${av('mira', 'av--sm')}<span class="who"><span class="nm">Mira</span></span></button></div>
   <div class="tr" style="grid-template-columns:90px 1fr 1fr 1fr"><span class="t-meta">Choice</span><div class="seg" role="radiogroup"><button role="radio" aria-checked="true">Off</button><button role="radio" class="is-hover">Drift</button><button role="radio">Breathe</button></div><span class="btn-row"><button class="chip chip--online">${ico('lock')}Private · direct</button><button class="chip is-hover">Officers</button></span><span class="btn-row"><button class="link">Delete</button><select class="select" style="width:130px"><option>Today</option></select></span></div></div></div>`)
 
+
+S.effects = () => `<div class="win" style="display:block;height:auto;padding:24px;overflow:visible"><div style="display:grid;gap:20px">${FX.map((fx) => `<section class="fx-strip"><div style="display:grid;gap:4px"><h2 class="t-section">${FX_NAMES[fx]}</h2><p class="t-hint">${{ drift: 'The weave slides slowly corner to corner and back', breathe: 'It fades and swells in and out', orbit: 'It circles slowly round', tide: 'It sways from side to side', shimmer: 'A soft band of its lightest tone passes across', parallax: 'Two layers of it move against each other' }[fx]}</p><p class="t-time">${FX_TIME[fx][0]} s a cycle at 1×, ${Math.round(FX_TIME[fx][1] / FX_TIME[fx][0])} steps a second</p></div>${[0, 0.25, 0.5, 0.75].map((at) => `<div style="display:grid;gap:4px"><span class="t-time">${Math.round(at * 100)} %</span>${smallCard('mira', { mine: true, status: 'Ranked tonight, quiet after eleven', theme: { kind: 2, shift: 40, op: 45, depth: 60, speed: 1, fx, at }, days: {} }).replace('style="--person', 'style="position:relative;width:100%;--person')}</div>`).join('')}</section>`).join('')}</div></div>`
 
 window.SCREENS = S

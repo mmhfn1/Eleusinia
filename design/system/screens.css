@@ -229,10 +229,13 @@
 .days-tip > span { display: flex; } .days-tip > span > span:last-child { margin-left: auto; color: var(--ink-3); font-variant-numeric: tabular-nums; }
 
 /* The profile theme (court-profile.html 3): the weave behind the card under a scrim of its colour */
-.theme-layer { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; }
-.theme-layer .wv { position: absolute; inset: -20%; opacity: var(--op, 0.25); }
-.theme-layer .wv > svg { width: 100%; height: 100%; }
-.theme-layer::after { content: ''; position: absolute; inset: 0; background: color-mix(in srgb, var(--surface) var(--scrim, 45%), transparent); }
+.theme-layer { position: absolute; inset: 0; z-index: -1; overflow: hidden; pointer-events: none; } /* its layers and effects: effects.js */
+.fx-strip { display: grid; grid-template-columns: 140px repeat(4, 1fr); gap: var(--sp-3); align-items: start; }
+.fx-strip .pop { position: relative; width: 100%; }
+.fx-strip .pop .bnr { height: 72px; }
+.fx-strip .pop .face { top: 36px; }
+.fx-strip .pop .face .av { width: 56px; height: 56px; }
+.fx-strip .pop .body { padding-top: var(--sp-6); }
 
 /* Dialogs */
 .backdrop { position: absolute; inset: 0; z-index: 30; background: var(--backdrop); display: grid; place-items: center; }

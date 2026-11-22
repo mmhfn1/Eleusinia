@@ -19,14 +19,20 @@ function picture(hex) {
   if (acc === 2) S.push(['rect', g({ x: ax - 12, y: ay, width: 24, height: 4, rx: 2, fill: c2 })])
   return svgOf(100, 100, S, false)
 }
-function weave(hex, kind = bytesOf(hex)[23] % 4, shift = 0, wide = true) {
-  const b = bytesOf(hex), [c0, c1, c2] = tones(b, shift), w = wide ? 600 : 200, h = wide ? 220 : 700, S = [['rect', { width: w, height: h, fill: c0 }]]
+// flat: the profile theme's weave, in the card's own lightness (OKLab L) and only its hues, with no ground, so it can
+// show strongly behind text without moving the text's contrast (WCAG contrast follows luminance alone)
+function weave(hex, kind = bytesOf(hex)[23] % 4, shift = 0, wide = true, flat) {
+  const b = bytesOf(hex), t = tones(b, shift), w = wide ? 600 : 200, h = wide ? 220 : 700
+  const hue = (c) => +c.match(/(\d+)\)$/)[1]
+  const [c0, c1, c2] = flat ? ['none', `oklch(${flat.L} ${flat.C} ${hue(t[1])})`, `oklch(${flat.L} ${(flat.C * 1.25).toFixed(3)} ${hue(t[2])})`] : t
+  const S = flat ? [] : [['rect', { width: w, height: h, fill: c0 }]]
+  const boost = flat ? 2.8 : 1 // the shapes' own opacities are made for a ground; flat they carry the pattern alone
   if (kind === 0) { const n = (3 + (b[24] % 2)) * (wide ? 3 : 1), aw = w / n, rh = aw * 1.6
-    for (let r = 0; r * rh < h; r++) for (let i = 0; i < n; i++) { const x = i * aw + aw * 0.18, ww = aw * 0.64, top = r * rh + aw * 0.2; S.push(['path', { d: `M${x} ${top + rh * 0.8} V${top + ww / 2} a${ww / 2} ${ww / 2} 0 0 1 ${ww} 0 V${top + rh * 0.8} Z`, fill: (r + i) % 5 ? c1 : c2, opacity: 0.32 }]) } }
-  else if (kind === 1) { const s = (6 + (b[25] % 4)) * (wide ? 3 : 1); for (let i = 0; i < s; i++) { const hh = h * (0.23 + ((b[(i % 20) + 4] * 5) % 360) / 700); S.push(['rect', { x: (i * w) / s, y: h - hh, width: w / s - 3, height: hh, fill: i % 3 ? c1 : c2, opacity: 0.3 }]) } }
-  else if (kind === 2) { for (let y = 0; y < h; y += 26) S.push(['rect', { y, width: w, height: 7, fill: c1, opacity: 0.28 }]); for (let i = 0; i < 3; i++) S.push(['circle', { cx: 40 + ((b[26 + i] * 3) % (w - 80)), cy: wide ? 40 + i * 70 : 90 + i * 170, r: 20 + (b[27 + i] % 4) * 4, fill: c2, opacity: 0.35 }]) }
-  else { const s = 34 + (b[25] % 3) * 8; for (let x = -h; x < w + h; x += s) { S.push(['line', { x1: x, y1: 0, x2: x + h, y2: h, stroke: c1, 'stroke-width': 1.4, opacity: 0.26 }]); S.push(['line', { x1: x + h, y1: 0, x2: x, y2: h, stroke: c1, 'stroke-width': 1.4, opacity: 0.26 }]) }
-    for (let i = 0; i < 7; i++) { const cx = (b[i + 4] * 7) % w, cy = (b[i + 11] * 11) % h; S.push(['rect', { x: cx - 9, y: cy - 9, width: 18, height: 18, fill: c2, opacity: 0.24, transform: `rotate(45 ${cx} ${cy})` }]) } }
+    for (let r = 0; r * rh < h; r++) for (let i = 0; i < n; i++) { const x = i * aw + aw * 0.18, ww = aw * 0.64, top = r * rh + aw * 0.2; S.push(['path', { d: `M${x} ${top + rh * 0.8} V${top + ww / 2} a${ww / 2} ${ww / 2} 0 0 1 ${ww} 0 V${top + rh * 0.8} Z`, fill: (r + i) % 5 ? c1 : c2, opacity: Math.min(0.95, 0.32 * boost) }]) } }
+  else if (kind === 1) { const s = (6 + (b[25] % 4)) * (wide ? 3 : 1); for (let i = 0; i < s; i++) { const hh = h * (0.23 + ((b[(i % 20) + 4] * 5) % 360) / 700); S.push(['rect', { x: (i * w) / s, y: h - hh, width: w / s - 3, height: hh, fill: i % 3 ? c1 : c2, opacity: Math.min(0.95, 0.3 * boost) }]) } }
+  else if (kind === 2) { for (let y = 0; y < h; y += 26) S.push(['rect', { y, width: w, height: 7, fill: c1, opacity: Math.min(0.95, 0.28 * boost) }]); for (let i = 0; i < 3; i++) S.push(['circle', { cx: 40 + ((b[26 + i] * 3) % (w - 80)), cy: wide ? 40 + i * 70 : 90 + i * 170, r: 20 + (b[27 + i] % 4) * 4, fill: c2, opacity: Math.min(0.95, 0.35 * boost) }]) }
+  else { const s = 34 + (b[25] % 3) * 8; for (let x = -h; x < w + h; x += s) { S.push(['line', { x1: x, y1: 0, x2: x + h, y2: h, stroke: c1, 'stroke-width': 1.4, opacity: Math.min(0.95, 0.26 * boost) }]); S.push(['line', { x1: x + h, y1: 0, x2: x, y2: h, stroke: c1, 'stroke-width': 1.4, opacity: Math.min(0.95, 0.26 * boost) }]) }
+    for (let i = 0; i < 7; i++) { const cx = (b[i + 4] * 7) % w, cy = (b[i + 11] * 11) % h; S.push(['rect', { x: cx - 9, y: cy - 9, width: 18, height: 18, fill: c2, opacity: Math.min(0.95, 0.24 * boost), transform: `rotate(45 ${cx} ${cy})` }]) } }
   return svgOf(w, h, S)
 }
 const accentOf = (hex) => tones(bytesOf(hex))[1]
