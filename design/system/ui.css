@@ -2,6 +2,9 @@
    States everywhere: :hover, :active (pressed), :focus-visible, :disabled, [aria-busy=true] (loading) and
    [aria-pressed=true] / [aria-selected=true] / [aria-checked=true] / [aria-current] (selected). The mockups force
    states with .is-hover, .is-press and .is-focus so they can be photographed. */
+/* The Eleusinia logo: the koi in its ring, the app's own emblem.png, shaded by the colour it stands in (gold on the rail
+   and the splash) as the app shades it */
+.logo { display: block; width: 100%; height: 100%; background: currentColor; -webkit-mask: url('../../src/renderer/assets/emblem.png') center / contain no-repeat; mask: url('../../src/renderer/assets/emblem.png') center / contain no-repeat; }
 
 * { box-sizing: border-box; }
 html, body { margin: 0; }

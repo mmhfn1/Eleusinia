@@ -48,8 +48,8 @@ const P = {
   bell: 'M6 16V11a6 6 0 0 1 12 0v5l2 2H4zM10 21h4', refresh: 'M20 12a8 8 0 1 1-2.3-5.7M20 4v5h-5', down: 'M12 4v12M6 10l6 6 6-6M4 20h16', eye: 'M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z',
 }
 const ico = (n, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${P[n]}"/></svg>`
-// The emblem (Home): a hemicycle of columns, drawn in the current colour
-const emblem = `<svg viewBox="-50 -50 100 100" aria-hidden="true"><circle r="46" fill="none" stroke="currentColor" stroke-width="3"/>${[0, 1, 2, 3, 4, 5, 6].map((i) => { const a = Math.PI * (i / 6), x = -Math.cos(a) * 26, y = -Math.sin(a) * 20 + 8; return `<rect x="${x - 2.4}" y="${y - 11}" width="4.8" height="17" fill="currentColor"/>` }).join('')}<rect x="-29" y="16" width="58" height="4" fill="currentColor"/></svg>`
+// The Eleusinia logo: the koi in its ring (src/renderer/assets/emblem.png, as build/icon.png), in the current colour
+const emblem = '<span class="logo" aria-hidden="true"></span>'
 
 // People, groups and servers: a key each (the drawings come from these)
 const K = {
