@@ -1,4 +1,4 @@
-// WCAG contrast of every text token on every surface it sits on, for Ink and Ivory and each gold direction, read from
+// WCAG contrast of every text token on every surface it sits on, for Ink and Ivory, read from
 // tokens.css: node design/system/contrast.mjs. Fails (under 4.5, or 3 for counts and large text) are listed last.
 import { readFileSync } from 'node:fs'
 
@@ -25,7 +25,7 @@ const PAIRS = [
   ['on-gold', ['gold-fill', 'gold-fill-hover', 'gold-fill-press'], 4.5],
 ]
 const fails = []
-for (const theme of ['dark', 'light']) for (const gold of ['leaf', 'brass', 'line']) {
+for (const theme of ['dark', 'light']) for (const gold of ['leaf']) {
   const t = tokens(theme, gold), rows = []
   for (const [fg, bgs, min] of PAIRS) for (const bg of bgs) {
     if (!t[fg] || !t[bg]) continue

@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" data-theme="dark" data-gold="leaf">
+<html lang="en" data-theme="dark">
 <head>
 <meta charset="utf-8">
 <title>Eleusinia mockup</title>
@@ -24,11 +24,8 @@
 <script>
   const q = new URLSearchParams(location.search)
   document.documentElement.dataset.theme = q.get('t') === 'ivory' ? 'light' : 'dark'
-  document.documentElement.dataset.gold = q.get('g') ?? 'leaf'
   const s = q.get('s') ?? 'home'
   document.getElementById('out').innerHTML = SCREENS[s] ? SCREENS[s]() : `<p style="color:#fff">No screen ${s}</p>`
-  // gold: the same Home in each direction, each frame scoped to its own direction
-  document.querySelectorAll('[data-gold-frame]').forEach((f) => { f.firstElementChild.dataset.goldScope = f.dataset.goldFrame })
 </script>
 </body>
 </html>

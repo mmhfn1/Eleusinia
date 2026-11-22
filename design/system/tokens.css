@@ -1,7 +1,7 @@
 /* Eleusinia's design tokens: the only source of type, colour, spacing, radius, shadow and motion.
    Proposed in design/system (phase 1); once approved this file moves into src/renderer unchanged.
-   Themes: Ink (dark, the default) and Ivory (:root[data-theme='light']). Gold directions: [data-gold='leaf' | 'brass' |
-   'line'], one of which will be kept. No glow anywhere: light is a 2 px line, never a blur. */
+   Themes: Ink (dark, the default) and Ivory (:root[data-theme='light']). Gold is Leaf: a flat metallic gold, a fill only on a
+   surface's one primary action. No glow anywhere: light is a 2 px line, never a blur. */
 
 :root {
   /* ---------- Type: one display face, one text face, one mono ---------- */
@@ -104,11 +104,9 @@
   color-scheme: light;
 }
 
-/* ---------- Gold, three directions (one is kept) ----------
+/* ---------- Gold: Leaf ----------
    --gold: the accent as text, lines and marks. --gold-fill / --on-gold: a primary button. --lit: the speaker's edge. */
-:root,
-:root[data-gold='leaf'] {
-  /* Leaf: a flat metallic gold, used as a fill on the one primary action of a screen */
+:root {
   --gold: #d2b06a;
   --gold-fill: #cfae69;
   --gold-fill-hover: #dbbd7d;
@@ -117,51 +115,12 @@
   --gold-soft: rgb(207 174 105 / 0.14); /* selected chips and segments */
   --lit: #f2c76b; /* brighter and more saturated than any fill, so speaking never reads as chosen */
 }
-:root[data-theme='light'],
-:root[data-theme='light'][data-gold='leaf'] {
+:root[data-theme='light'] {
   --gold: #735520;
   --gold-fill: #8a6a2c;
   --gold-fill-hover: #7a5c22;
   --gold-fill-press: #6a4f1b;
   --on-gold: #fffaf0;
   --gold-soft: rgb(138 106 44 / 0.13);
-  --lit: #a8640f;
-}
-:root[data-gold='brass'] {
-  /* Brass: deeper and browner, an old fitting rather than a coin */
-  --gold: #c39a55;
-  --gold-fill: #a8813f;
-  --gold-fill-hover: #b58d4a;
-  --gold-fill-press: #9d7838;
-  --on-gold: #120d06;
-  --gold-soft: rgb(168 129 63 / 0.16);
-  --lit: #f0bd5a;
-}
-:root[data-theme='light'][data-gold='brass'] {
-  --gold: #6b4c19;
-  --gold-fill: #6f511f;
-  --gold-fill-hover: #634719;
-  --gold-fill-press: #553c14;
-  --on-gold: #fff8ec;
-  --gold-soft: rgb(111 81 31 / 0.13);
-  --lit: #a8640f;
-}
-:root[data-gold='line'] {
-  /* Line: gold is never a fill; the primary button is ink on ink, gold marks only what is chosen or speaking */
-  --gold: #d9b979;
-  --gold-fill: #ece3d1;
-  --gold-fill-hover: #f7f0e2;
-  --gold-fill-press: #d9cfbb;
-  --on-gold: #151a24;
-  --gold-soft: transparent;
-  --lit: #f2c76b;
-}
-:root[data-theme='light'][data-gold='line'] {
-  --gold: #6f521c;
-  --gold-fill: #1f1b17;
-  --gold-fill-hover: #34302a;
-  --gold-fill-press: #0f0d0b;
-  --on-gold: #f5f0e5;
-  --gold-soft: transparent;
   --lit: #a8640f;
 }
