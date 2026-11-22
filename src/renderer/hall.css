@@ -251,30 +251,56 @@ body {
   transform: none;
 }
 
-/* ---------- A server's banner behind its name ---------- */
-.server-head {
+/* ---------- A server's banner behind its name (design/mockups/court-profile.html, 1) ---------- */
+/* 172 px over the top of the column, edge to edge; its last 56 px fade into the column's own colour (--abyss-2, the
+   aside background above), so there is no edge in either theme. The channels start below it and scroll up under the
+   fade, which fades them out too. */
+aside.server-side {
   position: relative;
-  height: 96px;
+  --banner-h: 172px;
+  --banner-fade: 56px;
+}
+.server-head {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
+  height: var(--banner-h);
   align-items: flex-end;
-  padding-bottom: 12px;
-  border-bottom-color: transparent;
+  padding: 0 14px calc(var(--banner-fade) + 6px);
+  border-bottom: 0;
   isolation: isolate;
   color: #fff;
 }
-.server-head .icon {
-  color: rgb(255 255 255 / 0.8);
+.server-head::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background: linear-gradient(180deg, var(--abyss-2) calc(100% - var(--banner-fade)), transparent);
 }
-/* It runs on below the head, behind the first channel row, and fades into the column; the channels paint over it */
+.server-head .icon {
+  color: rgb(255 255 255 / 0.85);
+  flex: none;
+}
 .server-banner {
   position: absolute;
-  inset: 0 0 -48px;
+  inset: 0;
   z-index: -1;
   overflow: hidden;
-  mask-image: linear-gradient(180deg, #000 55%, transparent);
   pointer-events: none;
 }
-aside.server-side .channels {
-  position: relative;
+.server-head .server-banner {
+  mask-image: linear-gradient(180deg, #000 calc(100% - var(--banner-fade)), transparent);
+}
+/* The scrim: the name reads on any picture, a white one too */
+.server-banner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgb(10 12 16 / calc(var(--dark) * 0.006)), rgb(10 12 16 / calc(0.35 + var(--dark) * 0.008)));
+}
+.server-head .server-banner::after {
+  background: linear-gradient(180deg, rgb(10 12 16 / calc(var(--dark) * 0.004)) 15%, rgb(10 12 16 / calc(0.5 + var(--dark) * 0.004)) calc(100% - var(--banner-fade)));
 }
 .server-banner img {
   position: absolute;
@@ -283,11 +309,10 @@ aside.server-side .channels {
   height: 100%;
   object-fit: cover;
 }
-.server-banner::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, rgb(10 12 16 / calc(var(--dark) * 0.006)), rgb(10 12 16 / calc(0.35 + var(--dark) * 0.008)));
+aside.server-side .channels {
+  position: relative;
+  padding-top: var(--banner-h);
+  scrollbar-width: none;
 }
 .server-head:hover,
 .server-head.open {
@@ -297,9 +322,31 @@ aside.server-side .channels {
 .server-head.open .server-banner {
   filter: brightness(1.12);
 }
+.server-head .server-title {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
 .server-head .server-name {
-  font-size: 17px;
-  text-shadow: 0 1px 12px rgb(0 0 0 / 0.4);
+  font: var(--type-title);
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  text-shadow: 0 1px 12px rgb(0 0 0 / 0.45);
+}
+.server-head .server-count {
+  font: var(--type-stat);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.88;
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.5);
+}
+.server-head .avatar,
+.server-head .group-emblem {
+  align-self: flex-end;
 }
 
 /* ---------- Profiles: a banner woven from the key when there is no game art or picture ---------- */

@@ -1625,6 +1625,22 @@ try {
   await until("Ann's server picture becomes the GIF, with its first frame as the still", () => a.ev(`api.call('state').then((s) => Object.values(s.servers).some((v) => v.gif?.h === '${gifH}' && v.avatar.startsWith('data:image/jpeg')))`), 15)
   await until("and Bob's rail shows it, fetched by hash", () => b.ev(`(() => { const i = document.querySelector('.rail-server img[src="eleusinia-file://${gifH}"]'); return !!i && i.complete && i.naturalWidth > 0 })()`), 60)
   await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
+  // The column banner (design/mockups/court-profile.html, 1): 172 px, the name and the member count on it, fading into
+  // the column; the channels start below it, the first one takes a click, and a long name keeps to two lines
+  const bannerOk = `(() => {
+    const h = document.querySelector('.server-head'), r = h.getBoundingClientRect(), first = ${channel('general')}.getBoundingClientRect()
+    const hit = document.elementFromPoint(first.left + 20, first.top + first.height / 2)
+    const name = h.querySelector('.server-name'), lines = Math.round(name.getBoundingClientRect().height / parseFloat(getComputedStyle(name).lineHeight))
+    return Math.round(r.height) === 172 && first.top >= r.bottom - 1 && ${channel('general')}.contains(hit) && lines >= 1 && lines <= 2 && /^\\d+ members?/.test(h.querySelector('.server-count').textContent) && getComputedStyle(name).fontFamily.includes('Bodoni')
+  })()`
+  await until('the banner is 172 px with the name and member count on it, and the first channel below it takes a click', () => a.ev(bannerOk), 10)
+  await a.shot('server-banner-column')
+  const smokeId = await a.ev(`api.call('state').then((s) => Object.values(s.servers).find((v) => v.name === 'Smoke Server').id)`)
+  await a.ev(`api.call('serverAct', '${smokeId}', 'server.edit', { name: 'The Midnight Cartographers of Very Long Server Names Everywhere' })`)
+  await until('a long name keeps to two lines and the channels still start below the banner', () => a.ev(`document.querySelector('.server-name').textContent.startsWith('The Midnight') && ${bannerOk}`), 10)
+  await a.shot('server-banner-long')
+  await a.ev(`api.call('serverAct', '${smokeId}', 'server.edit', { name: 'Smoke Server' })`)
+  await until('and the name goes back', () => a.ev(`document.querySelector('.server-name').textContent === 'Smoke Server'`), 10)
 
   console.log('--- Opening the app beside a voice channel, and restarting in one')
   // Cy joins the server too, so two people are in Lounge when Ann opens the app
