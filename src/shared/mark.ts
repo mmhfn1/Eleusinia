@@ -98,3 +98,20 @@ export function cleanWeave(v: any): Weave | undefined {
   if (!Number.isInteger(kind) || kind < 0 || kind > 3 || !Number.isInteger(shift) || shift < 0 || shift > 359) return undefined
   return { kind, shift }
 }
+
+// A profile theme (design/mockups/court-profile.html, 3): one of the weaves behind the whole card at a strength, still
+// or moving. Every number is snapped to its slider's steps; one out of range takes the default, not the theme away.
+export type Theme = { kind: number; shift: number; op: number; fx?: 'drift' | 'breathe'; speed: number; depth: number }
+export const THEME_DEFAULT = { op: 22, speed: 1, depth: 40 }
+export const THEME_LIMITS = { op: [5, 60, 1], speed: [0.5, 2, 0.25], depth: [10, 100, 10] } as const
+export function cleanTheme(v: any): Theme | undefined {
+  const w = cleanWeave(v)
+  if (!w) return undefined
+  const step = (x: unknown, [min, max, by]: readonly [number, number, number], d: number) =>
+    typeof x === 'number' && Number.isFinite(x) && x >= min && x <= max ? Math.round(x / by) * by : d
+  const fx = v.fx === 'drift' || v.fx === 'breathe' ? { fx: v.fx as Theme['fx'] } : {}
+  return { ...w, op: step(v.op, THEME_LIMITS.op, THEME_DEFAULT.op), ...fx, speed: step(v.speed, THEME_LIMITS.speed, THEME_DEFAULT.speed), depth: step(v.depth, THEME_LIMITS.depth, THEME_DEFAULT.depth) }
+}
+// How much of the card's own colour lies over the theme so text keeps AA contrast: more as the weave grows stronger.
+// The weave then moves the background at most op × (1 − scrim) ≈ 20 % of the way (test/mark.test.ts measures it).
+export const themeScrim = (op: number) => 0.3 + 0.6 * (op / 100)

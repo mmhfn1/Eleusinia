@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { banner, bytesOf, cleanWeave, defaultWeave, picture } from '../src/shared/mark'
+import { readFileSync } from 'node:fs'
+import { THEME_DEFAULT, THEME_LIMITS, banner, bytesOf, cleanTheme, cleanWeave, defaultWeave, picture, themeScrim, tones } from '../src/shared/mark'
 import { MAX_MEDIA, cleanProfile, statusOf } from '../src/shared/protocol'
+import { profileVersion } from '../src/shared/sync'
 
 const key = (seed: number) => Array.from({ length: 32 }, (_, i) => ((seed * 97 + i * 31) & 255).toString(16).padStart(2, '0')).join('')
 
@@ -83,4 +85,78 @@ describe('a status', () => {
     expect(cleanProfile({ ...base, status: { text: '' } }).status).toBeUndefined()
     expect(cleanProfile({ ...base, status: { text: 'x'.repeat(100) } }).status!.text).toHaveLength(60)
   })
+})
+
+describe('a profile theme', () => {
+  const ok = { kind: 2, shift: 40, op: 22, fx: 'drift' as const, speed: 1.25, depth: 40 }
+  it('keeps a valid theme as it is', () => {
+    expect(cleanTheme(ok)).toEqual(ok)
+    expect(cleanTheme({ kind: 0, shift: 0, op: 5, speed: 0.5, depth: 10 })).toEqual({ kind: 0, shift: 0, op: 5, speed: 0.5, depth: 10 })
+  })
+  it('needs a real weave; without one there is no theme', () => {
+    for (const bad of [null, 'arcade', 5, {}, { kind: 4, shift: 0 }, { kind: 1, shift: 360 }, { kind: '1', shift: 0 }, { kind: 1.5, shift: 0 }]) expect(cleanTheme(bad)).toBeUndefined()
+  })
+  it('takes the default for a number out of range, and snaps the rest to the sliders', () => {
+    expect(cleanTheme({ kind: 1, shift: 9, op: 900, speed: -1, depth: 'x' })).toEqual({ kind: 1, shift: 9, ...THEME_DEFAULT })
+    expect(cleanTheme({ kind: 1, shift: 9, op: 22.4, speed: 1.1, depth: 44 })).toEqual({ kind: 1, shift: 9, op: 22, speed: 1, depth: 40 })
+    expect(cleanTheme({ kind: 1, shift: 9, op: NaN, speed: Infinity })).toEqual({ kind: 1, shift: 9, ...THEME_DEFAULT })
+  })
+  it('knows only Drift and Breathe; anything else is still', () => {
+    expect(cleanTheme({ ...ok, fx: 'spin' })?.fx).toBeUndefined()
+    expect(cleanTheme({ ...ok, fx: 'breathe' })?.fx).toBe('breathe')
+  })
+  it('round-trips through the profile and its wire copy, and changes the version', () => {
+    const p = cleanProfile({ name: 'Mira', handle: 'mira#2210', about: '', avatar: '', theme: ok })
+    expect(p.theme).toEqual(ok)
+    expect(cleanProfile(JSON.parse(JSON.stringify(p)))).toEqual(p)
+    expect(profileVersion(p)).not.toBe(profileVersion({ ...p, theme: undefined }))
+    expect(profileVersion(p)).not.toBe(profileVersion({ ...p, theme: { ...ok, op: 30 } }))
+    // without a theme the version is what older copies compute
+    const { theme: _, ...plain } = p
+    expect(profileVersion(plain)).toBe(profileVersion(cleanProfile(plain)))
+    expect(cleanProfile({ ...p, theme: { kind: 9 } }).theme).toBeUndefined()
+  })
+  it('stays small enough for the published card', () => {
+    expect(JSON.stringify(cleanTheme({ ...ok, extra: 'x'.repeat(5000) })).length).toBeLessThan(100)
+  })
+})
+
+// WCAG contrast of the card's text over a theme: every weave's tones, at every hue turn and every strength, composited
+// the way hall.css does it (the weave at op, then the card's colour at themeScrim(op)), in both themes.
+describe('text over a theme', () => {
+  const css = readFileSync(new URL('../src/renderer/hall.css', import.meta.url), 'utf8')
+  const tokens = (theme: 'dark' | 'light') => {
+    const block = css.slice(css.indexOf(`:root[data-theme='${theme}']`), css.indexOf('}', css.indexOf(`:root[data-theme='${theme}']`)))
+    const hex = (name: string) => block.match(new RegExp(`--${name}: (#[0-9a-f]{6})`))![1]
+    return { bg: hex('obsidian-2'), text: [hex('silver'), hex('silver-2'), hex('mist')] }
+  }
+  const rgbOf = (h: string) => [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255)
+  const toLin = (c: number) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+  const toSrgb = (c: number) => Math.min(1, Math.max(0, c <= 0.0031308 ? 12.92 * c : 1.055 * c ** (1 / 2.4) - 0.055))
+  const oklch = (s: string) => {
+    const [L, C, H] = s.match(/oklch\(([\d.]+) ([\d.]+) (\d+)\)/)!.slice(1).map(Number)
+    const a = C * Math.cos((H * Math.PI) / 180), b = C * Math.sin((H * Math.PI) / 180)
+    const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3, m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3, q = (L - 0.0894841775 * a - 1.291485548 * b) ** 3
+    return [4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * q, -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * q, -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * q].map(toSrgb)
+  }
+  const mix = (a: number[], b: number[], t: number) => a.map((x, i) => x * (1 - t) + b[i] * t) // b over a at t (sRGB, as browsers blend)
+  const lum = (c: number[]) => 0.2126 * toLin(c[0]) + 0.7152 * toLin(c[1]) + 0.0722 * toLin(c[2])
+  const contrast = (x: number[], y: number[]) => { const [p, q] = [lum(x), lum(y)].sort((m, n) => n - m); return (p + 0.05) / (q + 0.05) }
+  for (const theme of ['dark', 'light'] as const)
+    it(`keeps AA in ${theme === 'dark' ? 'Ink' : 'Ivory'} on every weave at every strength`, () => {
+      const { bg, text } = tokens(theme)
+      let worst = Infinity
+      for (let seed = 0; seed < 24; seed++)
+        for (let shift = 0; shift < 360; shift += 15) {
+          const [c0, c1, c2] = tones(bytesOf(key(seed)), shift).map(oklch)
+          // the weave's own pixels: its ground, and the ground with each shape over it at the most any weave uses
+          for (const px of [c0, mix(c0, c1, 0.32), mix(c0, c2, 0.35)])
+            for (let op = THEME_LIMITS.op[0]; op <= THEME_LIMITS.op[1]; op++) {
+              const under = mix(mix(rgbOf(bg), px, op / 100), rgbOf(bg), themeScrim(op))
+              for (const t of text) worst = Math.min(worst, contrast(rgbOf(t), under))
+            }
+        }
+      expect(worst).toBeGreaterThanOrEqual(4.5)
+      console.log(`${theme}: lowest text contrast over any theme ${worst.toFixed(2)}`)
+    })
 })

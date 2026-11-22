@@ -208,7 +208,13 @@ export function Server({ st, sv, channel, people: everyone, run, go, show }: Pro
         }}>
           <ServerBannerArt sv={sv} />
           <GroupEmblem g={sv} size={28} />
-          <span className="server-name">{sv.name}</span>
+          <span className="server-title">
+            <span className="server-name">{sv.name}</span>
+            <span className="server-count">
+              {keys.length === 1 ? '1 member' : `${keys.length} members`}
+              {online.length > 0 && `, ${online.length} here`}
+            </span>
+          </span>
           <Icon name="chevron" size={16} />
         </button>
         <nav className="channels" aria-label="Channels">

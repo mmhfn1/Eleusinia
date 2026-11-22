@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import createTestnet from 'hyperdht/testnet.js'
 import { fakeBungie } from './fake-bungie.mjs'
+import { audit, auditDir, writeAudit } from './audit.mjs'
 
 // ELEUSINIA_SMOKE_EXE runs the packaged app instead (for example dist/win-unpacked/Eleusinia.exe after npm run dist).
 const packaged = process.env.ELEUSINIA_SMOKE_EXE
@@ -19,7 +20,7 @@ const app = packaged ? [] : [process.argv[2]]
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
 const t0 = Date.now()
 const children = []
-setTimeout(() => (console.error('FAIL overall timeout'), children.forEach((c) => c.kill()), process.exit(2)), 420000)
+setTimeout(() => (console.error('FAIL overall timeout'), children.forEach((c) => c.kill()), process.exit(2)), auditDir ? 1800000 : 420000) // the audit photographs as it goes
 
 const publicDht = process.env.ELEUSINIA_SMOKE_PUBLIC === '1'
 // 10 nodes, not 3: for two copies on one machine hyperdht races a LAN shortcut against hole punching, and the side
@@ -152,8 +153,10 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
   // Crashes the page as a real renderer crash would (Chromium's own command for it).
   const crash = () => ws.send(JSON.stringify({ id: ++id, method: 'Page.crash' }))
   // ELEUSINIA_SMOKE_SHOTS=<folder>: screenshots of a few views, to look at by eye.
-  const shot = (name) =>
-    process.env.ELEUSINIA_SMOKE_SHOTS &&
+  // ELEUSINIA_SMOKE_AUDIT=<folder> (test/audit.mjs): every screen photographed here is also audited
+  const cdp = (method, params = {}) => new Promise((resolve, reject) => (pending.set(++id, (m) => (m.error ? reject(new Error(m.error.message)) : resolve(m.result))), ws.send(JSON.stringify({ id, method, params }))))
+  const shot = async (name) =>
+    (await audit(port, name, ev, cdp), process.env.ELEUSINIA_SMOKE_SHOTS) &&
     new Promise((resolve) => {
       pending.set(++id, (m) => (m.result?.data && writeFileSync(join(process.env.ELEUSINIA_SMOKE_SHOTS, name + '.png'), Buffer.from(m.result.data, 'base64')), resolve()))
       ws.send(JSON.stringify({ id, method: 'Page.captureScreenshot' }))
@@ -526,7 +529,9 @@ const annGame = {
 }
 // And a folder standing in for CS2's cfg folder, where Settings → Set up writes the game's file.
 const annGsiCfg = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-gsi-')) // one subfolder per game
-const annEnv = { ...strictEnv, ...uploadEnv(3000), ELEUSINIA_TEST_ACTIVITY: JSON.stringify(annGame), ELEUSINIA_TEST_GSI_CFG: annGsiCfg }
+// Two weeks of Ann's play, as if counted day by day (ELEUSINIA_TEST_PLAYED: minutes per game per days ago)
+const annPlayed = { 0: { 'Counter-Strike 2': 95 }, 1: { 'Counter-Strike 2': 140, 'Dota 2': 45 }, 3: { 'Destiny 2': 260 }, 6: { 'Dota 2': 30 }, 13: { 'Dota 2': 300 } }
+const annEnv = { ...strictEnv, ...uploadEnv(3000), ELEUSINIA_TEST_ACTIVITY: JSON.stringify(annGame), ELEUSINIA_TEST_GSI_CFG: annGsiCfg, ELEUSINIA_TEST_PLAYED: JSON.stringify(annPlayed) }
 let a = await launch(9231, undefined, annEnv)
 // Bob plays Destiny 2 and links a stand-in for bungie.net (test/fake-bungie.mjs) that approves at once.
 const bobGame = { name: 'Destiny 2', source: 'steam', app: 1085660, played: 211683 }
@@ -550,6 +555,7 @@ try {
   await c.ev(`document.title = ${JSON.stringify(ownTitles[1])}`)
   for (const [p, n] of everyone) {
     await until(`${n} sees setup first, with a generated picture`, () => p.ev(`${body('Create your account')} && !document.querySelector('aside') && !!document.querySelector('.portrait-pick .avatar svg rect')`))
+    if (n === 'Ann') await p.shot('setup')
     // Cy keeps the generated picture; Ann and Bob upload one.
     await p.ev(`(async () => {
       const f = document.querySelector('form.profile')
@@ -726,6 +732,89 @@ try {
     await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
   } finally {
     clearInterval(posting)
+  }
+
+  console.log('--- Two weeks of play and a profile theme (design/mockups/court-profile.html), seen by a friend')
+  const annTheme = { kind: 2, shift: 40, op: 30, fx: 'drift', speed: 1, depth: 40 }
+  await a.ev(`api.call('state').then((s) => api.call('setProfile', { ...s.profile, theme: ${JSON.stringify(annTheme)} }))`)
+  // Oldest first: cell 13 is today (95 min, level 2), 12 yesterday (185, 3), 10 three days ago (260, 4), 0 two weeks ago (300, 4)
+  const cells = (root) => `[...${root}.querySelectorAll('.play-cell')].map((c) => c.dataset.l).join('')`
+  const annCells = '40000001004032'
+  await b.ev(`${annRow}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+  await until("B sees Ann's two weeks under her status in her small card: 14 days, today ringed, her strengths", () => b.ev(pop((p) => p.querySelectorAll('.play-cell').length === 14 && p.querySelector('.play-cell.today') === p.querySelectorAll('.play-cell')[13] && [...p.querySelectorAll('.play-cell')].map((c) => c.dataset.l).join('') === '40000001004032')), 20)
+  if (await b.ev(pop((p) => !!p.querySelector('.play-days .week-legend, .play-days small')))) throw new Error('the grid still has a key under it')
+  await until("and her theme behind the card, drifting", () => b.ev(pop((p) => !!p.querySelector(':scope > .profile-theme.fx-drift .woven'))), 10)
+  if (!(await b.ev(pop((p) => getComputedStyle(p).position === 'fixed' && p.getBoundingClientRect().top >= 0 && p.getBoundingClientRect().bottom <= innerHeight + 1)))) throw new Error('the themed card is not floating inside the window')
+  // Each cell says what it holds; focus shows the same as hover
+  await until('each cell is labelled with its day, games and hours', () => b.ev(pop((p) => /Counter-Strike 2 2\.3 h, Dota 2 45 min/.test(p.querySelectorAll('.play-cell')[12].getAttribute('aria-label')) && /no play/.test(p.querySelectorAll('.play-cell')[11].getAttribute('aria-label')))), 5)
+  await b.ev(`document.querySelector('.profile-pop .play-cell[tabindex="0"]').focus()`)
+  await b.ev(`document.querySelector('.profile-pop .play-cells').dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true }))`)
+  await until('the arrow keys move between days, and the focused one shows its date, games and hours', () => b.ev(pop((p) => document.activeElement === p.querySelectorAll('.play-cell')[12] && /Dota 2\s*45 min/.test(p.querySelector('.play-tip')?.textContent ?? ''))), 5)
+  const tipInside = await b.ev(pop((p) => { const t = p.querySelector('.play-tip').getBoundingClientRect(), r = p.getBoundingClientRect(); return t.left >= r.left - 1 && t.right <= r.right + 1 }))
+  if (!tipInside) throw new Error("the day's details run off the card")
+  await b.shot('play-grid-mini')
+  await b.ev(expandPop)
+  await until('her full card shows the same two weeks and the same theme', () => b.ev(`(() => { const d = document.querySelector('dialog[open].card-dialog'); return !!d && ${cells("d")} === '${annCells}' && !!d.querySelector('.profile-theme.fx-drift') })()`), 10)
+  await sleep(500) // past the dialog's opening
+  await b.shot('play-grid-full')
+  await b.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
+  // Her own view: Settings, My profile, Profile theme, with the preview as friends see it
+  await a.ev(`document.querySelector('.user-bar button[title="Settings"]').click()`)
+  await until("Ann's settings show her theme chosen, and the preview draws it", () => a.ev(`(() => { const t = document.querySelector('.theme-edit'); return !!t && t.querySelector('.theme-weaves [aria-checked="true"] span')?.textContent === 'Bands' && !!document.querySelector('.preview-card > .profile-theme') && ${cells("document.querySelector('.preview-card')")} === '${annCells}' })()`), 10)
+  await a.ev(`[...document.querySelectorAll('.theme-weaves button')].find((x) => x.textContent === 'Lattice').click()`)
+  await until('a change shows in the preview at once, playing, before it is saved', () => a.ev(`!!document.querySelector('.preview-card > .profile-theme.fx-drift:not(.paused)') && !document.querySelector('.theme-edit .button.primary').disabled`), 5)
+  await a.ev(`document.querySelector('.theme-edit').scrollIntoView()`)
+  await sleep(300)
+  await a.shot('settings-theme')
+  await until('the preview stops playing a few seconds after the last touch', () => a.ev(`!!document.querySelector('.preview-card > .profile-theme.paused')`), 8)
+  await a.ev(`[...document.querySelectorAll('.theme-edit button')].find((x) => x.textContent === 'Reset').click()`)
+  await until('Reset puts the saved theme back', () => a.ev(`document.querySelector('.theme-weaves [aria-checked="true"] span')?.textContent === 'Bands' && document.querySelector('.theme-edit .button.primary').disabled`), 5)
+  await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
+  await a.ev(`document.querySelector('.user-bar-me').click()`)
+  await until('her own full card shows her theme and two weeks too', () => a.ev(`(() => { const d = document.querySelector('dialog[open].card-dialog'); return !!d && !!d.querySelector('.profile-theme.fx-drift') && ${cells("d")} === '${annCells}' })()`), 10)
+  await sleep(400)
+  await a.shot('theme-owner')
+  await a.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
+  const fonts = await b.ev(`document.fonts.ready.then(() => JSON.stringify({ bodoni: document.fonts.check('italic 400 15px "Bodoni Moda Variable"') && document.fonts.check('600 22px "Bodoni Moda Variable"'), alegreya: document.fonts.check('500 15px "Alegreya Sans"'), google: performance.getEntriesByType('resource').filter((e) => /fonts\.(googleapis|gstatic)\.com/.test(e.name)).length, local: performance.getEntriesByType('resource').filter((e) => /bodoni-moda|alegreya-sans/.test(e.name) && !/^https?:/.test(e.name)).length }))`)
+  const f = JSON.parse(fonts)
+  if (!f.bodoni || !f.alegreya || f.google) throw new Error('court type is not loaded from the app: ' + fonts)
+  console.log(`ok   Bodoni Moda and Alegreya Sans load from the app (${f.local} font files), none from Google`)
+  console.log('ok   the grid and the theme crossed the wire: Bob drew both from what Ann shares')
+  // ELEUSINIA_SMOKE_PERF=1 (Windows): what an open themed card costs Bob's renderer and GPU processes, against none open
+  if (process.env.ELEUSINIA_SMOKE_PERF && process.platform === 'win32') {
+    // The app's child processes by type once, then their processor time from Get-Process before and after each wait
+    const ps = (cmd) => new Promise((done) => { let out = ''; spawn('powershell', ['-NoProfile', '-Command', cmd]).on('exit', () => done(out.trim())).stdout.on('data', (d) => (out += d)) })
+    const kids = (await ps(`Get-CimInstance Win32_Process -Filter "ParentProcessId=${b.child.pid}" | ForEach-Object { '{0}|{1}' -f $_.ProcessId, ([regex]::Match($_.CommandLine, '--type=([a-z-]+)').Groups[1].Value) }`))
+      .split(/\r?\n/).map((l) => l.split('|')).filter(([, type]) => type === 'renderer' || type === 'gpu-process')
+    const times = async () => Object.fromEntries((await ps(`${kids.map(([pid]) => pid).join(',')} | ForEach-Object { '{0}|{1}' -f $_, (Get-Process -Id $_).TotalProcessorTime.TotalMilliseconds }`)).split(/\r?\n/).map((l) => l.split('|')).map(([pid, ms]) => [pid, Number(ms)]))
+    const measure = async (label, ms = 10000) => {
+      const t0 = await times(), start = Date.now()
+      await sleep(ms)
+      const t1 = await times(), took = Date.now() - start
+      const pct = (type) => (kids.filter(([, t]) => t === type).reduce((n, [pid]) => n + (t1[pid] - t0[pid]), 0) / took * 100).toFixed(1)
+      console.log(`     perf ${label}: renderer ${pct('renderer')} % of a core, GPU process ${pct('gpu-process')} %`)
+    }
+    // Each motion between two readings of the same card held still, so whatever else the run left going shows in both
+    const themed = (fx) => a.ev(`api.call('state').then((s) => api.call('setProfile', { ...s.profile, theme: { ...s.profile.theme, fx: ${fx ? `'${fx}'` : 'undefined'} } }))`)
+    const showing = (fx) => {
+      const sel = fx ? `:scope > .profile-theme.fx-${fx}:not(.paused)` : ':scope > .profile-theme:not(.fx-drift):not(.fx-breathe)'
+      return until(`Bob's card shows ${fx ?? 'no motion'}`, () => b.ev(`(() => { const p = document.querySelector('.profile-pop.placed'); return !!p?.querySelector('${sel}') })()`), 20)
+    }
+    await themed(undefined)
+    await b.ev(`${annRow}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
+    await showing(undefined)
+    await sleep(20000)
+    for (const fx of ['drift', 'breathe', 'drift']) {
+      await measure('her card open, held still')
+      await themed(fx)
+      await showing(fx)
+      await measure(`her card open, ${fx === 'drift' ? 'Drift' : 'Breathe'}`)
+      await themed(undefined)
+      await showing(undefined)
+    }
+    await measure('her card open, held still')
+    await themed('drift') // as the checks after this expect
+    await b.ev(`document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))`)
   }
 
   console.log('--- Activity: a Dota 2 match, through the same Game State Integration server')
@@ -1625,6 +1714,22 @@ try {
   await until("Ann's server picture becomes the GIF, with its first frame as the still", () => a.ev(`api.call('state').then((s) => Object.values(s.servers).some((v) => v.gif?.h === '${gifH}' && v.avatar.startsWith('data:image/jpeg')))`), 15)
   await until("and Bob's rail shows it, fetched by hash", () => b.ev(`(() => { const i = document.querySelector('.rail-server img[src="eleusinia-file://${gifH}"]'); return !!i && i.complete && i.naturalWidth > 0 })()`), 60)
   await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
+  // The column banner (design/mockups/court-profile.html, 1): 172 px, the name and the member count on it, fading into
+  // the column; the channels start below it, the first one takes a click, and a long name keeps to two lines
+  const bannerOk = `(() => {
+    const h = document.querySelector('.server-head'), r = h.getBoundingClientRect(), first = ${channel('general')}.getBoundingClientRect()
+    const hit = document.elementFromPoint(first.left + 20, first.top + first.height / 2)
+    const name = h.querySelector('.server-name'), lines = Math.round(name.getBoundingClientRect().height / parseFloat(getComputedStyle(name).lineHeight))
+    return Math.round(r.height) === 172 && first.top >= r.bottom - 1 && ${channel('general')}.contains(hit) && lines >= 1 && lines <= 2 && /^\\d+ members?/.test(h.querySelector('.server-count').textContent) && getComputedStyle(name).fontFamily.includes('Bodoni')
+  })()`
+  await until('the banner is 172 px with the name and member count on it, and the first channel below it takes a click', () => a.ev(bannerOk), 10)
+  await a.shot('server-banner-column')
+  const smokeId = await a.ev(`api.call('state').then((s) => Object.values(s.servers).find((v) => v.name === 'Smoke Server').id)`)
+  await a.ev(`api.call('serverAct', '${smokeId}', 'server.edit', { name: 'The Midnight Cartographers of Very Long Server Names Everywhere' })`)
+  await until('a long name keeps to two lines and the channels still start below the banner', () => a.ev(`document.querySelector('.server-name').textContent.startsWith('The Midnight') && ${bannerOk}`), 10)
+  await a.shot('server-banner-long')
+  await a.ev(`api.call('serverAct', '${smokeId}', 'server.edit', { name: 'Smoke Server' })`)
+  await until('and the name goes back', () => a.ev(`document.querySelector('.server-name').textContent === 'Smoke Server'`), 10)
 
   console.log('--- Opening the app beside a voice channel, and restarting in one')
   // Cy joins the server too, so two people are in Lounge when Ann opens the app
@@ -1712,6 +1817,35 @@ try {
   await b.ev(`document.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true }))`)
   for (const p of [a, b, c]) await p.ev(press('Disconnect'))
   }
+  // The audit's extra stops: every Settings section, and the main screens again in Ivory (data-theme, as theme.ts sets it)
+  if (auditDir && !forwardMode && !relayedMode) {
+    console.log('--- Audit: Settings section by section, and the main screens in Ivory')
+    const openSettings = () => a.ev(`document.querySelector('.user-bar button[title="Settings"]').click()`)
+    const walk = async (theme) => {
+      await openSettings()
+      await sleep(400)
+      const rows = await a.ev(`[...document.querySelectorAll('.settings-index-row')].map((r) => r.textContent)`)
+      for (const [i, label] of rows.entries()) {
+        await a.ev(`document.querySelectorAll('.settings-index-row')[${i}].click()`)
+        await sleep(700)
+        await a.shot(`settings-${label.toLowerCase().replace(/[^a-z]+/g, '-')}-${theme}`)
+      }
+      await a.ev(`document.querySelector('dialog[open] .dialog-close').click()`)
+      await sleep(300)
+    }
+    await walk('ink')
+    await a.ev(`document.documentElement.dataset.theme = 'light'`)
+    await sleep(500)
+    await a.shot('server-ivory')
+    await a.ev(`document.querySelector('.rail-home, .rail .emblem, .rail button')?.click()`)
+    await sleep(500)
+    await a.shot('home-ivory-end')
+    await walk('ivory')
+    await a.ev(`document.querySelector('.user-bar-me').click()`)
+    await sleep(500)
+    await a.shot('card-own-ivory')
+    await a.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close')?.click()`)
+  }
 } catch (e) {
   failed = true
   console.error('FAIL', e.message)
@@ -1719,6 +1853,7 @@ try {
   for (const [n, p] of all) console.error(n, (await p.ev(`document.body.innerText`).catch(String)).replace(/\n+/g, ' | '))
   for (const [n, p] of all) console.error(n, 'DIAG', JSON.stringify(await p.ev(`api.diagnostics().then((d) => d.events.filter((e) => e.area === 'network' || e.area === 'call').map((e) => e.area[0] + ' ' + e.text).slice(-40))`).catch(String)))
 } finally {
+  writeAudit(process.env.ELEUSINIA_SMOKE_AUDIT_NAME || 'before')
   children.forEach((ch) => ch.kill())
   await testnet?.destroy().catch(() => {})
 }

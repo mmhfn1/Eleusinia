@@ -1,0 +1,9 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Eleusinia design system</title>
+<style>body{margin:0;padding:32px;background:#2b2a28;color:#eee;font:15px/1.5 system-ui}h1{font:600 24px system-ui;margin:0 0 6px}p{color:#ccc;max-width:80ch}ul{columns:3;padding-left:18px}a{color:#e2c27e}</style></head>
+<body><h1>Eleusinia design system</h1><p>The single reference for the UI rebuild (README.md). Each screen opens in Ink; add <code>&amp;t=ivory</code> for Ivory and <code>&amp;g=brass</code> or <code>&amp;g=line</code> for the other gold directions.</p>
+<ul id="list"></ul>
+<script src="draw.js"></script>
+<script src="effects.js"></script><script src="screens.js"></script>
+<script>document.getElementById('list').innerHTML = Object.keys(SCREENS).filter((s) => s !== 'gold').map((s) => `<li><a href="screen.html?s=${s}">${s}</a> · <a href="screen.html?s=${s}&t=ivory">ivory</a></li>`).join('')</script>
+</body></html>

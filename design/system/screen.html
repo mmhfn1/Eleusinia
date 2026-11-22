@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<title>Eleusinia mockup</title>
+<!-- One screen of design/system: screen.html?s=<id>&t=ink|ivory. Every font from the project's own @fontsource packages:
+     nothing from the web, nothing from the system. -->
+<link rel="stylesheet" href="../../node_modules/@fontsource-variable/bodoni-moda/standard.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource-variable/bodoni-moda/standard-italic.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource/alegreya-sans/400.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource/alegreya-sans/400-italic.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource/alegreya-sans/500.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource/alegreya-sans/700.css">
+<link rel="stylesheet" href="../../node_modules/@fontsource/cascadia-mono/500.css">
+<link rel="stylesheet" href="tokens.css">
+<link rel="stylesheet" href="ui.css">
+<link rel="stylesheet" href="screens.css">
+<style>body { padding: 0; background: #2b2a28; } #out { display: inline-block; }</style>
+</head>
+<body>
+<div id="out"></div>
+<script src="draw.js"></script>
+<script src="effects.js"></script>
+<script src="screens.js"></script>
+<script>
+  const q = new URLSearchParams(location.search)
+  document.documentElement.dataset.theme = q.get('t') === 'ivory' ? 'light' : 'dark'
+  const s = q.get('s') ?? 'home'
+  document.getElementById('out').innerHTML = SCREENS[s] ? SCREENS[s]() : `<p style="color:#fff">No screen ${s}</p>`
+</script>
+</body>
+</html>

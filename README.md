@@ -56,7 +56,7 @@
 
 ### Servers
 - Text and voice channels in categories, roles with colours and permissions, channels limited to some roles.
-- A banner behind the server's name: woven from the server's key, a picture, or a game's art.
+- A banner over the top of the channel list, the server's name and member count on it, fading into the column: woven from the server's key, a picture, or a game's art.
 - Invite links with an expiry and a use limit, and invite cards that join in one click.
 - Pokes to invite members into a voice channel.
 - Moderation: kick, ban, server mute and deafen, move, disconnect, and an audit log.
@@ -73,10 +73,11 @@
 - Opens on a short splash that waits until your friends are linked and missed messages have arrived, and installs any update first.
 - Its own title bar, a tray icon, mouse back and forward buttons, and resizable columns.
 - The rail holds your servers and groups. Home opens on friends in game, as art cards with the live match, then live calls and everyone online; its column has a live feed of what friends are doing (right-click to join them) and your direct messages, which stay beside any open conversation.
-- A DM shows the other person beside it: their status, what they play, a week of play, their showcase, your time together and the pictures you shared.
-- Profiles: a status that can clear itself and hold back pokes, a showcase of up to three favourite games or achievements, an accent colour taken from the banner, and a seal for people whose key you compared in person.
+- A DM shows the other person beside it: their status, what they play, two weeks of play, their showcase, your time together and the pictures you shared.
+- Profiles: a status that can clear itself and hold back pokes, two weeks of play under it (a cell a day in your accent, stronger the longer you played; hover or Tab to a day for its games and hours; counted on your computer, kept 14 days, shared only like the rest of your activity and not at all with Activity off), a showcase of up to three favourite games or achievements, an accent colour taken from the banner, and a seal for people whose key you compared in person.
+- A profile theme (Settings, My profile): one of the four weaves behind your whole card, in tones and at a strength you pick, still or slowly drifting or breathing, at the speed and depth you set. Text stays readable on any of them, and motion holds still for anyone who asks their system for less.
 - Settings has an index of its sections and a preview of what others see as you change your profile.
-- The look: Ink by night, muted ivory by day, or whichever Windows uses (Settings, General), set in Commissioner.
+- The look: Ink by night, muted ivory by day, or whichever Windows uses (Settings, General), set in Commissioner, with Bodoni Moda and Alegreya Sans for the newer pieces (the server banner, the play grid, the profile theme). All three are bundled, under the SIL Open Font License, and nothing is fetched from the web; the plan for the rest of the app is [design/type-plan.md](design/type-plan.md).
 - **Report a problem** sends a bug report to the developers. You preview it first, and nothing identifying is included ([docs/reports.md](docs/reports.md)).
 
 ## Connecting on strict networks

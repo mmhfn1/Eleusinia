@@ -6,13 +6,14 @@ import { type Area, type Diag, type Kind, type Meta, BUILD, cleanReport, describ
 import { GATE_DB, dbOf } from '../shared/speaking'
 import { DEFAULT_CACHE_MB, sizeLabel } from '../shared/media'
 import { type State, statusOf } from '../shared/protocol'
+import { type Theme, THEME_DEFAULT, THEME_LIMITS, WEAVES } from '../shared/mark'
 import * as call from './call'
-import { Avatar, BannerPick, Dialog, Icon, Info } from './ui'
+import { Avatar, BannerPick, Dialog, Icon, Info, ThemeLayer, Woven } from './ui'
 import * as theme from './theme'
 import { NOBODY, api, labelOf } from './common'
 import { ActivitySettingsSection, GameGlance } from './Activity'
 import { ProfileBanner } from './Profile'
-import { ShowcaseView, WeekBars } from './Person'
+import { PlayDays, ShowcaseView } from './Person'
 
 // Microphone, speakers and voice quality, in Settings.
 function AudioSettings({ st }: { st: State }) {
@@ -230,7 +231,7 @@ function ThemePick() {
 }
 
 // Name, about line and banner, saved here; the picture opens Edit profile, which has the cropper.
-function MyProfile({ st, edit }: { st: State; edit: () => void }) {
+function MyProfile({ st, edit, draft, setDraft }: { st: State; edit: () => void; draft: ThemeDraft; setDraft: (d: ThemeDraft) => void }) {
   const [name, setName] = useState(st.profile.name)
   const [about, setAbout] = useState(st.profile.about)
   const [err, setErr] = useState('')
@@ -275,7 +276,86 @@ function MyProfile({ st, edit }: { st: State; edit: () => void }) {
           <span>Show the game's art as my banner while I play</span>
         </label>
       </div>
+      <ThemeEdit st={st} save={save} draft={draft} setDraft={setDraft} />
     </>
+  )
+}
+
+// A theme being edited: what the preview shows until it is saved or reset (null: none being edited; `theme`
+// undefined: None chosen), and whether it plays (for a few seconds after each touch)
+type ThemeDraft = { theme?: Theme; playing: boolean } | null
+const PLAY_AFTER_TOUCH = 4000
+// Settings, My profile, Profile theme (design/mockups/court-profile.html, 3)
+function ThemeEdit({ st, save, draft, setDraft }: { st: State; save: (p: Partial<State['profile']>) => Promise<unknown>; draft: ThemeDraft; setDraft: (d: ThemeDraft) => void }) {
+  const saved = st.profile.theme
+  const t = draft ? draft.theme : saved
+  const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
+  useEffect(() => () => clearTimeout(timer.current), [])
+  const touch = (theme: Theme | undefined) => {
+    setDraft({ theme, playing: true })
+    clearTimeout(timer.current)
+    timer.current = setTimeout(() => setDraft({ theme, playing: false }), PLAY_AFTER_TOUCH)
+  }
+  const set = (p: Partial<Theme>) => touch({ kind: 0, shift: 0, ...THEME_DEFAULT, ...t, ...p })
+  const slider = (key: 'op' | 'speed' | 'depth', label: string, unit: string, off?: boolean) => {
+    const [min, max, step] = THEME_LIMITS[key]
+    const v = t?.[key] ?? THEME_DEFAULT[key]
+    return (
+      <label className={`theme-slider ${off ? 'off' : ''}`}>
+        <span className="theme-label">
+          {label} <output>{v}{unit}</output>
+        </span>
+        <input type="range" min={min} max={max} step={step} value={v} disabled={off} onChange={(e) => set({ [key]: +e.target.value })} />
+      </label>
+    )
+  }
+  const same = JSON.stringify(t ?? null) === JSON.stringify(saved ?? null)
+  return (
+    <div className="theme-edit">
+      <h3>Profile theme</h3>
+      <p className="theme-hint">A weave behind your whole card, small and full. Everyone who opens your profile sees it.</p>
+      <span className="theme-label">Weave</span>
+      <div className="theme-weaves" role="radiogroup" aria-label="Weave">
+        <button type="button" role="radio" aria-checked={!t} className={`weave-kind none ${!t ? 'on' : ''}`} onClick={() => touch(undefined)}>
+          <span>None</span>
+        </button>
+        {WEAVES.map((name, kind) => (
+          <button key={name} type="button" role="radio" aria-checked={t?.kind === kind} className={`weave-kind ${t?.kind === kind ? 'on' : ''}`} onClick={() => set({ kind })}>
+            <Woven id={st.me} weave={{ kind, shift: t?.shift ?? 0 }} />
+            <span>{name}</span>
+          </button>
+        ))}
+      </div>
+      <div className={t ? '' : 'theme-off'}>
+        <label className="theme-slider">
+          <span className="theme-label">
+            Tones <output>{t?.shift ?? 0}°</output>
+          </span>
+          <input type="range" min={0} max={359} value={t?.shift ?? 0} disabled={!t} onChange={(e) => set({ shift: +e.target.value })} />
+          <span className="theme-tones" aria-hidden="true" />
+        </label>
+        {slider('op', 'Strength', ' %', !t)}
+        <span className="theme-label">Motion</span>
+        <div className="segmented" role="radiogroup" aria-label="Motion">
+          {([[undefined, 'Off'], ['drift', 'Drift'], ['breathe', 'Breathe']] as const).map(([fx, label]) => (
+            <button key={label} type="button" role="radio" aria-checked={t?.fx === fx} className={t?.fx === fx ? 'on' : ''} disabled={!t} onClick={() => set({ fx })}>
+              {label}
+            </button>
+          ))}
+        </div>
+        {slider('speed', 'Speed', '×', !t?.fx)}
+        {slider('depth', 'Depth', ' %', !t?.fx)}
+        <p className="theme-hint">Held still for anyone who asks their system for less motion.</p>
+      </div>
+      <div className="settings-row">
+        <button className="button primary" disabled={same} onClick={() => save({ theme: t }).then(() => setDraft(null))}>
+          Save theme
+        </button>
+        <button className="button" disabled={!draft} onClick={() => setDraft(null)}>
+          Reset
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -416,12 +496,13 @@ function StatusEdit({ st, save }: { st: State; save: (p: Partial<State['profile'
 }
 
 // What others see of you, beside the settings and answering every change in them
-function Preview({ st }: { st: State }) {
+function Preview({ st, draft }: { st: State; draft: ThemeDraft }) {
   const game = st.activity[st.me]?.game
   return (
     <div className="settings-preview" aria-label="What others see">
       <h2>What others see</h2>
       <div className="preview-card">
+        <ThemeLayer k={st.me} theme={draft ? draft.theme : st.profile.theme} still={!draft?.playing} />
         <ProfileBanner st={st} k={st.me} p={st.profile} />
         <div className="preview-portrait">
           <Avatar k={st.me} p={st.profile} size={72} online />
@@ -430,10 +511,10 @@ function Preview({ st }: { st: State }) {
           <b className="preview-name">{st.profile.name}</b>
           <span className="row-sub">{st.profile.handle}</span>
           {statusOf(st.profile) && <p className="pop-status">{statusOf(st.profile)!.text}</p>}
+          <PlayDays st={st} k={st.me} />
           {st.profile.about && <p className="preview-about">{st.profile.about}</p>}
           {game && <GameGlance g={game} />}
           <ShowcaseView items={st.profile.showcase} />
-          <WeekBars week={st.activity[st.me]?.week} />
         </div>
       </div>
     </div>
@@ -456,6 +537,7 @@ const PANES: [string, string, string][] = [
 // the right. The index scrolls to a section and marks the one in view.
 export function SettingsDialog({ st, close, edit, remove }: { st: State; close: () => void; edit: () => void; remove: () => void }) {
   const [here, setHere] = useState('profile')
+  const [draft, setDraft] = useState<ThemeDraft>(null)
   const body = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = body.current!
@@ -488,7 +570,7 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
         <div className="settings-body" ref={body}>
           <section className="settings-section" data-pane="profile">
             <h2>My profile</h2>
-            <MyProfile st={st} edit={editNow} />
+            <MyProfile st={st} edit={editNow} draft={draft} setDraft={setDraft} />
           </section>
           <section className="settings-section" data-pane="activity">
             <h2>Activity</h2>
@@ -548,7 +630,7 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
             </div>
           </section>
         </div>
-        <Preview st={st} />
+        <Preview st={st} draft={draft} />
       </div>
     </Dialog>
   )

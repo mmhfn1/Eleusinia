@@ -20,3 +20,9 @@ deploy/relay/node_modules/
 relay-data/
 inbox-data/
 forwarder-data/
+# The audit's pictures are made again by the smoke run (design/audit/README.md); only its tables are kept
+design/audit/**/*.png
+design/audit/*.png
+# The design system's pictures are made again by design/system/capture.cjs
+design/system/shots/
+design/system/sheets/

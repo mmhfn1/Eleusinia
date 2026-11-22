@@ -1,4 +1,4 @@
-import { type Weave, cleanWeave } from './mark'
+import { type Theme, type Weave, cleanTheme, cleanWeave } from './mark'
 import type { ServerBanner } from './server'
 import { type Activity, type ActivitySettings, type Showcase, cleanShowcase } from './activity'
 import type { Action, Bindings } from './hotkeys'
@@ -38,7 +38,7 @@ export type Banner = Weave | { fade: true } | { pic: string; gif?: GifRef }
 // status: a line under their name, until a time (unix ms) or until cleared; quiet: no pokes reach them while it is set
 export type Status = { text: string; until?: number; quiet?: true }
 // gif: their picture as a GIF too big for a greeting, fetched by hash; avatar is then its first frame
-export type Profile = { handle: string; name: string; about: string; avatar: string; gif?: GifRef; banner?: Banner; gameArt?: false; status?: Status; showcase?: Showcase }
+export type Profile = { handle: string; name: string; about: string; avatar: string; gif?: GifRef; banner?: Banner; gameArt?: false; status?: Status; showcase?: Showcase; theme?: Theme }
 // Device labels are kept beside the ids, since an id can change while the name stays (see devices.ts).
 // volumes: how loud each person is played in calls, 0 to 1, kept between sessions.
 // hotkeys: only those the user bound; none by default.
@@ -236,10 +236,11 @@ export function cleanProfile(p: any): Profile {
   const ok = isMedia(p?.avatar)
   const banner = cleanBanner(p?.banner)
   const showcase = cleanShowcase(p?.showcase)
+  const theme = cleanTheme(p?.theme)
   const st = p?.status
   const text = typeof st?.text === 'string' ? st.text.trim().slice(0, 60) : ''
   const status: Status | undefined = text ? { text, ...(Number.isSafeInteger(st.until) && st.until > 0 && { until: st.until }), ...(st.quiet === true && { quiet: true as const }) } : undefined
-  return { handle: isHandle(p?.handle) ? p.handle : '', name: str(p?.name, 40), about: str(p?.about, 200), avatar: ok ? p.avatar : '', ...(ok && gifOf(p.gif)), ...(banner && { banner }), ...(p?.gameArt === false && { gameArt: false as const }), ...(status && { status }), ...(showcase && { showcase }) }
+  return { handle: isHandle(p?.handle) ? p.handle : '', name: str(p?.name, 40), about: str(p?.about, 200), avatar: ok ? p.avatar : '', ...(ok && gifOf(p.gif)), ...(banner && { banner }), ...(p?.gameArt === false && { gameArt: false as const }), ...(status && { status }), ...(showcase && { showcase }), ...(theme && { theme }) }
 }
 
 export const isUsername = (s: unknown): s is string => typeof s === 'string' && /^[a-z0-9_.]{2,20}$/.test(s)

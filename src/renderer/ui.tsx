@@ -1,6 +1,6 @@
 // Small shared pieces of the Eleusinia interface: icons, portraits, emblems, dialogs and ornaments.
 import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useRef, useState } from 'react'
-import { type Drawing, type Weave, WEAVES, banner, bytesOf, defaultWeave, picture, tones } from '../shared/mark'
+import { type Drawing, type Theme, type Weave, WEAVES, banner, bytesOf, defaultWeave, picture, themeScrim, tones } from '../shared/mark'
 import { type Banner, type GifRef, type Group, type Key, MAX_MEDIA, type Profile, type ServerView } from '../shared/protocol'
 import { api } from './common'
 import { GifPicker, type Picked, gifFile } from './Gifs'
@@ -238,6 +238,46 @@ export function GroupEmblem({ g, size = 32 }: { g: Pick<Group, 'id' | 'name' | '
 // A banner woven from a key or id (shared/mark.ts); fills its parent.
 export function Woven({ id, weave, tall }: { id: string; weave?: Weave; tall?: boolean }) {
   return <Drawn className="woven" d={banner(id, weave, !tall)} slice />
+}
+
+// A profile's theme behind the whole card (design/mockups/court-profile.html, 3): its weave at the chosen strength
+// under a scrim of the card's own colour (themeScrim), moving only by transform or opacity. It stops while off screen,
+// while the window is hidden, for reduced motion (hall.css), and with `still`.
+export function ThemeLayer({ k, theme, still }: { k: Key; theme?: Theme; still?: boolean }) {
+  const ref = useRef<HTMLSpanElement>(null)
+  const [seen, setSeen] = useState(true)
+  const [shown, setShown] = useState(!document.hidden)
+  useEffect(() => {
+    const el = ref.current
+    if (!el || !theme?.fx) return
+    // Looked at once a second rather than with an IntersectionObserver, which in testing kept the place a card
+    // had before it was positioned (below the window) and never said when it moved into view
+    const look = () => {
+      const r = el.getBoundingClientRect()
+      setSeen(r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth)
+    }
+    look()
+    const every = setInterval(look, 1000)
+    const vis = () => setShown(!document.hidden)
+    document.addEventListener('visibilitychange', vis)
+    return () => (clearInterval(every), document.removeEventListener('visibilitychange', vis))
+  }, [theme?.fx])
+  if (!theme) return null
+  const moving = theme.fx && !still && seen && shown
+  return (
+    <span
+      ref={ref}
+      className={`profile-theme ${theme.fx ? `fx-${theme.fx} d-${Math.round(theme.depth / 10)}` : ''} ${moving ? '' : 'paused'}`}
+      aria-hidden="true"
+      style={{ ['--op' as string]: theme.op / 100, ['--scrim' as string]: `${Math.round(themeScrim(theme.op) * 100)}%`, ['--spd' as string]: theme.speed }}
+    >
+      <span className="theme-weave">
+        <span className="theme-move">
+          <Woven id={k} weave={{ kind: theme.kind, shift: theme.shift }} tall />
+        </span>
+      </span>
+    </span>
+  )
 }
 
 // A picture's colour, the most saturated pixels weighing most, brought to a lightness both themes read well

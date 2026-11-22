@@ -251,30 +251,56 @@ body {
   transform: none;
 }
 
-/* ---------- A server's banner behind its name ---------- */
-.server-head {
+/* ---------- A server's banner behind its name (design/mockups/court-profile.html, 1) ---------- */
+/* 172 px over the top of the column, edge to edge; its last 56 px fade into the column's own colour (--abyss-2, the
+   aside background above), so there is no edge in either theme. The channels start below it and scroll up under the
+   fade, which fades them out too. */
+aside.server-side {
   position: relative;
-  height: 96px;
+  --banner-h: 172px;
+  --banner-fade: 56px;
+}
+.server-head {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
+  height: var(--banner-h);
   align-items: flex-end;
-  padding-bottom: 12px;
-  border-bottom-color: transparent;
+  padding: 0 14px calc(var(--banner-fade) + 6px);
+  border-bottom: 0;
   isolation: isolate;
   color: #fff;
 }
-.server-head .icon {
-  color: rgb(255 255 255 / 0.8);
+.server-head::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  background: linear-gradient(180deg, var(--abyss-2) calc(100% - var(--banner-fade)), transparent);
 }
-/* It runs on below the head, behind the first channel row, and fades into the column; the channels paint over it */
+.server-head .icon {
+  color: rgb(255 255 255 / 0.85);
+  flex: none;
+}
 .server-banner {
   position: absolute;
-  inset: 0 0 -48px;
+  inset: 0;
   z-index: -1;
   overflow: hidden;
-  mask-image: linear-gradient(180deg, #000 55%, transparent);
   pointer-events: none;
 }
-aside.server-side .channels {
-  position: relative;
+.server-head .server-banner {
+  mask-image: linear-gradient(180deg, #000 calc(100% - var(--banner-fade)), transparent);
+}
+/* The scrim: the name reads on any picture, a white one too */
+.server-banner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgb(10 12 16 / calc(var(--dark) * 0.006)), rgb(10 12 16 / calc(0.35 + var(--dark) * 0.008)));
+}
+.server-head .server-banner::after {
+  background: linear-gradient(180deg, rgb(10 12 16 / calc(var(--dark) * 0.004)) 15%, rgb(10 12 16 / calc(0.5 + var(--dark) * 0.004)) calc(100% - var(--banner-fade)));
 }
 .server-banner img {
   position: absolute;
@@ -283,11 +309,10 @@ aside.server-side .channels {
   height: 100%;
   object-fit: cover;
 }
-.server-banner::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, rgb(10 12 16 / calc(var(--dark) * 0.006)), rgb(10 12 16 / calc(0.35 + var(--dark) * 0.008)));
+aside.server-side .channels {
+  position: relative;
+  padding-top: var(--banner-h);
+  scrollbar-width: none;
 }
 .server-head:hover,
 .server-head.open {
@@ -297,9 +322,31 @@ aside.server-side .channels {
 .server-head.open .server-banner {
   filter: brightness(1.12);
 }
+.server-head .server-title {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
 .server-head .server-name {
-  font-size: 17px;
-  text-shadow: 0 1px 12px rgb(0 0 0 / 0.4);
+  font: var(--type-title);
+  white-space: normal;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  text-shadow: 0 1px 12px rgb(0 0 0 / 0.45);
+}
+.server-head .server-count {
+  font: var(--type-stat);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.88;
+  text-shadow: 0 1px 8px rgb(0 0 0 / 0.5);
+}
+.server-head .avatar,
+.server-head .group-emblem {
+  align-self: flex-end;
 }
 
 /* ---------- Profiles: a banner woven from the key when there is no game art or picture ---------- */
@@ -2132,52 +2179,99 @@ h2.in-chat {
   margin-top: 8px;
 }
 
-/* ---------- The week of play ---------- */
-.week-bars {
+/* ---------- Two weeks of play (design/mockups/court-profile.html, 2) ---------- */
+.play-days {
   display: grid;
-  grid-template-columns: repeat(7, 1fr);
   gap: 6px;
-  height: 72px;
+  margin: 10px 0 4px;
+  --play: var(--person, var(--accent));
 }
-.week-day {
+.play-days h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0;
+  font: var(--type-label);
+  color: var(--silver-2, var(--mist));
+  letter-spacing: 0;
+  text-transform: none;
+}
+.play-sum {
+  margin-left: auto;
+  font: var(--type-stat);
+  font-variant-numeric: tabular-nums;
+  color: var(--mist);
+}
+.play-cells {
+  position: relative;
   display: grid;
-  grid-template-rows: 1fr auto;
+  grid-template-columns: repeat(14, 1fr);
   gap: 3px;
-  justify-items: center;
 }
-.week-stack {
-  display: flex;
-  flex-direction: column-reverse;
-  justify-content: flex-start;
-  width: 100%;
-  max-width: 18px;
-  height: 100%;
-  overflow: hidden;
-  border-radius: 3px;
-  background: var(--obsidian-2);
-}
-.week-stack i {
-  display: block;
-  width: 100%;
-  min-height: 2px;
-  transition: height 600ms var(--ease);
-}
-.week-day small {
-  color: var(--mist-2);
-  font-size: 10.5px;
-}
-.week-legend {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 12px;
-  font-size: 12px;
-}
-.week-legend i {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  margin-right: 4px;
+.play-cell {
+  aspect-ratio: 1;
   border-radius: 2px;
+  background: var(--lvl);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--silver) 10%, transparent);
+  outline: none;
+}
+.play-cell[data-l='0'] { --lvl: color-mix(in oklab, var(--line) 80%, transparent); }
+.play-cell[data-l='1'] { --lvl: color-mix(in oklab, var(--play) 32%, transparent); }
+.play-cell[data-l='2'] { --lvl: color-mix(in oklab, var(--play) 56%, transparent); }
+.play-cell[data-l='3'] { --lvl: color-mix(in oklab, var(--play) 78%, transparent); }
+.play-cell[data-l='4'] { --lvl: var(--play); }
+.play-cell.today {
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--silver) 10%, transparent), 0 0 0 1.5px var(--abyss-2), 0 0 0 3px color-mix(in srgb, var(--silver) 40%, transparent);
+}
+.play-cell:focus-visible {
+  box-shadow: var(--focus-ring);
+}
+/* Above the cells, kept inside them so it never runs off a narrow card */
+.play-tip {
+  position: absolute;
+  z-index: 5;
+  bottom: calc(100% + 10px);
+  width: 200px;
+  left: clamp(0px, calc(var(--at) * 100% - 24px), calc(100% - 200px));
+  display: grid;
+  gap: 2px;
+  padding: 9px 12px;
+  background: var(--obsidian-2);
+  color: var(--silver);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow-1);
+  font: var(--type-meta);
+  pointer-events: none;
+}
+.play-tip b {
+  font: var(--type-tip);
+  margin-bottom: 2px;
+}
+.play-tip > span {
+  display: flex;
+  gap: 10px;
+}
+.play-tip > span > span:last-child {
+  margin-left: auto;
+  color: var(--mist);
+  font-variant-numeric: tabular-nums;
+}
+.play-tip-arrow {
+  position: absolute;
+  z-index: 6;
+  bottom: calc(100% + 4px);
+  left: calc(var(--at) * 100% - 6px);
+  width: 12px;
+  height: 6px;
+  background: var(--obsidian-2);
+  clip-path: polygon(0 0, 100% 0, 50% 100%);
+  pointer-events: none;
+}
+.play-empty {
+  margin: 0;
+  font: var(--type-quiet);
+  color: var(--mist);
 }
 
 /* ---------- The showcase ---------- */
@@ -2382,4 +2476,205 @@ dialog.gif-picker[open] > .dialog-body {
 }
 .gif-credit {
   margin-left: auto;
+}
+
+/* ---------- A profile theme (design/mockups/court-profile.html, 3) ---------- */
+/* Behind the whole card: the weave at --op under a scrim of the card's colour (--scrim, themeScrim in mark.ts), so text
+   keeps AA contrast. It moves only by transform (Drift) or opacity (Breathe), and is still under reduced motion. */
+/* The small card is already fixed, which holds the layer; the others need a position for it */
+.profile-pop {
+  isolation: isolate;
+}
+.card-dialog .dialog-body,
+.preview-card {
+  position: relative;
+  isolation: isolate;
+}
+.profile-pop:has(> .profile-theme),
+.preview-card:has(> .profile-theme) {
+  overflow: hidden;
+}
+.profile-theme {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.profile-theme::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: color-mix(in srgb, var(--obsidian-2) var(--scrim), transparent);
+}
+.theme-weave {
+  position: absolute;
+  inset: -20%;
+  opacity: var(--op);
+}
+.theme-weave .woven {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+/* One keyframes per Depth step (theme.depth / 10), holding only numbers: keyframes reading a variable can keep an
+   animation on the main thread, these run on the compositor. Duration is the only variable (Speed). */
+/* Stepped about twice a second: it moves well under a pixel a second, so 60 frames would only cost the GPU */
+.profile-theme.fx-drift .theme-move {
+  animation: calc(60s / var(--spd)) steps(120) infinite alternate;
+}
+.profile-theme.fx-breathe .theme-move {
+  animation: calc(12s / var(--spd)) steps(24) infinite alternate;
+}
+.profile-theme.paused .theme-move {
+  animation-play-state: paused;
+}
+.theme-move {
+  position: absolute;
+  inset: 0;
+}
+/* Its own layer, drawn once and then only moved or faded */
+.profile-theme.fx-drift:not(.paused) .theme-move {
+  will-change: transform;
+}
+.profile-theme.fx-breathe:not(.paused) .theme-move {
+  will-change: opacity;
+}
+.fx-drift.d-1 .theme-move { animation-name: theme-drift-1; }
+@keyframes theme-drift-1 { from { transform: translate3d(-1.2%, 0, 0); } to { transform: translate3d(1.2%, 0.48%, 0); } }
+.fx-breathe.d-1 .theme-move { animation-name: theme-breathe-1; }
+@keyframes theme-breathe-1 { from { opacity: 0.9; } to { opacity: 1; } }
+.fx-drift.d-2 .theme-move { animation-name: theme-drift-2; }
+@keyframes theme-drift-2 { from { transform: translate3d(-2.4%, 0, 0); } to { transform: translate3d(2.4%, 0.96%, 0); } }
+.fx-breathe.d-2 .theme-move { animation-name: theme-breathe-2; }
+@keyframes theme-breathe-2 { from { opacity: 0.8; } to { opacity: 1; } }
+.fx-drift.d-3 .theme-move { animation-name: theme-drift-3; }
+@keyframes theme-drift-3 { from { transform: translate3d(-3.6%, 0, 0); } to { transform: translate3d(3.6%, 1.44%, 0); } }
+.fx-breathe.d-3 .theme-move { animation-name: theme-breathe-3; }
+@keyframes theme-breathe-3 { from { opacity: 0.7; } to { opacity: 1; } }
+.fx-drift.d-4 .theme-move { animation-name: theme-drift-4; }
+@keyframes theme-drift-4 { from { transform: translate3d(-4.8%, 0, 0); } to { transform: translate3d(4.8%, 1.92%, 0); } }
+.fx-breathe.d-4 .theme-move { animation-name: theme-breathe-4; }
+@keyframes theme-breathe-4 { from { opacity: 0.6; } to { opacity: 1; } }
+.fx-drift.d-5 .theme-move { animation-name: theme-drift-5; }
+@keyframes theme-drift-5 { from { transform: translate3d(-6.0%, 0, 0); } to { transform: translate3d(6.0%, 2.4%, 0); } }
+.fx-breathe.d-5 .theme-move { animation-name: theme-breathe-5; }
+@keyframes theme-breathe-5 { from { opacity: 0.5; } to { opacity: 1; } }
+.fx-drift.d-6 .theme-move { animation-name: theme-drift-6; }
+@keyframes theme-drift-6 { from { transform: translate3d(-7.2%, 0, 0); } to { transform: translate3d(7.2%, 2.88%, 0); } }
+.fx-breathe.d-6 .theme-move { animation-name: theme-breathe-6; }
+@keyframes theme-breathe-6 { from { opacity: 0.4; } to { opacity: 1; } }
+.fx-drift.d-7 .theme-move { animation-name: theme-drift-7; }
+@keyframes theme-drift-7 { from { transform: translate3d(-8.4%, 0, 0); } to { transform: translate3d(8.4%, 3.36%, 0); } }
+.fx-breathe.d-7 .theme-move { animation-name: theme-breathe-7; }
+@keyframes theme-breathe-7 { from { opacity: 0.3; } to { opacity: 1; } }
+.fx-drift.d-8 .theme-move { animation-name: theme-drift-8; }
+@keyframes theme-drift-8 { from { transform: translate3d(-9.6%, 0, 0); } to { transform: translate3d(9.6%, 3.84%, 0); } }
+.fx-breathe.d-8 .theme-move { animation-name: theme-breathe-8; }
+@keyframes theme-breathe-8 { from { opacity: 0.2; } to { opacity: 1; } }
+.fx-drift.d-9 .theme-move { animation-name: theme-drift-9; }
+@keyframes theme-drift-9 { from { transform: translate3d(-10.8%, 0, 0); } to { transform: translate3d(10.8%, 4.32%, 0); } }
+.fx-breathe.d-9 .theme-move { animation-name: theme-breathe-9; }
+@keyframes theme-breathe-9 { from { opacity: 0.1; } to { opacity: 1; } }
+.fx-drift.d-10 .theme-move { animation-name: theme-drift-10; }
+@keyframes theme-drift-10 { from { transform: translate3d(-12.0%, 0, 0); } to { transform: translate3d(12.0%, 4.8%, 0); } }
+.fx-breathe.d-10 .theme-move { animation-name: theme-breathe-10; }
+@keyframes theme-breathe-10 { from { opacity: 0.0; } to { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .profile-theme .theme-move {
+    animation: none !important;
+  }
+}
+/* What lies over it lets it through: the card's own panels were opaque */
+.profile-pop:has(> .profile-theme) .pop-body,
+.card-dialog .dialog-body:has(> .profile-theme) .card,
+.preview-card:has(> .profile-theme) .preview-body {
+  background: transparent;
+}
+
+/* Settings, My profile, Profile theme */
+.theme-edit {
+  display: grid;
+  gap: 8px;
+  margin-top: 18px;
+}
+.theme-edit h3 {
+  margin: 0;
+  font: var(--type-section);
+  color: var(--silver);
+  text-transform: none;
+  letter-spacing: 0;
+}
+.theme-hint {
+  margin: 0 0 6px;
+  font: var(--type-meta);
+  color: var(--mist);
+  max-width: 60ch;
+}
+.theme-label {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 10px;
+  font: var(--type-label);
+  color: var(--silver-2);
+}
+.theme-label output {
+  margin-left: auto;
+  font: var(--type-stat);
+  font-variant-numeric: tabular-nums;
+  color: var(--mist);
+}
+.theme-weaves {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 8px;
+}
+.theme-weaves .weave-kind {
+  height: 58px;
+}
+.theme-weaves .weave-kind.none {
+  display: grid;
+  place-items: center;
+  background: var(--obsidian-3);
+}
+.theme-weaves .weave-kind.none span {
+  position: static;
+  color: var(--silver-2);
+  text-shadow: none;
+}
+.theme-slider {
+  display: grid;
+  gap: 4px;
+}
+.theme-slider input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+}
+.theme-slider.off,
+.theme-off {
+  opacity: 0.45;
+}
+.theme-tones {
+  height: 8px;
+  border-radius: 4px;
+  background: linear-gradient(90deg, oklch(0.7 0.1 0), oklch(0.7 0.1 60), oklch(0.7 0.1 120), oklch(0.7 0.1 180), oklch(0.7 0.1 240), oklch(0.7 0.1 300), oklch(0.7 0.1 360));
+}
+.theme-edit .segmented {
+  justify-self: start;
+}
+/* The full card aligns its children to the start, which would shrink the grid to nothing */
+.card-dialog .card .play-days,
+.person-panel .play-days,
+.preview-body .play-days {
+  justify-self: stretch;
+  width: 100%;
+}
+.settings-section .theme-edit h3 {
+  font: var(--type-section);
+  color: var(--silver);
+}
+.theme-weaves .weave-kind {
+  width: auto;
+  min-width: 0;
 }

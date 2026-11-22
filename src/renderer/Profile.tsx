@@ -6,11 +6,12 @@ import { createPortal } from 'react-dom'
 import type React from 'react'
 import { type Key, type Profile, type State, MAX_TEXT, dmId, statusOf } from '../shared/protocol'
 import { routeWords } from '../shared/reach'
+import { PlayDays } from './Person'
 import { GameGlance } from './Activity'
 import * as call from './call'
 import { type People, type Run, api } from './common'
 import { PersonVolume, useSpeaking } from './Media'
-import { Avatar, BannerArt, Icon, VerifiedSeal, useAccent } from './ui'
+import { Avatar, BannerArt, Icon, ThemeLayer, VerifiedSeal, useAccent } from './ui'
 
 // The banner leans a little toward the pointer while it is over it
 const tilt = (e: React.MouseEvent<HTMLElement>) => {
@@ -98,6 +99,7 @@ export function ProfilePop({ k, from, st, people, run, close, expand, chat, edit
       className={`profile-pop ${at ? 'placed' : ''} from-${at?.side ?? 'right'} ${online ? 'online' : ''} ${inCall && call.speaking.has(k) ? 'speaking' : ''}`}
       style={{ ...(at ? { left: at.left, top: at.top } : { visibility: 'hidden' }), ['--person' as string]: accent }}
     >
+      <ThemeLayer k={k} theme={p.theme} />
       <ProfileBanner st={st} k={k} p={p} />
       <div className="pop-head">
         <span className="pop-portrait">
@@ -112,6 +114,7 @@ export function ProfilePop({ k, from, st, people, run, close, expand, chat, edit
           {name} {st.settings.verified?.includes(k) && <VerifiedSeal />}
         </h2>
         {statusOf(p) && <p className="pop-status">{statusOf(p)!.text}</p>}
+        <PlayDays st={st} k={k} />
         <p className="pop-handle">
           {p.handle || 'No friend ID yet'}
           {me && ' (you)'}

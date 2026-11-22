@@ -31,7 +31,8 @@ export type Game = {
   destiny?: Destiny // Destiny 2 through the Bungie.net API (shared/destiny.ts)
 }
 // now: the sender's clock when sent, so `since` can be moved onto the receiver's clock.
-// week: minutes played per game on each of the last 7 days (d: 0 today, 1 yesterday...), counted by their own app
+// week: minutes played per game on each of the last 14 days (d: 0 today, 1 yesterday...), counted by their own app;
+// an empty list says they share it and played nothing, no list that they do not share it (or run an older copy)
 export type Week = { d: number; g: string; m: number }[]
 export type Activity = { now: number; game?: Game; week?: Week }
 
@@ -57,7 +58,7 @@ export const sharing = (set: ActivitySettings | undefined) => set?.games !== fal
 // Only what the user chose to share leaves this computer.
 export function shareable(a: Activity, set: ActivitySettings | undefined): Activity {
   if (!sharing(set)) return { now: a.now }
-  const week = set?.playtime !== false && a.week?.length ? { week: a.week } : {}
+  const week = set?.playtime !== false && a.week ? { week: a.week } : {}
   if (!a.game) return { now: a.now, ...week }
   const g: Game = { ...a.game }
   if (set?.playtime === false) delete g.played
@@ -73,25 +74,46 @@ const int = (v: unknown, min: number, max: number) => (Number.isSafeInteger(v) &
 const DAY = 864e5
 
 // A friend's activity, checked and capped like a profile. Null when there is nothing valid to show.
-// A friend's week, capped: at most 3 games a day for 7 days, minutes within a day
+export const PLAY_DAYS = 14
+export const PLAY_GAMES = 3 // per day
+// A friend's two weeks, capped: at most 3 games a day for 14 days, and no more than a day's minutes in a day. Older
+// copies read only the first 21 entries and days up to 6, so they still show the last week.
 export function cleanWeek(w: unknown): Week {
   if (!Array.isArray(w)) return []
-  return w.slice(0, 21).flatMap((x: any) => {
-    const d = int(x?.d, 0, 6), m = int(x?.m, 1, 1440), g = str(x?.g, 100)
-    return d === undefined || !m || !g ? [] : [{ d, g, m }]
+  const perDay = new Map<number, number>(), used = new Map<number, number>()
+  return w.slice(0, PLAY_DAYS * PLAY_GAMES).flatMap((x: any) => {
+    const d = int(x?.d, 0, PLAY_DAYS - 1), m = int(x?.m, 1, 1440), g = str(x?.g, 100)?.replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, '').trim()
+    if (d === undefined || !m || !g || (perDay.get(d) ?? 0) >= PLAY_GAMES || (used.get(d) ?? 0) + m > 1440) return []
+    perDay.set(d, (perDay.get(d) ?? 0) + 1)
+    used.set(d, (used.get(d) ?? 0) + m)
+    return [{ d, g, m }]
   })
+}
+// How strongly a day's cell shows: a fixed scale, so everyone's grid means the same (0 none, 1 under an hour,
+// 2 one to two, 3 two to four, 4 four or more)
+export const playLevel = (minutes: number) => (minutes <= 0 ? 0 : minutes < 60 ? 1 : minutes < 120 ? 2 : minutes < 240 ? 3 : 4)
+// The day `d` calendar days before `now`'s, in local time: stepping by 24 h would land twice on a 25-hour day
+export const daysBack = (now: number, d: number) => {
+  const t = new Date(now)
+  return new Date(t.getFullYear(), t.getMonth(), t.getDate() - d, 12).getTime()
 }
 
 // Our own minutes per game per day (YYYY-MM-DD), as node.ts keeps them, turned into the week we share: the 3 games
 // played most each day, rounded to 5 minutes so the shared copy changes only every few minutes
 export function weekOf(played: Record<string, Record<string, number>>, now = Date.now()): Week {
   const out: Week = []
-  for (let d = 0; d < 7; d++) {
-    const day = dayKey(now - d * DAY)
-    const games = Object.entries(played[day] ?? {}).sort((a, b) => b[1] - a[1]).slice(0, 3)
+  for (let d = 0; d < PLAY_DAYS; d++) {
+    const day = dayKey(daysBack(now, d))
+    const games = Object.entries(played[day] ?? {}).sort((a, b) => b[1] - a[1]).slice(0, PLAY_GAMES)
     for (const [g, m] of games) if (m >= 5) out.push({ d, g, m: Math.round(m / 5) * 5 })
   }
   return out
+}
+// Our record kept to the last 14 days, the oldest dropped (keys compare as text, YYYY-MM-DD)
+export function prunePlayed(played: Record<string, Record<string, number>>, now = Date.now()) {
+  const oldest = dayKey(daysBack(now, PLAY_DAYS - 1))
+  for (const d of Object.keys(played)) if (d < oldest) delete played[d]
+  return played
 }
 export const dayKey = (t: number) => {
   const d = new Date(t)
@@ -103,7 +125,7 @@ export function cleanActivity(x: unknown, now = Date.now()): Activity | null {
   const a = x as Record<string, any>
   const shift = Number.isFinite(a.now) ? now - a.now : 0
   const week = cleanWeek(a.week)
-  const base = week.length ? { now, week } : { now }
+  const base = Array.isArray(a.week) ? { now, week } : { now }
   const g = a.game
   if (!g || typeof g !== 'object') return base
   const name = str(g.name, 100)
