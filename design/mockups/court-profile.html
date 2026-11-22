@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Eleusinia: banner, play grid, profile theme</title>
+<!-- Mockup next to court.html, same tokens and type. Static page, not part of the build: fonts from Google Fonts here,
+     the app bundles them. ?s=1..4 shows one section, ?t=night the Ink theme (court's night). -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,400..800;1,6..96,400..600&family=Alegreya+Sans:ital,wght@0,400;0,500;0,700;0,800;1,400&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+/* ---------- court.html's tokens, unchanged: Ivory (day) and Ink (night) ---------- */
+.court { --ground:#ebe4d4; --paper:#f5f0e5; --plaster:#e0d6c2; --stone:#cbbea6; --ink:#1f1b17; --ink-2:#4c453c; --ink-3:#6f675a;
+  --shu:#a63a2b; --gold:#957434; --ai:#2d4062; --moss:#5a6845; --seam:#fff6dc; --seam-glow:rgb(255 214 140 / .55);
+  --shade:0 1px 0 rgb(255 255 255 / .6) inset, 0 -1px 0 rgb(80 60 30 / .08) inset; --lift:0 18px 40px -18px rgb(70 50 20 / .35); color-scheme:light }
+.court.night { --ground:#0f121a; --paper:#151a24; --plaster:#1c2230; --stone:#2a3142; --ink:#ece3d1; --ink-2:#b7ae9c; --ink-3:#8f887b;
+  --shu:#d65a43; --gold:#cfae69; --ai:#93a9cf; --moss:#9fb07f; --seam:#ffe7b0; --seam-glow:rgb(255 196 110 / .5);
+  --shade:0 1px 0 rgb(255 255 255 / .04) inset, 0 -1px 0 rgb(0 0 0 / .4) inset; --lift:0 22px 50px -20px rgb(0 0 0 / .8); color-scheme:dark }
+/* The type plan's roles (design/type-plan.md), as the app would name them */
+.court { --f-display:'Bodoni Moda', Georgia, serif; --f-text:'Alegreya Sans', 'Segoe UI', 'Noto Sans', system-ui, sans-serif; --f-mono:'IBM Plex Mono', Consolas, monospace }
+
+* { box-sizing:border-box }
+html { background:#3a3631 }
+body { margin:0; padding:32px 0 80px; font:15px/1.45 'Alegreya Sans', sans-serif; color:#efe9dd }
+.page { width:1280px; margin:0 auto }
+.page-head { display:flex; align-items:end; gap:24px; margin-bottom:28px }
+.page-head h1 { margin:0; font:500 44px/1 'Bodoni Moda', serif }
+.page-head p { margin:0; max-width:70ch; color:#cfc6b6 }
+.switch-theme { margin-left:auto; display:flex; border:1px solid #6b6357 }
+.switch-theme button { font:500 14px 'Alegreya Sans'; background:none; border:0; color:#cfc6b6; padding:8px 14px; cursor:pointer }
+.switch-theme button[aria-pressed='true'] { background:#efe9dd; color:#1f1b17 }
+section.mock { margin:0 0 64px }
+section.mock > h2 { margin:0 0 6px; font:500 26px 'Bodoni Moda', serif }
+section.mock > .why { margin:0 0 16px; max-width:115ch; color:#cfc6b6 }
+section.mock > .why b { color:#fff; font-weight:700 }
+.cap { font:italic 400 15px 'Bodoni Moda'; color:#cfc6b6; margin:10px 0 6px }
+
+/* ---------- Pieces shared by the frames ---------- */
+.court { background:var(--ground); color:var(--ink); font:400 15.5px/1.45 var(--f-text) }
+.label { display:flex; align-items:baseline; gap:6px; padding:14px 10px 6px; font:italic 400 15px var(--f-display); color:var(--ink-2) }
+.label .n { font:500 13px var(--f-text); color:var(--ink-3); font-style:normal }
+.row { position:relative; display:flex; align-items:center; gap:10px; padding:6px 10px; color:var(--ink-2); white-space:nowrap }
+.row.sel { background:var(--plaster); color:var(--ink) }
+.row.sel::before { content:''; position:absolute; left:0; top:6px; bottom:6px; width:2px; background:var(--seam); box-shadow:0 0 10px 1px var(--seam-glow) }
+.row .nm { font-weight:500; overflow:hidden; text-overflow:ellipsis }
+.row.unread .nm { font-weight:700; color:var(--ink) }
+.hash { width:18px; text-align:center; color:var(--ink-3); font:400 17px var(--f-display) }
+.count { margin-left:auto; min-width:18px; height:18px; border-radius:9px; background:var(--shu); color:#fff; font:700 11px/18px var(--f-text); text-align:center; font-variant-numeric:tabular-nums }
+.btn { white-space:nowrap; display:inline-flex; align-items:center; gap:8px; height:34px; padding:0 14px; font:700 14px var(--f-text); letter-spacing:.01em; border:0; color:var(--ink); background:var(--plaster);
+  clip-path:polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 0 100%) }
+.btn.ink { background:var(--ink); color:var(--paper) }
+.btn.gold { background:var(--gold); color:#1b160e }
+.av { flex:none; border-radius:50%; overflow:hidden; display:block }
+.av svg { display:block; width:100%; height:100% }
+
+/* ---------- 1. Server column ---------- */
+.srv { position:relative; overflow:hidden; display:grid; grid-template-columns:72px var(--colw) 1fr; grid-template-rows:36px 1fr 58px; box-shadow:0 30px 70px rgb(0 0 0 / .45) }
+.srv .tb { grid-column:1 / -1; display:flex; align-items:center; padding-left:14px; gap:10px; border-bottom:1px solid var(--stone); background:var(--paper); font:600 15px/1 var(--f-display); position:relative; z-index:2 }
+.srv .tb i { font-style:italic; font-weight:400; color:var(--ink-3) }
+.srv .rail { grid-row:2 / 4; background:var(--paper); border-right:1px solid var(--stone); display:flex; flex-direction:column; align-items:center; gap:8px; padding:12px 0 }
+.srv .rail .t { width:44px; height:44px; border-radius:50%; overflow:hidden }
+.srv .rail .t.sel { outline:2px solid var(--gold); outline-offset:3px }
+.srv .col { --col-bg:color-mix(in srgb, var(--paper) 55%, var(--ground)); grid-row:2; background:var(--col-bg); border-right:1px solid var(--stone); position:relative; overflow:hidden; display:flex; flex-direction:column; min-height:0 }
+.srv .bar { grid-column:2; display:flex; align-items:center; gap:10px; padding:0 12px; background:var(--paper); border-top:1px solid var(--stone); border-right:1px solid var(--stone) }
+.srv .bar b { font-weight:700 } .srv .bar small { display:block; color:var(--ink-3); font-size:13px }
+.srv .main { grid-row:2 / 4; display:flex; flex-direction:column; min-width:0 }
+.srv .mh { height:52px; flex:none; display:flex; align-items:center; gap:10px; padding:0 22px; border-bottom:1px solid var(--stone) }
+.srv .mh h3 { margin:0; font:600 22px/1 var(--f-display) }
+.srv .mh span { color:var(--ink-3); font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+.srv .chat { flex:1; padding:18px 22px; display:flex; flex-direction:column; justify-content:flex-end; gap:12px; color:var(--ink-2) }
+.srv .chat b { color:var(--ink) } .srv .chat time { color:var(--ink-3); font-size:13px; margin-left:6px }
+/* The proposed head: 172 px, edge to edge, the name in display type at its foot over a scrim; channels start below it */
+.shead { position:absolute; left:0; right:0; top:0; z-index:1; height:var(--bh); display:flex; align-items:flex-end; gap:10px; padding:0 14px 62px; color:#fff; isolation:isolate }
+.shead .art { position:absolute; inset:0; z-index:-1; overflow:hidden; mask-image:linear-gradient(180deg, #000 calc(100% - 56px), transparent) }
+.shead::before { content:''; position:absolute; inset:0; z-index:-2; background:linear-gradient(180deg, var(--col-bg) calc(100% - 56px), transparent) } /* what scrolls under the fade fades with it; at rest the fade ends in the column colour */
+.shead .art svg { width:100%; height:100%; display:block }
+.shead .art::after { content:''; position:absolute; inset:0; background:linear-gradient(180deg, rgb(10 12 16 / .05) 20%, rgb(10 12 16 / .55) calc(100% - 56px)) }
+.shead .name { flex:1; min-width:0; display:grid }
+.shead .name b { font:600 22px/1.1 var(--f-display); display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; text-shadow:0 1px 12px rgb(0 0 0 / .45) }
+.shead .name small { font:500 13px var(--f-text); opacity:.85; margin-top:3px }
+.shead .chev { flex:none; opacity:.85; margin-bottom:4px }
+.srv .channels { flex:1; min-height:0; overflow:auto; padding:var(--bh) 10px 12px; position:relative; scrollbar-width:none }
+.grid2 { display:grid; grid-template-columns:1fr 1fr; gap:28px }
+
+/* ---------- 2. The fourteen days ---------- */
+.days { display:grid; gap:6px; margin:12px 0 2px }
+.days .head { display:flex; align-items:baseline; gap:8px }
+.days .head h4 { margin:0; font:italic 400 15px var(--f-display); color:var(--ink-2) }
+.days .head .sum { margin-left:auto; font:500 13px var(--f-text); color:var(--ink-3); font-variant-numeric:tabular-nums }
+.cells { position:relative; display:grid; grid-template-columns:repeat(14, 1fr); gap:3px }
+.cell { aspect-ratio:1; border:0; padding:0; border-radius:2px; background:var(--lvl); box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--ink) 10%, transparent); cursor:default }
+.cell[data-l='0'] { --lvl:color-mix(in oklab, var(--stone) 45%, var(--paper)) }
+.cell[data-l='1'] { --lvl:color-mix(in oklab, var(--person) 30%, var(--paper)) }
+.cell[data-l='2'] { --lvl:color-mix(in oklab, var(--person) 55%, var(--paper)) }
+.cell[data-l='3'] { --lvl:color-mix(in oklab, var(--person) 78%, var(--paper)) }
+.cell[data-l='4'] { --lvl:var(--person) }
+.cell.today { box-shadow:inset 0 0 0 1px color-mix(in srgb, var(--ink) 10%, transparent), 0 0 0 1.5px var(--paper), 0 0 0 3px color-mix(in srgb, var(--ink) 35%, transparent) }
+.cell:focus-visible, .cell.focus { outline:2px solid var(--ai); outline-offset:2px }
+.tip { position:absolute; z-index:5; bottom:calc(100% + 10px); width:200px; padding:10px 12px; background:var(--paper); color:var(--ink); box-shadow:var(--lift), 0 0 0 1px var(--stone); font:400 13.5px/1.4 var(--f-text) }
+.tip b { display:block; font:600 14px var(--f-display); margin-bottom:4px }
+.tip div { display:flex; gap:8px } .tip div span:last-child { margin-left:auto; color:var(--ink-3); font-variant-numeric:tabular-nums }
+.tip::after { content:''; position:absolute; top:100%; left:var(--arrow, 50%); border:6px solid transparent; border-top-color:var(--paper) }
+/* Recently played: the full card only, the last five games, newest first */
+.recent { margin-top:20px }
+.recent h4 { margin:0 0 8px; font:italic 400 15px var(--f-display); color:var(--ink-2) }
+.recent ol { list-style:none; margin:0; padding:0; display:grid; gap:2px }
+.recent li { display:flex; align-items:center; gap:12px; padding:6px 8px; margin:0 -8px }
+.recent li:hover { background:color-mix(in srgb, var(--plaster) 70%, transparent) }
+.recent .art { position:relative; width:72px; height:34px; flex:none; overflow:hidden; box-shadow:var(--shade) }
+.recent .art::before { content:''; position:absolute; inset:0; background:repeating-linear-gradient(90deg, rgb(255 255 255 / .06) 0 1px, transparent 1px 12px) }
+.recent .g { min-width:0; display:grid }
+.recent .g b { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis }
+.recent .g span { font-size:13.5px; color:var(--ink-3) }
+.recent time { margin-left:auto; font-size:13px; color:var(--ink-3); font-variant-numeric:tabular-nums; white-space:nowrap }
+.art.cs2 { background:linear-gradient(160deg, #c9873e 0%, #5d4a33 40%, #23313a 100%) }
+.art.d2 { background:linear-gradient(170deg, #b9c7d6 0%, #5c6f8c 40%, #1c2233 100%) }
+.art.dota { background:linear-gradient(165deg, #c0563c 0%, #6a2a1d 45%, #1d0f0b 100%) }
+.art.mar { background:linear-gradient(165deg, #d8e24a 0%, #3b3f2a 50%, #121410 100%) }
+.art.hd { background:linear-gradient(160deg, #e7c64a 0%, #4a4232 50%, #16140f 100%) }
+.days .empty { font:italic 400 14px var(--f-display); color:var(--ink-3); margin:2px 0 0 }
+.days.off .cells { display:none }
+
+/* ---------- Profiles: mini and full, themed ---------- */
+.stage { padding:28px; display:flex; gap:28px; align-items:flex-start }
+.pop { position:relative; width:320px; background:var(--paper); box-shadow:var(--lift), 0 0 0 1px var(--stone); overflow:hidden; isolation:isolate }
+.pop .ban { position:relative; height:112px; overflow:hidden }
+.pop .ban svg { width:100%; height:100%; display:block }
+.pop .face { position:absolute; left:16px; top:66px; width:84px; height:84px; border-radius:50%; border:5px solid var(--paper); background:var(--paper); z-index:2 }
+.pop .body { position:relative; padding:44px 18px 18px }
+.pop .nm { margin:0; font:600 24px/1.1 var(--f-display) }
+.pop .status { margin:4px 0 0; color:var(--ink-2); font:italic 400 15px/1.35 var(--f-text) }
+.pop .handle { margin:6px 0 0; font:500 12.5px var(--f-mono); color:var(--ink-3) }
+.pop .about { margin:10px 0 0; color:var(--ink-2) }
+.pop .note { margin-top:14px; display:flex; height:40px; border:1px solid var(--stone); background:color-mix(in srgb, var(--ground) 70%, transparent); align-items:center; padding:0 12px; color:var(--ink-3) }
+.pop .glance { margin-top:12px; padding:10px 12px; background:color-mix(in srgb, var(--plaster) 80%, transparent); display:flex; gap:10px; align-items:center }
+.pop .glance b { display:block; font-weight:700 } .pop .glance span { font-size:13.5px; color:var(--ink-3) }
+.pop .glance .sc { margin-left:auto; font:600 24px/1 var(--f-display); font-variant-numeric:lining-nums }
+.full { width:620px }
+.full .ban { height:170px }
+.full .face { top:116px; width:112px; height:112px }
+.full .body { padding:60px 26px 22px }
+.full .nm { font-size:30px }
+.full .acts { position:absolute; right:22px; top:16px; display:flex; gap:8px }
+.full .tabs { display:flex; gap:22px; margin:18px 0 12px; border-bottom:1px solid var(--stone) }
+.full .tabs span { padding:8px 0; font:500 14.5px var(--f-text); color:var(--ink-3) }
+.full .tabs span.on { color:var(--ink); box-shadow:inset 0 -2px 0 var(--gold) }
+.full dl { display:grid; grid-template-columns:140px 1fr; gap:8px 12px; margin:0; font-size:14.5px }
+.full dt { color:var(--ink-3) }
+/* The theme: the weave behind the whole card at the chosen strength; text keeps a scrim, so it reads at any setting */
+.theme { position:absolute; inset:0; z-index:-1; overflow:hidden; pointer-events:none }
+.theme .layer { position:absolute; inset:-20%; opacity:var(--op) }
+.theme .layer svg { width:100%; height:100%; display:block }
+.theme::after { content:''; position:absolute; inset:0; background:color-mix(in srgb, var(--paper) var(--scrim), transparent) }
+.fx-drift .layer { animation:drift calc(60s / var(--spd)) linear infinite alternate }
+.fx-breathe .layer { animation:breathe calc(12s / var(--spd)) ease-in-out infinite alternate }
+@keyframes drift { from { transform:translate3d(calc(var(--amp) * -1), 0, 0) } to { transform:translate3d(var(--amp), calc(var(--amp) * .4), 0) } }
+@keyframes breathe { from { opacity:calc(var(--op) * (1 - var(--depth))) } to { opacity:var(--op) } }
+@media (prefers-reduced-motion: reduce) { .fx-drift .layer, .fx-breathe .layer { animation:none } }
+.paused .layer { animation-play-state:paused }
+
+/* ---------- 3. Settings: Profile theme ---------- */
+.set { display:grid; grid-template-columns:1fr 340px; gap:28px; padding:28px }
+.set h5 { margin:0 0 4px; font:500 20px var(--f-display) }
+.set .hint { color:var(--ink-3); font-size:14px; margin:0 0 16px; max-width:60ch }
+.set .lab { font:italic 400 15px var(--f-display); color:var(--ink-2); margin:18px 0 8px; display:flex; gap:8px; align-items:baseline }
+.set .lab output { margin-left:auto; font:500 13px var(--f-text); font-style:normal; color:var(--ink-3); font-variant-numeric:tabular-nums }
+.weaves { display:grid; grid-template-columns:repeat(5, 1fr); gap:8px }
+.weaves button { position:relative; height:58px; padding:0; border:0; overflow:hidden; background:var(--plaster); cursor:pointer; box-shadow:0 0 0 1px var(--stone) }
+.weaves button svg { width:100%; height:100%; display:block }
+.weaves button span { position:absolute; left:6px; bottom:4px; font:700 12px var(--f-text); color:#fff; text-shadow:0 1px 3px rgb(0 0 0 / .6) }
+.weaves button.none { display:grid; place-items:center; color:var(--ink-2); font:500 13px var(--f-text) }
+.weaves button[aria-pressed='true'] { box-shadow:0 0 0 2px var(--gold) }
+.seg { display:inline-flex; border:1px solid var(--stone) }
+.seg button { font:500 14px var(--f-text); background:none; border:0; color:var(--ink-2); padding:7px 14px; cursor:pointer }
+.seg button[aria-pressed='true'] { background:var(--ink); color:var(--paper) }
+input[type=range] { width:100%; accent-color:var(--gold) }
+.tone { height:10px; margin-top:-2px; background:linear-gradient(90deg, oklch(.7 .1 0), oklch(.7 .1 60), oklch(.7 .1 120), oklch(.7 .1 180), oklch(.7 .1 240), oklch(.7 .1 300), oklch(.7 .1 360)); }
+.dim { opacity:.45; pointer-events:none }
+.set .prev { position:sticky; top:0 }
+.set .prev .lab { margin-top:0 }
+.set .actions { display:flex; gap:10px; margin-top:22px }
+.note-motion { margin-top:10px; font-size:13.5px; color:var(--ink-3) }
+</style>
+</head>
+<body>
+<div class="page">
+  <div class="page-head">
+    <h1>Banner, play and theme</h1>
+    <p>A companion to court.html for items 1 to 3 of the next build. Every colour and typeface here is court's; only the pieces are new.</p>
+    <div class="switch-theme"><button data-t="day" aria-pressed="true">Ivory</button><button data-t="night" aria-pressed="false">Ink</button></div>
+  </div>
+
+  <section class="mock">
+    <h2>1. A server's banner</h2>
+    <div class="why"><b>The column banner:</b> 172 px, edge to edge of the column, the name in Bodoni at 22 px on two lines at most with the member count under it. Its last 56 px fade into the column's own background, so there is no edge; the channel list starts below it and scrolls up under the fade. Left at the smallest window (900 by 600, the column at its 300 px floor) with a long name and fourteen channels; right, the list scrolled, a one-line name and a very bright banner.</div>
+    <div class="grid2">
+      <div><div class="cap">At rest</div><div class="srv court" data-frame style="--colw:300px; --bh:172px; width:600px; height:600px" data-srv></div></div>
+      <div><div class="cap">Scrolled, short name, bright banner</div><div class="srv court" data-frame style="--colw:300px; --bh:172px; width:600px; height:600px" data-srv="bright"></div></div>
+    </div>
+  </section>
+
+  <section class="mock">
+    <h2>2. Two weeks of play, under the status</h2>
+    <div class="why"><b>Fourteen days in a row, oldest on the left, today ringed.</b> Each cell is the profile's own accent at four strengths by hours played that day (under 1 h, 1 to 2, 2 to 4, 4 or more), a fixed scale so a friend's grid means the same as yours; an empty day is a stone tint, not the accent. No key under the cells: each one's label says it. <b>Hover or Tab to a cell</b>: the date, then each game and its hours. The same grid on the small card, the full card, yours and others'. <b>Recently played</b>, on the full card only: the last five games, newest first, with when each was last played; its own record, so a game from three weeks ago still shows. Below: fewer than five, then the empty states.</div>
+    <div class="court stage" data-frame id="profiles" style="width:1280px"></div>
+    <div class="court stage" data-frame id="recents" style="width:1280px; padding-top:0"></div>
+    <div class="court stage" data-frame id="empties" style="width:1280px; padding-top:0"></div>
+  </section>
+
+  <section class="mock">
+    <h2>3. A profile theme</h2>
+    <div class="why"><b>Settings, My profile, Profile theme.</b> Pick one of the four weaves (or none) and turn its tones; Strength sets how much of it shows behind the card. <b>Motion:</b> Off, Drift (the weave slides slowly) or Breathe (it fades in and out); Speed and Depth set how fast and how far. The small card on the right is the live preview, exactly what friends see; it plays here while the controls are touched and stops a few seconds after. Text always sits on a paper scrim that grows with Strength, so it keeps AA contrast. Reduced motion holds it still, and it pauses off screen or in a hidden window.</div>
+    <div class="court" data-frame style="width:1280px" id="settings"></div>
+  </section>
+</div>
+
+<script>
+// ---------- mark.ts banner() and tones(), ported as is so the weaves match the app ----------
+function bytesOf(hex) { const raw = []; for (let i = 0; i + 1 < hex.length; i += 2) raw.push(parseInt(hex.slice(i, i + 2), 16) || 0); if (!raw.length) raw.push(0)
+  const out = []; for (let i = 0; i < 32; i++) out.push((raw[i % raw.length] ^ Math.imul(Math.floor(i / raw.length), 167)) & 255); return out }
+function tones(b, shift = 0) { const h = ((b[12] * 360) / 256 + shift) % 360, turn = 35 + (b[13] % 4) * 30
+  const at = (l, c, x) => `oklch(${l} ${c} ${Math.round(x % 360)})`; return [at(.42, .07, h), at(.7, .095, h + turn), at(.9, .035, h + 2 * turn)] }
+function banner(hex, weave, wide = true) {
+  const b = bytesOf(hex), [c0, c1, c2] = tones(b, weave.shift), w = wide ? 600 : 200, h = wide ? 220 : 700, S = [['rect', { width: w, height: h, fill: c0 }]], k = weave.kind
+  if (k === 0) { const n = (3 + (b[24] % 2)) * (wide ? 3 : 1), aw = w / n, rh = aw * 1.6
+    for (let r = 0; r * rh < h; r++) for (let i = 0; i < n; i++) { const x = i * aw + aw * .18, ww = aw * .64, top = r * rh + aw * .2
+      S.push(['path', { d: `M${x} ${top + rh * .8} V${top + ww / 2} a${ww / 2} ${ww / 2} 0 0 1 ${ww} 0 V${top + rh * .8} Z`, fill: (r + i) % 5 ? c1 : c2, opacity: .32 }]) } }
+  else if (k === 1) { const s = (6 + (b[25] % 4)) * (wide ? 3 : 1)
+    for (let i = 0; i < s; i++) { const hh = h * (.23 + ((b[(i % 20) + 4] * 5) % 360) / 700); S.push(['rect', { x: (i * w) / s, y: h - hh, width: w / s - 3, height: hh, fill: i % 3 ? c1 : c2, opacity: .3 }]) } }
+  else if (k === 2) { for (let y = 0; y < h; y += 26) S.push(['rect', { y, width: w, height: 7, fill: c1, opacity: .28 }])
+    for (let i = 0; i < 3; i++) S.push(['circle', { cx: 40 + ((b[26 + i] * 3) % (w - 80)), cy: wide ? 40 + i * 70 : 90 + i * 170, r: 20 + (b[27 + i] % 4) * 4, fill: c2, opacity: .35 }]) }
+  else { const s = 34 + (b[25] % 3) * 8
+    for (let x = -h; x < w + h; x += s) { S.push(['line', { x1: x, y1: 0, x2: x + h, y2: h, stroke: c1, 'stroke-width': 1.4, opacity: .26 }]); S.push(['line', { x1: x + h, y1: 0, x2: x, y2: h, stroke: c1, 'stroke-width': 1.4, opacity: .26 }]) }
+    for (let i = 0; i < 7; i++) { const cx = (b[i + 4] * 7) % w, cy = (b[i + 11] * 11) % h; S.push(['rect', { x: cx - 9, y: cy - 9, width: 18, height: 18, fill: c2, opacity: .24, transform: `rotate(45 ${cx} ${cy})` }]) } }
+  return `<svg viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid slice">${S.map(([t, a]) => `<${t} ${Object.entries(a).map(([k, v]) => `${k}="${v}"`).join(' ')}/>`).join('')}</svg>` }
+function picture(hex) { const b = bytesOf(hex), [c0, c1, c2] = tones(b), x = 26 + (b[16] % 20), w = 34 + (b[17] % 18)
+  return `<svg viewBox="0 0 100 100"><rect width="100" height="100" fill="${c0}"/><path d="M${x} 100 V${50 - w / 4} a${w / 2} ${w / 2} 0 0 1 ${w} 0 V100 Z" fill="${c1}"/><circle cx="${20 + b[19] % 60}" cy="${18 + b[20] % 22}" r="8" fill="${c2}"/></svg>` }
+const KEY = { mira: '7f3a91c20be4d8155c07a9e133d06b2f7f3a91c20be4d8155c07a9e133d06b2f', ann: 'a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f9', srv: '5d0e9a77c1f2b3a4d5e6f708192a3b4c5d0e9a77c1f2b3a4d5e6f708192a3b4c', theo: '0c1d2e3f405162738495a6b7c8d9eafb0c1d2e3f405162738495a6b7c8d9eafb' }
+const accentOf = (k, shift = 0) => tones(bytesOf(k), shift)[1]
+
+// ---------- 1. Server frames ----------
+const CH = ['general', 'plans', 'clips', 'raid-night-signups-and-who-brings-what', 'builds', 'memes', 'lfg', 'patch-notes', 'screenshots', 'music', 'off-topic', 'trading', 'bot-commands', 'archive']
+function server(f, bright) {
+  const art = bright ? `<svg viewBox="0 0 600 220" preserveAspectRatio="xMidYMid slice"><rect width="600" height="220" fill="#f4efe2"/><circle cx="470" cy="60" r="70" fill="#fffbe8"/><rect y="150" width="600" height="70" fill="#e9dcc0"/></svg>` : banner(KEY.srv, { kind: 1, shift: 0 })
+  const head = `<div class="shead"><div class="art">${art}</div><div class="name"><b>${bright ? 'Night Owls' : "The Midnight Cartographers' Society of Very Long Server Names"}</b><small>24 members, six here</small></div><svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="m6 9 6 6 6-6"/></svg></div>`
+  const list = `<div class="label">Text channels <span class="n">14</span></div>` + CH.map((c, i) => `<div class="row ${i === 1 ? 'sel' : ''} ${i === 2 || i === 6 ? 'unread' : ''}"><span class="hash">#</span><span class="nm">${c}</span>${i === 2 ? '<span class="count">4</span>' : ''}</div>`).join('')
+    + `<div class="label">Voice channels <span class="n">2</span></div><div class="row"><span class="hash">◖</span><span class="nm">Lounge</span></div><div class="row"><span class="hash">◖</span><span class="nm">Squad</span></div>`
+  const rail = `<div class="rail">${[KEY.srv, KEY.ann, KEY.mira, KEY.theo].map((k, i) => `<span class="t ${i === 0 ? 'sel' : ''}">${picture(k)}</span>`).join('')}</div>`
+  const main = `<div class="main"><div class="mh"><h3>#plans</h3><span>Friday's raid and who brings what</span></div><div class="chat"><div><b>Dov</b><time>20:12</time><br>raid Friday at nine, who's in?</div><div><b>Rae</b><time>20:15</time><br>in. I'll invite Lux, she cleared it last week</div></div></div>`
+  const bar = `<div class="bar"><span class="av" style="width:34px;height:34px">${picture(KEY.ann)}</span><div><b>Ann</b><small>ann#7095</small></div></div>`
+  f.innerHTML = `<div class="tb">Eleusinia <i>· The Midnight Cartographers…</i></div>${rail}` + `<div class="col">${head}<div class="channels">${list}</div></div>` + bar + main
+}
+document.querySelectorAll('[data-srv]').forEach((f) => { server(f, f.dataset.srv === 'bright'); if (f.dataset.srv === 'bright') f.querySelector('.channels').scrollTop = 150 })
+
+// ---------- 2. Days: minutes per game for the last 14 days (d 13 oldest .. 0 today) ----------
+const DAY = 864e5, NOW = new Date(2026, 10, 22, 21, 40)
+const PLAY = { 0: [['Counter-Strike 2', 95]], 1: [['Counter-Strike 2', 140], ['Dota 2', 45]], 2: [], 3: [['Destiny 2', 260]], 4: [['Counter-Strike 2', 30]], 5: [], 6: [['Dota 2', 180], ['Counter-Strike 2', 70]],
+  7: [['Counter-Strike 2', 50]], 8: [], 9: [], 10: [['Destiny 2', 75]], 11: [['Destiny 2', 150], ['Counter-Strike 2', 20]], 12: [], 13: [['Dota 2', 300]] }
+const level = (m) => m === 0 ? 0 : m < 60 ? 1 : m < 120 ? 2 : m < 240 ? 3 : 4
+const hrs = (m) => m < 60 ? `${m} min` : `${(m / 60).toFixed(m % 60 ? 1 : 0)} h`
+const dateOf = (d) => new Date(NOW - d * DAY).toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long' })
+function days(play, { tip, focus, off, mine } = {}) {
+  if (off) return `<div class="days off"><div class="head"><h4>Two weeks of play</h4></div><p class="empty">${mine ? 'Activity is off. Turn it on in Settings, Activity.' : 'Not shared'}</p></div>`
+  const tot = (d) => (play[d] || []).reduce((n, [, m]) => n + m, 0), sum = [...Array(14).keys()].reduce((n, d) => n + tot(d), 0)
+  const cells = [...Array(14).keys()].reverse().map((d) => `<button class="cell ${d === 0 ? 'today' : ''} ${focus === d ? 'focus' : ''}" data-l="${level(tot(d))}" aria-label="${dateOf(d)}: ${tot(d) ? (play[d] || []).map(([g, m]) => `${g} ${hrs(m)}`).join(', ') : 'no play'}"></button>`).join('')
+  const cx = (13 - tip) * 20.5 + 8, tl = Math.min(Math.max(cx - 24, 0), 84)
+  const t = tip != null ? `<div class="tip" style="left:${tl}px; --arrow:${cx - tl - 6}px"><b>${dateOf(tip)}</b>${(play[tip] || []).map(([g, m]) => `<div><span>${g}</span><span>${hrs(m)}</span></div>`).join('') || '<div><span>No play</span></div>'}</div>` : ''
+  return `<div class="days"><div class="head"><h4>Two weeks of play</h4><span class="sum">${sum ? hrs(sum) : 'none'}</span></div><div class="cells">${cells}${t}</div>`
+    + (sum ? '' : `<p class="empty">No play in the last 14 days</p>`) + `</div>`
+}
+function themeLayer(k, th) {
+  if (!th || th.kind < 0) return ''
+  return `<div class="theme ${th.fx ? 'fx-' + th.fx : ''}" style="--op:${th.op / 100}; --scrim:${Math.round(30 + th.op * .6)}%; --spd:${th.speed}; --amp:${th.depth * .15}%; --depth:${th.depth / 100}"><div class="layer">${banner(k, { kind: th.kind, shift: th.shift }, false)}</div></div>`
+}
+function mini(k, name, o = {}) {
+  return `<div class="pop" style="--person:${accentOf(k)}">${themeLayer(k, o.theme)}<div class="ban">${banner(k, { kind: o.weave ?? 3, shift: 0 })}</div><span class="face av">${picture(k)}</span>
+    <div class="body"><h3 class="nm">${name}</h3><p class="status">${o.status ?? 'Ranked tonight, quiet after eleven'}</p>${days(o.play ?? PLAY, o)}
+    <p class="handle">${name.toLowerCase()}#2210</p><p class="about">Entry fragger. Mirage or nothing.</p>${o.mine ? '' : '<div class="note">Message @' + name + '</div>'}</div></div>`
+}
+function full(k, name, o = {}) {
+  return `<div class="pop full" style="--person:${accentOf(k)}">${themeLayer(k, o.theme)}<div class="ban">${banner(k, { kind: 3, shift: 0 })}</div><span class="face av">${picture(k)}</span>
+    <div class="body"><div class="acts"></div><h3 class="nm">${name}</h3><p class="status">Ranked tonight, quiet after eleven</p>${days(PLAY, o)}<p class="handle">${name.toLowerCase()}#2210</p>
+    <div class="tabs"><span class="on">About</span><span>Activity</span><span>In common</span></div>
+    <dl><dt>About</dt><dd>Entry fragger. Mirage or nothing.</dd><dt>On Eleusinia since</dt><dd>March 2026</dd><dt>Last played</dt><dd>Counter-Strike 2, 2 hours ago</dd></dl>${recent(o.recent ?? RECENT)}</div></div>`
+}
+const RECENT = [['cs2', 'Counter-Strike 2', 'Today, 21:10'], ['dota', 'Dota 2', 'Yesterday'], ['d2', 'Destiny 2', '19 November'], ['mar', 'Marathon', '9 November'], ['hd', 'Helldivers 2', '1 November']]
+const recent = (list) => list.length ? `<div class="recent"><h4>Recently played</h4><ol>${list.map(([a, g, t]) => `<li><span class="art ${a}"></span><span class="g"><b>${g}</b></span><time>${t}</time></li>`).join('')}</ol></div>` : ''
+const MIRA_THEME = { kind: 0, shift: 40, op: 22, fx: 'drift', speed: 1, depth: 40 }
+document.getElementById('profiles').innerHTML =
+  `<div><div class="cap" style="color:var(--ink-3)">Mira's small card, seen by a friend, hovering a day</div>${mini(KEY.mira, 'Mira', { tip: 1, theme: MIRA_THEME })}</div>`
+  + `<div><div class="cap" style="color:var(--ink-3)">Her full card, a cell focused from the keyboard</div>${full(KEY.mira, 'Mira', { focus: 6, theme: MIRA_THEME })}</div>`
+document.getElementById('recents').innerHTML =
+  `<div><div class="cap" style="color:var(--ink-3)">Fewer than five: all of them. With none, the section is not there at all.</div>${full(KEY.theo, 'Theo', { recent: RECENT.slice(1, 3), theme: { kind: 1, shift: 0, op: 18 } })}</div>`
+document.getElementById('empties').innerHTML =
+  `<div><div class="cap" style="color:var(--ink-3)">No play in 14 days</div>${mini(KEY.theo, 'Theo', { play: {}, status: 'Back in December', weave: 1 })}</div>`
+  + `<div><div class="cap" style="color:var(--ink-3)">Activity not shared (or an older copy)</div>${mini(KEY.ann, 'Ann', { off: true, status: 'Exams until Friday', weave: 2 })}</div>`
+  + `<div><div class="cap" style="color:var(--ink-3)">Your own, with Activity off</div>${mini(KEY.theo, 'You', { off: true, mine: true, status: 'Away', weave: 0 })}</div>`
+
+// ---------- 3. Settings with a live preview ----------
+const th = { ...MIRA_THEME }
+function settings() {
+  const W = ['Arcade', 'Skyline', 'Bands', 'Lattice']
+  document.getElementById('settings').innerHTML = `<div class="set"><div>
+    <h5>Profile theme</h5><p class="hint">A weave behind your whole card, small and full. Everyone who opens your profile sees it.</p>
+    <div class="lab">Weave</div><div class="weaves"><button class="none" data-k="-1" aria-pressed="${th.kind < 0}">None</button>${W.map((n, i) => `<button data-k="${i}" aria-pressed="${th.kind === i}">${banner(KEY.mira, { kind: i, shift: th.shift })}<span>${n}</span></button>`).join('')}</div>
+    <div class="${th.kind < 0 ? 'dim' : ''}">
+    <div class="lab">Tones <output>${th.shift}°</output></div><input type="range" min="0" max="359" value="${th.shift}" data-v="shift" aria-label="Tones"><div class="tone"></div>
+    <div class="lab">Strength <output>${th.op} %</output></div><input type="range" min="5" max="60" value="${th.op}" data-v="op" aria-label="Strength">
+    <div class="lab">Motion</div><div class="seg">${[['', 'Off'], ['drift', 'Drift'], ['breathe', 'Breathe']].map(([v, n]) => `<button data-fx="${v}" aria-pressed="${(th.fx || '') === v}">${n}</button>`).join('')}</div>
+    <div class="${th.fx ? '' : 'dim'}"><div class="lab">Speed <output>${th.speed}×</output></div><input type="range" min="0.5" max="2" step="0.25" value="${th.speed}" data-v="speed" aria-label="Speed">
+    <div class="lab">Depth <output>${th.depth} %</output></div><input type="range" min="10" max="100" step="10" value="${th.depth}" data-v="depth" aria-label="Depth"></div>
+    <p class="note-motion">Held still for anyone who asks their system for less motion.</p></div>
+    <div class="actions"><span class="btn gold">Save theme</span><span class="btn">Reset</span></div>
+  </div><div class="prev"><div class="lab">What others see</div>${mini(KEY.mira, 'Mira', { theme: th })}</div></div>`
+}
+document.getElementById('settings').addEventListener('input', (e) => { const v = e.target.dataset.v; if (v) { th[v] = +e.target.value; settings(); document.querySelector(`[data-v="${v}"]`).focus() } })
+document.getElementById('settings').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return
+  if (b.dataset.k != null) th.kind = +b.dataset.k; if (b.dataset.fx != null) th.fx = b.dataset.fx; settings() })
+settings()
+
+// ---------- Theme switch and ?s= / ?t= for screenshots ----------
+const setTheme = (t) => { document.querySelectorAll('[data-frame]').forEach((f) => f.classList.toggle('night', t === 'night'))
+  document.querySelectorAll('.switch-theme button').forEach((b) => b.setAttribute('aria-pressed', b.dataset.t === t)) }
+document.querySelectorAll('.switch-theme button').forEach((b) => b.addEventListener('click', () => setTheme(b.dataset.t)))
+const q = new URLSearchParams(location.search)
+if (q.get('t')) setTheme(q.get('t'))
+if (q.get('s')) { document.querySelectorAll('section.mock').forEach((s, i) => { if (i + 1 !== +q.get('s')) s.remove() }); document.querySelector('.page-head p').remove() }
+if (q.get('still')) document.querySelectorAll('.theme').forEach((t) => t.classList.add('paused'))
+</script>
+</body>
+</html>

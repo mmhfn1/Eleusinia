@@ -59,6 +59,19 @@
   --display: 'Commissioner Variable', 'Segoe UI', system-ui, sans-serif; /* wordmark and titles, flared (hall.css) */
   --sans: 'Commissioner Variable', 'Segoe UI', system-ui, -apple-system, 'Helvetica Neue', sans-serif;
   --mono: 'Cascadia Mono', ui-monospace, 'SF Mono', Consolas, monospace;
+  /* Court's type (design/type-plan.md): the pieces built from design/mockups/court-profile.html use only these */
+  --f-display: 'Bodoni Moda Variable', Georgia, 'Noto Serif', serif;
+  --f-text: 'Alegreya Sans', 'Segoe UI', 'Noto Sans', 'Yu Gothic UI', 'Microsoft YaHei UI', system-ui, sans-serif;
+  --type-title: 600 22px/1.15 var(--f-display);
+  --type-section: 500 20px/1.2 var(--f-display);
+  --type-label: italic 400 15px/1.3 var(--f-display);
+  --type-tip: 600 14px/1.3 var(--f-display);
+  --type-quiet: italic 400 14px/1.35 var(--f-display);
+  --type-name: 500 15.5px/1.3 var(--f-text);
+  --type-ui: 500 14.5px/1.35 var(--f-text);
+  --type-meta: 400 13.5px/1.35 var(--f-text);
+  --type-time: 400 13px/1.3 var(--f-text);
+  --type-stat: 500 13px/1.3 var(--f-text);
 
   --r-sm: 4px;
   --r-md: 6px;

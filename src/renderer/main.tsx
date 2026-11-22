@@ -1,5 +1,12 @@
 // Bundled, so every system shows the same type: Commissioner with all its axes (titles flare at their stroke ends).
 import '@fontsource-variable/commissioner/full.css'
+// Court's type (design/type-plan.md), bundled too: Bodoni Moda for titles and quiet labels, Alegreya Sans for text
+import '@fontsource-variable/bodoni-moda/standard.css'
+import '@fontsource-variable/bodoni-moda/standard-italic.css'
+import '@fontsource/alegreya-sans/400.css'
+import '@fontsource/alegreya-sans/400-italic.css'
+import '@fontsource/alegreya-sans/500.css'
+import '@fontsource/alegreya-sans/700.css'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import './style.css'
