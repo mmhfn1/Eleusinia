@@ -1,0 +1,328 @@
+/* Home (design/system s=home, home-empty, home-requests): search, requests, Playing now, Live calls, Online and Offline,
+   and the activity notices that pass in the corner. */
+
+.home .page-body {
+  gap: var(--sp-5);
+}
+.shelf-title,
+.page-body > section > h2 {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  margin: 0 0 var(--sp-3);
+  padding: 0;
+  font: var(--type-section);
+}
+.shelf-title span,
+.page-body > section > h2 > span {
+  font: var(--type-time);
+  color: var(--ink-3);
+}
+.search-box {
+  display: grid;
+  gap: var(--sp-2);
+}
+#search-status {
+  min-height: 1.4em;
+  font: var(--type-meta);
+  color: var(--ink-3);
+}
+.results,
+.requests {
+  display: grid;
+  gap: 2px;
+  padding: var(--sp-2);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.requests > h2 {
+  padding: var(--sp-1) var(--sp-3) var(--sp-1);
+  font: var(--type-label);
+  color: var(--ink-2);
+}
+.result,
+.request {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--h-lg);
+  padding: var(--sp-1) var(--sp-3);
+  border-radius: var(--r-1);
+}
+.result:hover,
+.request:hover {
+  background: var(--raised);
+}
+.result .add-friend {
+  flex: none;
+  min-width: 112px;
+}
+.result .tail {
+  margin-left: auto;
+  color: var(--ink-3);
+}
+.request > :last-child,
+.request .row-actions {
+  margin-left: auto;
+  display: flex;
+  gap: var(--sp-1);
+}
+
+/* Playing now: art cards */
+.shelf {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: var(--sp-4);
+}
+.game-card {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  height: 196px;
+  padding: var(--sp-4);
+  overflow: hidden;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--sunk);
+  color: var(--on-art);
+}
+.game-card-art,
+.game-card > .woven {
+  position: absolute;
+  inset: 0;
+  z-index: -2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.game-card::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: linear-gradient(180deg, var(--scrim-art), transparent 26%, transparent 34%, var(--scrim-art) 72%);
+}
+.game-card-top {
+  position: absolute;
+  top: var(--sp-3);
+  left: var(--sp-3);
+  right: var(--sp-3);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font: var(--type-meta);
+}
+.game-card-game {
+  color: var(--on-art);
+}
+.game-card-live {
+  margin-left: auto;
+}
+.game-card-bottom {
+  display: grid;
+  gap: var(--sp-2);
+}
+.game-card-score {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: var(--type-section);
+}
+.game-card-line {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: var(--type-meta);
+  color: var(--on-art);
+}
+.game-card-line .activity-line,
+.game-card-line .activity-line b {
+  color: inherit;
+  font-weight: 400;
+}
+.game-card-foot {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.game-card-foot .button {
+  margin-left: auto;
+  height: var(--h-sm);
+  padding: 0 var(--sp-3);
+}
+.game-card-who {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  min-width: 0;
+  height: var(--h-sm);
+  padding: 0 var(--sp-1) 0 0;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--on-art);
+  font: var(--type-name);
+}
+.game-card-who:hover {
+  text-decoration: underline;
+}
+
+/* Live calls */
+.call-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: var(--sp-4);
+}
+.call-card.live-call,
+.live-call {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.live-call > h2 {
+  font: var(--type-name);
+}
+.live-faces {
+  display: flex;
+  flex: none;
+}
+.live-faces .avatar + .avatar {
+  margin-left: -8px;
+}
+.live-faces .avatar > img,
+.live-faces .avatar > svg {
+  outline: 2px solid var(--surface);
+}
+.call-card .button {
+  margin-left: auto;
+}
+
+/* Online and Offline */
+.people-list {
+  display: grid;
+  gap: 2px;
+}
+/* The row opens their DM; the call button sits at its right end, shown on hover or focus */
+.friend-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  border-radius: var(--r-1);
+}
+.friend-row > .row-button {
+  flex: 1;
+  min-width: 0;
+}
+.friend-row:hover {
+  background: var(--raised);
+}
+.friend-row .row-actions {
+  display: flex;
+  gap: 2px;
+  margin-left: auto;
+  opacity: 0;
+}
+.friend-row:hover .row-actions,
+.friend-row:focus-within .row-actions {
+  opacity: 1;
+}
+
+/* Empty states: words and one action */
+.empty-state {
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-2);
+  max-width: 460px;
+  margin: auto;
+  padding: var(--sp-7) var(--sp-5);
+  text-align: center;
+}
+.empty-state > .emblem {
+  display: none;
+}
+.empty-title {
+  font: var(--type-section);
+  color: var(--ink);
+}
+.empty-state p:not(.empty-title) {
+  font: var(--type-meta);
+  color: var(--ink-3);
+}
+
+/* Activity notices (Lists.tsx): a friend's news above the bars, fading out over 3 s */
+.notices {
+  position: fixed;
+  left: 84px;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-width: min(340px, calc(100vw - 100px));
+  pointer-events: none;
+}
+.notices > .notice {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  height: var(--h-lg);
+  padding: 0 var(--sp-4) 0 var(--sp-2);
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--surface);
+  box-shadow: var(--shadow-float);
+  color: var(--ink-2);
+  font: var(--type-meta);
+  text-align: left;
+  pointer-events: auto;
+  animation: notice 3s ease-out forwards;
+}
+.notices > .notice:hover {
+  color: var(--ink);
+}
+.notice-text {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.notice-text b {
+  color: var(--ink);
+  font: var(--type-name);
+}
+@keyframes notice {
+  0% {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  8% {
+    opacity: 1;
+    transform: none;
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .notices > .notice {
+    animation: notice-still 3s linear forwards;
+  }
+}
+@keyframes notice-still {
+  0%,
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}

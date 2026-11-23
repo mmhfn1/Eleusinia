@@ -5,7 +5,6 @@
 import { type ReactNode, useEffect, useState } from 'react'
 import type { Event } from '../shared/protocol'
 import { api } from './common'
-import './splash.css'
 
 type Startup = Extract<Event, { type: 'startup' }>
 const FADE = 400

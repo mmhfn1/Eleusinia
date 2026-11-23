@@ -2,7 +2,7 @@
 // copy checked. The zone is set before any date is made, so the 25-hour day at the end of summer time is real here.
 process.env.TZ = 'Europe/Berlin'
 import { expect, test } from 'vitest'
-import { PLAY_DAYS, cleanActivity, cleanWeek, dayKey, daysBack, playLevel, prunePlayed, shareable, weekOf } from '../src/shared/activity'
+import { PLAY_DAYS, RECENT_GAMES, cleanActivity, cleanRecent, cleanWeek, dayKey, daysBack, noteRecent, playLevel, prunePlayed, recentFromPlayed, shareable, weekOf } from '../src/shared/activity'
 
 test('this file really runs in Berlin time', () => {
   expect(new Date(Date.UTC(2026, 6, 1, 12)).getHours()).toBe(14)
@@ -68,4 +68,60 @@ test('an older copy reading our two weeks still gets the last one', () => {
   const played: Record<string, Record<string, number>> = {}
   for (let d = 0; d < PLAY_DAYS; d++) played[dayKey(daysBack(now, d))] = { A: 60, B: 30, C: 10 }
   expect(new Set(old(weekOf(played, now)).map((w) => w.d))).toEqual(new Set([0, 1, 2, 3, 4, 5, 6]))
+})
+
+test('recently played: newest first, each game once, five at most, times kept to 5 minutes', () => {
+  const t = new Date(2026, 10, 22, 21, 7, 30).getTime()
+  let r = noteRecent(undefined, { name: 'Counter-Strike 2', app: 730 }, t)
+  expect(r).toEqual([{ g: 'Counter-Strike 2', app: 730, at: new Date(2026, 10, 22, 21, 5).getTime() }])
+  for (const [i, g] of ['Dota 2', 'Marathon', 'Destiny 2', 'Helldivers 2', 'Hades II'].entries()) r = noteRecent(r, { name: g }, t + (i + 1) * 6e5)
+  expect(r.map((x) => x.g)).toEqual(['Hades II', 'Helldivers 2', 'Destiny 2', 'Marathon', 'Dota 2'])
+  r = noteRecent(r, { name: 'Marathon' }, t + 9e6)
+  expect(r.map((x) => x.g)).toEqual(['Marathon', 'Hades II', 'Helldivers 2', 'Destiny 2', 'Dota 2'])
+  expect(r).toHaveLength(RECENT_GAMES)
+})
+
+test('recently played starts from the two weeks an older data folder already counted', () => {
+  expect(recentFromPlayed({ '2026-11-20': { A: 30, B: 10 }, '2026-11-22': { B: 5 }, '2026-11-10': { C: 60 } })).toEqual([
+    { g: 'B', at: new Date(2026, 10, 22, 12).getTime() },
+    { g: 'A', at: new Date(2026, 10, 20, 12).getTime() },
+    { g: 'C', at: new Date(2026, 10, 10, 12).getTime() },
+  ])
+  expect(recentFromPlayed({})).toEqual([])
+})
+
+test("a friend's recently played is capped, cleaned and moved onto our clock", () => {
+  const now = new Date(2026, 10, 22, 21).getTime()
+  const r = cleanRecent(
+    [
+      { g: 'Dota 2', app: 570, at: now - 3600e3 + 60e3 },
+      { g: 'Dota 2', at: now - 7200e3 },
+      { g: '‮evil\u0000', at: now - 7200e3 },
+      { g: 'Ahead', at: now + 864e5 },
+      { g: '', at: now },
+      { g: 'Bad time', at: 'x' },
+      { g: 'Bad app', app: -4, at: now - 1 },
+      { g: 'Too many', at: now - 1 },
+    ],
+    -60e3,
+    now,
+  )
+  expect(r).toEqual([
+    { g: 'Dota 2', app: 570, at: now - 3600e3 },
+    { g: 'evil', at: now - 7260e3 },
+    { g: 'Ahead', at: now },
+  ])
+  expect(cleanRecent('nope')).toEqual([])
+  expect(cleanRecent(Array.from({ length: 50 }, (_, i) => ({ g: `G${i}`, at: now - i }))).length).toBe(RECENT_GAMES)
+})
+
+test('recently played is shared under the playtime switch, and an older copy sends none', () => {
+  const now = Date.now()
+  const a = { now, week: [], recent: [{ g: 'Dota 2', at: now - 1000 }] }
+  expect(shareable(a, undefined).recent).toEqual(a.recent)
+  expect(shareable(a, { playtime: false }).recent).toBeUndefined()
+  expect(shareable(a, { games: false }).recent).toBeUndefined()
+  expect(cleanActivity({ now, week: [] }, now)!.recent).toBeUndefined()
+  expect(cleanActivity({ now, recent: [] }, now)!.recent).toEqual([])
+  expect(cleanActivity({ now, recent: a.recent }, now)!.recent).toEqual(a.recent)
 })

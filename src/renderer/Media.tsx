@@ -9,7 +9,6 @@ import { Avatar, BannerArt, Dialog, Icon } from './ui'
 import type { SourceKind } from '../shared/sources'
 import { api } from './common'
 import { callWords, throughWords } from '../shared/reach'
-import './pip.css'
 
 const GRADE_WORDS = { good: 'good and stable', fair: 'degraded', poor: 'poor' }
 // How much the ping moved over the last minute, next to the number itself.
@@ -108,14 +107,14 @@ export function RingBar({ conv, who, st, name, join }: { conv: string; who: Key;
       <span className="row-text">
         <span className="row-title">{name(who)} is calling you</span>
       </span>
-      <button className="round" aria-label="Join with your microphone muted" title="Join muted" onClick={() => join(true)}>
+      <button className="icon-button" aria-label="Join with your microphone muted" title="Join muted" onClick={() => join(true)}>
         <Icon name="micOff" size={18} />
       </button>
-      <button className="round primary" aria-label="Join the call" title="Join" onClick={() => join(false)}>
+      <button className="icon-button primary" aria-label="Join the call" title="Join" onClick={() => join(false)}>
         <Icon name="phone" size={18} />
       </button>
       {!quiet && (
-        <button className="round leave" aria-label="Silence the ringing" title="Silence" onClick={() => (call.silence(conv), setQuiet(true))}>
+        <button className="icon-button leave" aria-label="Silence the ringing" title="Silence" onClick={() => (call.silence(conv), setQuiet(true))}>
           <Icon name="close" size={18} />
         </button>
       )}
@@ -255,7 +254,7 @@ export function ShareDialog({ close }: { close: () => void }) {
         {listed?.length === 0 && <p className="quiet">{SOURCE_TABS.find((t) => t.kind === tab)!.empty}</p>}
         {tab === 'window' && !admin && (
           <p className="hint sources-hint">
-            Game missing? A game run as administrator shows here only when Eleusinia runs as administrator too (Settings, Hotkeys). One in exclusive full
+            Game missing? A game run as administrator shows here only when Eleusinia runs as administrator too (Settings, My profile). One in exclusive full
             screen may only share as part of your screen; borderless windowed works best.
           </p>
         )}

@@ -6,7 +6,7 @@ import { type Area, type Diag, type Kind, type Meta, BUILD, cleanReport, describ
 import { GATE_DB, dbOf } from '../shared/speaking'
 import { DEFAULT_CACHE_MB, sizeLabel } from '../shared/media'
 import { type State, statusOf } from '../shared/protocol'
-import { type Theme, THEME_DEFAULT, THEME_LIMITS, WEAVES } from '../shared/mark'
+import { type Theme, THEME_DEFAULT, THEME_FX, THEME_LIMITS, WEAVES } from '../shared/mark'
 import * as call from './call'
 import { Avatar, BannerPick, Dialog, Icon, Info, ThemeLayer, Woven } from './ui'
 import * as theme from './theme'
@@ -337,7 +337,7 @@ function ThemeEdit({ st, save, draft, setDraft }: { st: State; save: (p: Partial
         {slider('op', 'Strength', ' %', !t)}
         <span className="theme-label">Motion</span>
         <div className="segmented" role="radiogroup" aria-label="Motion">
-          {([[undefined, 'Off'], ['drift', 'Drift'], ['breathe', 'Breathe']] as const).map(([fx, label]) => (
+          {([[undefined, 'Off'], ...THEME_FX.map((fx) => [fx, fx[0].toUpperCase() + fx.slice(1)] as const)] as const).map(([fx, label]) => (
             <button key={label} type="button" role="radio" aria-checked={t?.fx === fx} className={t?.fx === fx ? 'on' : ''} disabled={!t} onClick={() => set({ fx })}>
               {label}
             </button>
@@ -533,7 +533,7 @@ const PANES: [string, string, string][] = [
   ['App', 'account', 'Account'],
 ]
 
-// Settings (design/mockups/hall.html, F): an index on the left, every section in one column, and what others see on
+// Settings (design/system s=settings): an index on the left, every section in one column, and what others see on
 // the right. The index scrolls to a section and marks the one in view.
 export function SettingsDialog({ st, close, edit, remove }: { st: State; close: () => void; edit: () => void; remove: () => void }) {
   const [here, setHere] = useState('profile')
@@ -571,6 +571,7 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
           <section className="settings-section" data-pane="profile">
             <h2>My profile</h2>
             <MyProfile st={st} edit={editNow} draft={draft} setDraft={setDraft} />
+            {WINDOWS && <RunAsAdmin />}
           </section>
           <section className="settings-section" data-pane="activity">
             <h2>Activity</h2>
@@ -607,7 +608,6 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
           <section className="settings-section" data-pane="hotkeys">
             <h2>Hotkeys</h2>
             <Hotkeys st={st} />
-            {WINDOWS && <RunAsAdmin />}
           </section>
           <section className="settings-section" data-pane="storage">
             <h2>Storage</h2>
@@ -699,10 +699,12 @@ function RunAsAdmin() {
     if (!(await window.api.restartAsAdmin())) setErr('Not restarted: Windows did not get permission.')
   }
   return (
+    <>
+    <h3>Run as administrator</h3>
     <div className="settings-row admin-row">
       <span className="row-text">
         <span className="row-line">
-          <span className="row-title">Restart App as Administrator</span>
+          <span className="row-title">Restart Eleusinia as administrator</span>
           <Info id="admin-tip">
             Use this when push to talk or your other hotkeys stop working while a game is in front. Some games, launchers and anti-cheat tools run as
             administrator, and Windows then hides your key presses from programs that are not.
@@ -720,6 +722,7 @@ function RunAsAdmin() {
         {admin ? 'Running as administrator' : 'Restart'}
       </button>
     </div>
+    </>
   )
 }
 

@@ -575,6 +575,8 @@ function startApp() {
   startActivity(node, dir, (text) => diagnostics.add('app', text))
   if (updatable()) node.updateStep({ done: false, detail: 'Asking for a newer version', waiting: ['Still waiting for the update check'] })
   startUpdates((version) => toPage({ type: 'update', version }), diagnostics.add, node.updateStep, node.starting)
+  // Testing, local test DHT only: an update ready to install, so the smoke run can see its toast
+  if (process.env.ELEUSINIA_BOOTSTRAP && process.env.ELEUSINIA_TEST_UPDATE) toPage({ type: 'update', version: process.env.ELEUSINIA_TEST_UPDATE })
   ipcMain.handle('installUpdate', installNow)
   // From the emblem's menu. A copy run from source (or with updates off) never updates, and says so.
   ipcMain.handle('checkUpdates', async () => {

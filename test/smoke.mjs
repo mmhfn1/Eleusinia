@@ -170,7 +170,7 @@ async function launch(port, dir = mkdtempSync(join(tmpdir(), 'eleusinia-smoke-')
   // What each step said when the splash closed, and what was still pending if it gave up
   console.log(`     ${port}: startup ${startup.ready ? 'ready' : 'GAVE UP'} ${(closed / 1000).toFixed(1)}s after the page opened:`, startup.steps.map((s) => `${s.id}${s.done ? '' : ' (pending)'}: ${s.detail}`).join('; '), startup.pending.length ? `| pending: ${startup.pending.join(', ')}` : '')
   await ev(`(() => { window.__pcs = []; const P = RTCPeerConnection; window.RTCPeerConnection = class extends P { constructor(...a) { super(...a); window.__pcs.push(this) } } })()`)
-  return { child, ev, dir, title, windowState, crash, shot, focused, startup, closed }
+  return { child, ev, cdp, dir, title, windowState, crash, shot, focused, startup, closed }
 }
 
 // What one of the live connection's slots has received (see slotsOf in call.ts): 'sound' is the second audio.
@@ -538,7 +538,7 @@ const bobGame = { name: 'Destiny 2', source: 'steam', app: 1085660, played: 2116
 const bungieFake = await fakeBungie()
 // In forwarding mode Bob plays nothing: someone in a game is never asked to forward
 let b = await launch(9232, undefined, { ...strictEnv, ...uploadEnv(largeMode ? 5000 : 20000), ...(serverMode && { ELEUSINIA_TEST_NO_FORWARD: '1' }), ...(!forwardMode && { ELEUSINIA_TEST_ACTIVITY: JSON.stringify(bobGame) }), ELEUSINIA_TEST_BUNGIE: bungieFake.base })
-const c = await launch(9233, undefined, { ...(hostedMode && { ELEUSINIA_TEST_NO_RELAY: '1' }), ...uploadEnv(500) })
+const c = await launch(9233, undefined, { ...(hostedMode && { ELEUSINIA_TEST_NO_RELAY: '1' }), ...uploadEnv(500), ...(!relayedMode && !forwardMode && { ELEUSINIA_TEST_UPDATE: '9.9.9' }) })
 const dee = largeMode ? await launch(9245, undefined, uploadEnv(4000)) : null
 const eve = largeMode ? await launch(9246, undefined, uploadEnv(500)) : null
 const everyone = [[a, 'Ann'], [b, 'Bob'], [c, 'Cy'], ...(largeMode ? [[dee, 'Dee'], [eve, 'Eve']] : [])]
@@ -586,6 +586,10 @@ try {
     if (!new RegExp('^' + n.toLowerCase() + 'tester#\\d{4}$').test(ids[n])) throw new Error('unexpected friend ID ' + ids[n])
   }
 
+  await until('Cy is told an update is ready, and can put it off', () => c.ev(`!!document.querySelector('.update-toast')?.textContent.includes('9.9.9')`), 10)
+  await c.shot('update-toast')
+  await c.ev(`[...document.querySelectorAll('.update-toast button')].find((x) => x.textContent === 'Later').click()`)
+
   console.log('--- Friend ID and Settings sections, bitrate (i)')
   await a.ev(`document.querySelector('.user-bar button[title="Settings"]').click()`)
   const layout = await a.ev(`(() => {
@@ -600,6 +604,9 @@ try {
   console.log('     ', JSON.stringify(layout))
   if (!(layout.idSection && layout.summary === 'Settings' && layout.hidden === 'none' && layout.shown === 'block' && layout.rightOfLabel)) throw new Error('settings layout wrong')
   console.log('ok   friend ID is its own section; Settings separate; (i) sits right of the bitrate and shows its tip on focus')
+  await a.ev(`document.querySelector('.info-icon[aria-describedby=bitrate-tip]').scrollIntoView({ block: 'center' }); document.querySelector('.info-icon[aria-describedby=bitrate-tip]').focus()`)
+  await sleep(200)
+  await a.shot('tooltip')
   // The theme: Ivory switches the whole window, and Ink brings it back (theme.ts, kept in this window's storage)
   const themeTo = (label) => a.ev(`[...document.querySelectorAll('dialog[open] [role=radiogroup][aria-label=Theme] [role=radio]')].find((x) => x.textContent === '${label}').click()`)
   await themeTo('Ivory')
@@ -755,6 +762,7 @@ try {
   await b.shot('play-grid-mini')
   await b.ev(expandPop)
   await until('her full card shows the same two weeks and the same theme', () => b.ev(`(() => { const d = document.querySelector('dialog[open].card-dialog'); return !!d && ${cells("d")} === '${annCells}' && !!d.querySelector('.profile-theme.fx-drift') })()`), 10)
+  await until('and what she played lately, newest first, each game once', () => b.ev(`JSON.stringify([...document.querySelectorAll('dialog[open].card-dialog .recent .recent-game')].map((x) => x.textContent)) === '["Counter-Strike 2","Dota 2","Destiny 2"]'`), 10)
   await sleep(500) // past the dialog's opening
   await b.shot('play-grid-full')
   await b.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
@@ -775,12 +783,13 @@ try {
   await sleep(400)
   await a.shot('theme-owner')
   await a.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
-  const fonts = await b.ev(`document.fonts.ready.then(() => JSON.stringify({ bodoni: document.fonts.check('italic 400 15px "Bodoni Moda Variable"') && document.fonts.check('600 22px "Bodoni Moda Variable"'), alegreya: document.fonts.check('500 15px "Alegreya Sans"'), google: performance.getEntriesByType('resource').filter((e) => /fonts\.(googleapis|gstatic)\.com/.test(e.name)).length, local: performance.getEntriesByType('resource').filter((e) => /bodoni-moda|alegreya-sans/.test(e.name) && !/^https?:/.test(e.name)).length }))`)
+  const fonts = await b.ev(`document.fonts.ready.then(() => JSON.stringify({ bodoni: document.fonts.check('600 26px "Bodoni Moda Variable"') && document.fonts.check('500 20px "Bodoni Moda Variable"'), alegreya: document.fonts.check('500 15px "Alegreya Sans"') && document.fonts.check('700 13.5px "Alegreya Sans"'), mono: document.fonts.check('500 12.5px "Cascadia Mono"') && [...document.fonts].some((x) => x.family.includes('Cascadia Mono') && x.status === 'loaded'), google: performance.getEntriesByType('resource').filter((e) => /fonts\.(googleapis|gstatic)\.com/.test(e.name)).length, local: performance.getEntriesByType('resource').filter((e) => /bodoni-moda|alegreya-sans|cascadia-mono/.test(e.name) && !/^https?:/.test(e.name)).length }))`)
   const f = JSON.parse(fonts)
-  if (!f.bodoni || !f.alegreya || f.google) throw new Error('court type is not loaded from the app: ' + fonts)
-  console.log(`ok   Bodoni Moda and Alegreya Sans load from the app (${f.local} font files), none from Google`)
+  if (!f.bodoni || !f.alegreya || !f.mono || f.google) throw new Error('the type is not loaded from the app: ' + fonts)
+  console.log(`ok   Bodoni Moda, Alegreya Sans and Cascadia Mono load from the app (${f.local} font files), none from Google`)
   console.log('ok   the grid and the theme crossed the wire: Bob drew both from what Ann shares')
   // ELEUSINIA_SMOKE_PERF=1 (Windows): what an open themed card costs Bob's renderer and GPU processes, against none open
+  let perfMeasure = null // set by the perf block, for the reading in a call further on
   if (process.env.ELEUSINIA_SMOKE_PERF && process.platform === 'win32') {
     // The app's child processes by type once, then their processor time from Get-Process before and after each wait
     const ps = (cmd) => new Promise((done) => { let out = ''; spawn('powershell', ['-NoProfile', '-Command', cmd]).on('exit', () => done(out.trim())).stdout.on('data', (d) => (out += d)) })
@@ -797,18 +806,21 @@ try {
     // Each motion between two readings of the same card held still, so whatever else the run left going shows in both
     const themed = (fx) => a.ev(`api.call('state').then((s) => api.call('setProfile', { ...s.profile, theme: { ...s.profile.theme, fx: ${fx ? `'${fx}'` : 'undefined'} } }))`)
     const showing = (fx) => {
-      const sel = fx ? `:scope > .profile-theme.fx-${fx}:not(.paused)` : ':scope > .profile-theme:not(.fx-drift):not(.fx-breathe)'
+      const sel = fx ? `:scope > .profile-theme.fx-${fx}:not(.paused)` : ':scope > .profile-theme:not([class*="fx-"])'
       return until(`Bob's card shows ${fx ?? 'no motion'}`, () => b.ev(`(() => { const p = document.querySelector('.profile-pop.placed'); return !!p?.querySelector('${sel}') })()`), 20)
     }
+    perfMeasure = measure
+    await measure('Home, nothing open')
     await themed(undefined)
     await b.ev(`${annRow}.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))`)
     await showing(undefined)
     await sleep(20000)
-    for (const fx of ['drift', 'breathe', 'drift']) {
+    // Each of the six effects (shared/mark.ts THEME_FX), the budget about 6 % of a core over still
+    for (const fx of ['drift', 'breathe', 'orbit', 'tide', 'shimmer', 'parallax']) {
       await measure('her card open, held still')
       await themed(fx)
       await showing(fx)
-      await measure(`her card open, ${fx === 'drift' ? 'Drift' : 'Breathe'}`)
+      await measure(`her card open, ${fx[0].toUpperCase() + fx.slice(1)}`)
       await themed(undefined)
       await showing(undefined)
     }
@@ -1070,6 +1082,7 @@ try {
   await until('A sends voice ahead of video when the link is short of room', () =>
     a.ev(`(() => { const pc = window.__pcs.find((p) => p.connectionState === 'connected'); const e = pc?.getTransceivers().find((t) => t.receiver.track.kind === 'audio')?.sender.getParameters().encodings?.[0]; return e?.priority === 'high' && e?.networkPriority === 'high' })()`), 10)
   await until('B connected to Ann', () => b.ev(`!!document.querySelector('.caller.state-connected')?.textContent.includes('Ann')`))
+  if (perfMeasure) await perfMeasure('in a call, Ann talking (her fake microphone beeps)')
   await b.ev(`document.querySelector('.caller.state-connected .caller-who').click()`)
   await until('clicking Ann in the call opens her panel beside it: in your call, her volume, a message box', () => b.ev(pop((p) => /in your call/i.test(p.textContent) && !!p.querySelector('.pop-volume input[type=range]') && !!p.querySelector('.pop-note input'))), 5)
   await sleep(400)
@@ -1155,7 +1168,7 @@ try {
   await a.ev(`[...document.querySelectorAll('dialog[open] button')].find((x) => x.textContent === 'Turn on camera').click()`)
   await until("Ann's camera plays in her tile under the stream on B", () => b.ev(`[...${peopleRow}.querySelectorAll('.person-tile')].some((t) => t.querySelector('video')?.videoHeight > 0)`), 30)
   await b.shot('people-row')
-  if ((await b.ev(`getComputedStyle(document.querySelector('.person-tile .person-name')).fontSize`)) !== '11px') throw new Error("a call tile's name label is not the tile's small label")
+  if ((await b.ev(`getComputedStyle(document.querySelector('.person-tile .person-name')).fontSize`)) !== '12.5px') throw new Error("a call tile's name label is not the tile's small label")
   await until('sharing with a camera on, A can see its Turn off camera control', () =>
     a.ev(`(() => { const b = [...document.querySelectorAll('.voice-bar button')].find((x) => x.textContent.includes('Turn off camera')); if (!b) return false; const r = b.getBoundingClientRect(), p = document.querySelector('.bars').getBoundingClientRect(); return r.width > 0 && r.left >= p.left && r.right <= p.right })()`), 5)
   await a.ev(`[...document.querySelectorAll('.stage button')].find((x) => x.textContent.includes('Turn off camera')).click()`)
@@ -1624,7 +1637,7 @@ try {
   await until("Ann sees Bob's message in #plans", () => a.ev(shows('hello server')), 30)
   await a.ev(say('welcome bob'))
   await until("Bob sees Ann's answer", () => b.ev(shows('welcome bob')), 30)
-  await until('both are listed online in the members list', () => a.ev(`(() => { const m = document.querySelector('aside.members'); return !!m && m.textContent.includes('Online — 2') && ['Ann', 'Bob'].every((n) => m.textContent.includes(n)) })()`), 30)
+  await until('both are listed online in the members list', () => a.ev(`(() => { const m = document.querySelector('aside.members'); return !!m && m.textContent.includes('Online 2') && ['Ann', 'Bob'].every((n) => m.textContent.includes(n)) })()`), 30)
   await until("Ann's message shows delivered once Bob's receipt is back", () => a.ev(`!!document.querySelector('.msgs .msg') && !document.querySelector('.msgs .msg-status.pending')`), 20)
   await a.shot('server')
   // A channel not being looked at counts on the server's rail tile and is bold until opened
@@ -1787,7 +1800,7 @@ try {
   if (starts.length < 2) throw new Error(`Ann's diagnostics lost her run before the restart: ${JSON.stringify(starts)}`)
   console.log(`ok   Ann's diagnostics keep her run before the restart (${starts.length} starts)`)
   await until('as soon as she is linked, the freshly opened Ann sees Bob and Cy in Lounge and online, without joining', async () =>
-    (await inLounge(a, 'Bob', 'Cy')) && (await a.ev(`!document.querySelector('.voice-bar') && !!document.querySelector('aside.members')?.textContent.includes('Online — 3')`)), 3)
+    (await inLounge(a, 'Bob', 'Cy')) && (await a.ev(`!document.querySelector('.voice-bar') && !!document.querySelector('aside.members')?.textContent.includes('Online 3')`)), 3)
   console.log('     ', (await diagLines(a, 'first person shown'))[0])
   // A normal join keeps its first connections: nobody takes it for a restart (only a different known session is one)
   const restarts = (p) => p.ev(`api.diagnostics().then((d) => d.events.filter((e) => e.text.includes('restarted: dropping the old connection')).length)`)
@@ -1845,6 +1858,37 @@ try {
     await sleep(500)
     await a.shot('card-own-ivory')
     await a.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close')?.click()`)
+  }
+  if (!forwardMode && !relayedMode) {
+    console.log('--- The look at a small window, at 125 % and 150 %, with reduced motion and from the keyboard')
+    // A window's CSS size at each: 900x600, and 1280x800 at 125 % and 150 % (Windows scaling or Ctrl +)
+    for (const [w, h, scale, label] of [[900, 600, 1, '900x600'], [1024, 640, 1.25, '125'], [853, 533, 1.5, '150']]) {
+      await a.cdp('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: scale, mobile: false })
+      await sleep(500)
+      const over = await a.ev(`JSON.stringify({ page: document.documentElement.scrollWidth - innerWidth, cut: [...document.querySelectorAll('.titlebar, .rail, aside, main, .bars')].filter((e) => e.getBoundingClientRect().right > innerWidth + 1).map((e) => e.className) })`)
+      const o = JSON.parse(over)
+      if (o.page > 1 || o.cut.length) throw new Error(`at ${label} the window scrolls sideways or cuts off: ${over}`)
+      console.log(`ok   at ${label} nothing scrolls sideways or is cut off`)
+      await a.shot(`size-${label}`)
+    }
+    await a.cdp('Emulation.clearDeviceMetricsOverride')
+    // Reduced motion: a theme stands still and every animation is over at once
+    await a.cdp('Emulation.setEmulatedMedia', { features: [{ name: 'prefers-reduced-motion', value: 'reduce' }] })
+    await a.ev(`document.querySelector('.user-bar-me').click()`)
+    await until('with reduced motion her own card shows her theme, standing still', () => a.ev(`(() => { const m = document.querySelector('dialog[open].card-dialog .theme-layer .mv'); return !!m && getComputedStyle(m).animationName === 'none' })()`), 10)
+    await a.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close')?.click()`)
+    await a.cdp('Emulation.setEmulatedMedia', { features: [] })
+    // The keyboard: every stop Tab reaches shows the focus ring
+    await a.ev(`document.activeElement?.blur()`)
+    const ringless = []
+    for (let i = 0; i < 25; i++) {
+      await a.cdp('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+      await a.cdp('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Tab', code: 'Tab', windowsVirtualKeyCode: 9 })
+      const f = await a.ev(`(() => { const e = document.activeElement; if (!e || e === document.body) return null; const c = getComputedStyle(e), box = e.closest('.composer'); return { tag: e.tagName + '.' + [...e.classList].join('.'), ring: (c.outlineStyle !== 'none' && parseFloat(c.outlineWidth) >= 2) || c.boxShadow.includes('inset') || (!!box && getComputedStyle(box).boxShadow.includes('inset')) } })() /* a field shows focus as its voice edge (components.css), the composer's text box as the composer's */`)
+      if (f && !f.ring) ringless.push(f.tag)
+    }
+    if (ringless.length) throw new Error('these show no focus ring: ' + [...new Set(ringless)].join(', '))
+    console.log('ok   25 Tab stops, each with the focus ring')
   }
 } catch (e) {
   failed = true

@@ -1,6 +1,6 @@
 // Small shared pieces of the Eleusinia interface: icons, portraits, emblems, dialogs and ornaments.
 import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useRef, useState } from 'react'
-import { type Drawing, type Theme, type Weave, WEAVES, banner, bytesOf, defaultWeave, picture, themeScrim, tones } from '../shared/mark'
+import { type Drawing, type Theme, type Weave, WEAVES, banner, bytesOf, defaultWeave, picture, themeFlat, tones } from '../shared/mark'
 import { type Banner, type GifRef, type Group, type Key, MAX_MEDIA, type Profile, type ServerView } from '../shared/protocol'
 import { api } from './common'
 import { GifPicker, type Picked, gifFile } from './Gifs'
@@ -240,13 +240,15 @@ export function Woven({ id, weave, tall }: { id: string; weave?: Weave; tall?: b
   return <Drawn className="woven" d={banner(id, weave, !tall)} slice />
 }
 
-// A profile's theme behind the whole card (design/mockups/court-profile.html, 3): its weave at the chosen strength
-// under a scrim of the card's own colour (themeScrim), moving only by transform or opacity. It stops while off screen,
-// while the window is hidden, for reduced motion (hall.css), and with `still`.
+// A profile's theme behind the whole card (design/system, Profile theme): its weave, flat (themeFlat: only its hues,
+// moved away from the text's luminance, so text keeps the plain card's contrast at any strength), moving by one of the
+// effects in styles/theme-fx.css (a second weave for Parallax, a band of its lightest tone for Shimmer), only by
+// transform or opacity. It stops while off screen, while the window is hidden, for reduced motion, and with `still`.
 export function ThemeLayer({ k, theme, still }: { k: Key; theme?: Theme; still?: boolean }) {
   const ref = useRef<HTMLSpanElement>(null)
   const [seen, setSeen] = useState(true)
   const [shown, setShown] = useState(!document.hidden)
+  const light = useLight()
   useEffect(() => {
     const el = ref.current
     if (!el || !theme?.fx) return
@@ -264,20 +266,39 @@ export function ThemeLayer({ k, theme, still }: { k: Key; theme?: Theme; still?:
   }, [theme?.fx])
   if (!theme) return null
   const moving = theme.fx && !still && seen && shown
-  return (
-    <span
-      ref={ref}
-      className={`profile-theme ${theme.fx ? `fx-${theme.fx} d-${Math.round(theme.depth / 10)}` : ''} ${moving ? '' : 'paused'}`}
-      aria-hidden="true"
-      style={{ ['--op' as string]: theme.op / 100, ['--scrim' as string]: `${Math.round(themeScrim(theme.op) * 100)}%`, ['--spd' as string]: theme.speed }}
-    >
-      <span className="theme-weave">
-        <span className="theme-move">
-          <Woven id={k} weave={{ kind: theme.kind, shift: theme.shift }} tall />
-        </span>
+  const flat = themeFlat(light)
+  const hue = +tones(bytesOf(k), theme.shift)[2].match(/(\d+)\)$/)![1]
+  const weave = (turn: number) => (
+    <span className={`wv${turn ? ' wv2' : ''}`}>
+      <span className="mv">
+        <Drawn className="woven" d={banner(k, { kind: theme.kind, shift: (theme.shift + turn) % 360 }, false, flat)} slice />
       </span>
     </span>
   )
+  return (
+    <span
+      ref={ref}
+      className={`theme-layer profile-theme ${theme.fx ? `fx-${theme.fx} d-${Math.round(theme.depth / 10)}` : ''} ${moving ? 'moving' : 'paused'}`}
+      aria-hidden="true"
+      style={{ ['--op' as string]: theme.op / 100, ['--scrim' as string]: '0%', ['--spd' as string]: theme.speed, ['--band' as string]: `oklch(${flat.L} ${flat.C} ${hue})` }}
+    >
+      {weave(0)}
+      {theme.fx === 'parallax' && weave(25)}
+      {theme.fx === 'shimmer' && <span className="band" />}
+    </span>
+  )
+}
+
+// Whether the window shows Ivory: data-theme on <html> (theme.ts), which can change while a card is open
+function useLight() {
+  const read = () => document.documentElement.dataset.theme === 'light'
+  const [light, setLight] = useState(read)
+  useEffect(() => {
+    const o = new MutationObserver(() => setLight(read()))
+    o.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] })
+    return () => o.disconnect()
+  }, [])
+  return light
 }
 
 // A picture's colour, the most saturated pixels weighing most, brought to a lightness both themes read well

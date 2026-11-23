@@ -113,19 +113,19 @@ export function ProfilePop({ k, from, st, people, run, close, expand, chat, edit
         <h2 className="pop-name">
           {name} {st.settings.verified?.includes(k) && <VerifiedSeal />}
         </h2>
-        {statusOf(p) && <p className="pop-status">{statusOf(p)!.text}</p>}
-        <PlayDays st={st} k={k} />
         <p className="pop-handle">
           {p.handle || 'No friend ID yet'}
           {me && ' (you)'}
         </p>
+        {statusOf(p) && <p className="pop-status">{statusOf(p)!.text}</p>}
+        <PlayDays st={st} k={k} />
+        {p.about && <p className="pop-about">{p.about}</p>}
         {!me && (
           <p className={`pop-presence ${online ? 'on' : ''}`}>
             <span className="pop-dot" aria-hidden="true" />
             {presence}
           </p>
         )}
-        {p.about && <p className="pop-about">{p.about}</p>}
         {game && (
           <button className="pop-glance" onClick={expand} aria-label={`See everything about ${name}'s game`}>
             <GameGlance g={game} />

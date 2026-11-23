@@ -1,0 +1,150 @@
+/* The profile theme's six effects (Drift, Breathe, Orbit, Tide, Shimmer, Parallax): written out by design/system/effects.js
+   (fxCss), the same stylesheet the mockups use. Transform and opacity only, fixed keyframes per depth step (1 to 10),
+   stepped, its own layer only while it moves, still under reduced motion. ThemeLayer in ui.tsx. */
+.theme-layer .wv { position: absolute; inset: -35%; opacity: var(--op, 0.3); }
+.theme-layer .wv > .mv { position: absolute; inset: 0; }
+.theme-layer .wv svg { width: 100%; height: 100%; display: block; }
+.theme-layer .wv2 { opacity: calc(var(--op, 0.3) * 0.7); }
+.theme-layer .wv2 svg { transform: scale(1.35) rotate(8deg); }
+.theme-layer .band { position: absolute; top: -10%; bottom: -10%; left: 0; width: 38%; opacity: var(--op, 0.3); background: linear-gradient(90deg, transparent, var(--band, #fff) 50%, transparent); transform: translateX(-120%); }
+.theme-layer::after { content: ''; position: absolute; inset: 0; background: color-mix(in srgb, var(--surface) var(--scrim, 45%), transparent); }
+.theme-layer.moving .mv, .theme-layer.moving .band { will-change: transform, opacity; }
+.theme-layer.paused .mv, .theme-layer.paused .band { animation-play-state: paused !important; }
+@media (prefers-reduced-motion: reduce) { .theme-layer .mv, .theme-layer .band { animation: none !important; } }
+.theme-layer.fx-drift .wv:first-child .mv { animation: calc(24s / var(--spd, 1)) steps(96) alternate infinite; }
+@keyframes fx-drift-1 { from { transform: translate3d(-2%, -0.6%, 0); } to { transform: translate3d(2%, 0.6%, 0); } }
+.theme-layer.fx-drift.d-1 .wv:first-child .mv { animation-name: fx-drift-1; }
+@keyframes fx-drift-2 { from { transform: translate3d(-4%, -1.2%, 0); } to { transform: translate3d(4%, 1.2%, 0); } }
+.theme-layer.fx-drift.d-2 .wv:first-child .mv { animation-name: fx-drift-2; }
+@keyframes fx-drift-3 { from { transform: translate3d(-6%, -1.7999999999999998%, 0); } to { transform: translate3d(6%, 1.7999999999999998%, 0); } }
+.theme-layer.fx-drift.d-3 .wv:first-child .mv { animation-name: fx-drift-3; }
+@keyframes fx-drift-4 { from { transform: translate3d(-8%, -2.4%, 0); } to { transform: translate3d(8%, 2.4%, 0); } }
+.theme-layer.fx-drift.d-4 .wv:first-child .mv { animation-name: fx-drift-4; }
+@keyframes fx-drift-5 { from { transform: translate3d(-10%, -3%, 0); } to { transform: translate3d(10%, 3%, 0); } }
+.theme-layer.fx-drift.d-5 .wv:first-child .mv { animation-name: fx-drift-5; }
+@keyframes fx-drift-6 { from { transform: translate3d(-12%, -3.5999999999999996%, 0); } to { transform: translate3d(12%, 3.5999999999999996%, 0); } }
+.theme-layer.fx-drift.d-6 .wv:first-child .mv { animation-name: fx-drift-6; }
+@keyframes fx-drift-7 { from { transform: translate3d(-14%, -4.2%, 0); } to { transform: translate3d(14%, 4.2%, 0); } }
+.theme-layer.fx-drift.d-7 .wv:first-child .mv { animation-name: fx-drift-7; }
+@keyframes fx-drift-8 { from { transform: translate3d(-16%, -4.8%, 0); } to { transform: translate3d(16%, 4.8%, 0); } }
+.theme-layer.fx-drift.d-8 .wv:first-child .mv { animation-name: fx-drift-8; }
+@keyframes fx-drift-9 { from { transform: translate3d(-18%, -5.3999999999999995%, 0); } to { transform: translate3d(18%, 5.3999999999999995%, 0); } }
+.theme-layer.fx-drift.d-9 .wv:first-child .mv { animation-name: fx-drift-9; }
+@keyframes fx-drift-10 { from { transform: translate3d(-20%, -6%, 0); } to { transform: translate3d(20%, 6%, 0); } }
+.theme-layer.fx-drift.d-10 .wv:first-child .mv { animation-name: fx-drift-10; }
+.theme-layer.fx-breathe .wv:first-child .mv { animation: calc(6s / var(--spd, 1)) steps(24) alternate infinite; }
+@keyframes fx-breathe-1 { from { opacity: 0.925; transform: scale(1); } to { opacity: 1; transform: scale(1.015); } }
+.theme-layer.fx-breathe.d-1 .wv:first-child .mv { animation-name: fx-breathe-1; }
+@keyframes fx-breathe-2 { from { opacity: 0.850; transform: scale(1); } to { opacity: 1; transform: scale(1.030); } }
+.theme-layer.fx-breathe.d-2 .wv:first-child .mv { animation-name: fx-breathe-2; }
+@keyframes fx-breathe-3 { from { opacity: 0.775; transform: scale(1); } to { opacity: 1; transform: scale(1.045); } }
+.theme-layer.fx-breathe.d-3 .wv:first-child .mv { animation-name: fx-breathe-3; }
+@keyframes fx-breathe-4 { from { opacity: 0.700; transform: scale(1); } to { opacity: 1; transform: scale(1.060); } }
+.theme-layer.fx-breathe.d-4 .wv:first-child .mv { animation-name: fx-breathe-4; }
+@keyframes fx-breathe-5 { from { opacity: 0.625; transform: scale(1); } to { opacity: 1; transform: scale(1.075); } }
+.theme-layer.fx-breathe.d-5 .wv:first-child .mv { animation-name: fx-breathe-5; }
+@keyframes fx-breathe-6 { from { opacity: 0.550; transform: scale(1); } to { opacity: 1; transform: scale(1.090); } }
+.theme-layer.fx-breathe.d-6 .wv:first-child .mv { animation-name: fx-breathe-6; }
+@keyframes fx-breathe-7 { from { opacity: 0.475; transform: scale(1); } to { opacity: 1; transform: scale(1.105); } }
+.theme-layer.fx-breathe.d-7 .wv:first-child .mv { animation-name: fx-breathe-7; }
+@keyframes fx-breathe-8 { from { opacity: 0.400; transform: scale(1); } to { opacity: 1; transform: scale(1.120); } }
+.theme-layer.fx-breathe.d-8 .wv:first-child .mv { animation-name: fx-breathe-8; }
+@keyframes fx-breathe-9 { from { opacity: 0.325; transform: scale(1); } to { opacity: 1; transform: scale(1.135); } }
+.theme-layer.fx-breathe.d-9 .wv:first-child .mv { animation-name: fx-breathe-9; }
+@keyframes fx-breathe-10 { from { opacity: 0.250; transform: scale(1); } to { opacity: 1; transform: scale(1.150); } }
+.theme-layer.fx-breathe.d-10 .wv:first-child .mv { animation-name: fx-breathe-10; }
+.theme-layer.fx-orbit .wv:first-child .mv { animation: calc(16s / var(--spd, 1)) steps(64) infinite; }
+@keyframes fx-orbit-1 { 0% { transform: translate3d(1.4%, 0, 0); } 25% { transform: translate3d(0, 1.4%, 0); } 50% { transform: translate3d(-1.4%, 0, 0); } 75% { transform: translate3d(0, -1.4%, 0); } 100% { transform: translate3d(1.4%, 0, 0); } }
+.theme-layer.fx-orbit.d-1 .wv:first-child .mv { animation-name: fx-orbit-1; }
+@keyframes fx-orbit-2 { 0% { transform: translate3d(2.8%, 0, 0); } 25% { transform: translate3d(0, 2.8%, 0); } 50% { transform: translate3d(-2.8%, 0, 0); } 75% { transform: translate3d(0, -2.8%, 0); } 100% { transform: translate3d(2.8%, 0, 0); } }
+.theme-layer.fx-orbit.d-2 .wv:first-child .mv { animation-name: fx-orbit-2; }
+@keyframes fx-orbit-3 { 0% { transform: translate3d(4.2%, 0, 0); } 25% { transform: translate3d(0, 4.2%, 0); } 50% { transform: translate3d(-4.2%, 0, 0); } 75% { transform: translate3d(0, -4.2%, 0); } 100% { transform: translate3d(4.2%, 0, 0); } }
+.theme-layer.fx-orbit.d-3 .wv:first-child .mv { animation-name: fx-orbit-3; }
+@keyframes fx-orbit-4 { 0% { transform: translate3d(5.6%, 0, 0); } 25% { transform: translate3d(0, 5.6%, 0); } 50% { transform: translate3d(-5.6%, 0, 0); } 75% { transform: translate3d(0, -5.6%, 0); } 100% { transform: translate3d(5.6%, 0, 0); } }
+.theme-layer.fx-orbit.d-4 .wv:first-child .mv { animation-name: fx-orbit-4; }
+@keyframes fx-orbit-5 { 0% { transform: translate3d(7.0%, 0, 0); } 25% { transform: translate3d(0, 7.0%, 0); } 50% { transform: translate3d(-7.0%, 0, 0); } 75% { transform: translate3d(0, -7.0%, 0); } 100% { transform: translate3d(7.0%, 0, 0); } }
+.theme-layer.fx-orbit.d-5 .wv:first-child .mv { animation-name: fx-orbit-5; }
+@keyframes fx-orbit-6 { 0% { transform: translate3d(8.4%, 0, 0); } 25% { transform: translate3d(0, 8.4%, 0); } 50% { transform: translate3d(-8.4%, 0, 0); } 75% { transform: translate3d(0, -8.4%, 0); } 100% { transform: translate3d(8.4%, 0, 0); } }
+.theme-layer.fx-orbit.d-6 .wv:first-child .mv { animation-name: fx-orbit-6; }
+@keyframes fx-orbit-7 { 0% { transform: translate3d(9.8%, 0, 0); } 25% { transform: translate3d(0, 9.8%, 0); } 50% { transform: translate3d(-9.8%, 0, 0); } 75% { transform: translate3d(0, -9.8%, 0); } 100% { transform: translate3d(9.8%, 0, 0); } }
+.theme-layer.fx-orbit.d-7 .wv:first-child .mv { animation-name: fx-orbit-7; }
+@keyframes fx-orbit-8 { 0% { transform: translate3d(11.2%, 0, 0); } 25% { transform: translate3d(0, 11.2%, 0); } 50% { transform: translate3d(-11.2%, 0, 0); } 75% { transform: translate3d(0, -11.2%, 0); } 100% { transform: translate3d(11.2%, 0, 0); } }
+.theme-layer.fx-orbit.d-8 .wv:first-child .mv { animation-name: fx-orbit-8; }
+@keyframes fx-orbit-9 { 0% { transform: translate3d(12.6%, 0, 0); } 25% { transform: translate3d(0, 12.6%, 0); } 50% { transform: translate3d(-12.6%, 0, 0); } 75% { transform: translate3d(0, -12.6%, 0); } 100% { transform: translate3d(12.6%, 0, 0); } }
+.theme-layer.fx-orbit.d-9 .wv:first-child .mv { animation-name: fx-orbit-9; }
+@keyframes fx-orbit-10 { 0% { transform: translate3d(14.0%, 0, 0); } 25% { transform: translate3d(0, 14.0%, 0); } 50% { transform: translate3d(-14.0%, 0, 0); } 75% { transform: translate3d(0, -14.0%, 0); } 100% { transform: translate3d(14.0%, 0, 0); } }
+.theme-layer.fx-orbit.d-10 .wv:first-child .mv { animation-name: fx-orbit-10; }
+.theme-layer.fx-tide .wv:first-child .mv { animation: calc(8s / var(--spd, 1)) steps(32) alternate infinite; }
+@keyframes fx-tide-1 { from { transform: translate3d(-2.4%, 0, 0); } to { transform: translate3d(2.4%, 0, 0); } }
+.theme-layer.fx-tide.d-1 .wv:first-child .mv { animation-name: fx-tide-1; }
+@keyframes fx-tide-2 { from { transform: translate3d(-4.8%, 0, 0); } to { transform: translate3d(4.8%, 0, 0); } }
+.theme-layer.fx-tide.d-2 .wv:first-child .mv { animation-name: fx-tide-2; }
+@keyframes fx-tide-3 { from { transform: translate3d(-7.2%, 0, 0); } to { transform: translate3d(7.2%, 0, 0); } }
+.theme-layer.fx-tide.d-3 .wv:first-child .mv { animation-name: fx-tide-3; }
+@keyframes fx-tide-4 { from { transform: translate3d(-9.6%, 0, 0); } to { transform: translate3d(9.6%, 0, 0); } }
+.theme-layer.fx-tide.d-4 .wv:first-child .mv { animation-name: fx-tide-4; }
+@keyframes fx-tide-5 { from { transform: translate3d(-12.0%, 0, 0); } to { transform: translate3d(12.0%, 0, 0); } }
+.theme-layer.fx-tide.d-5 .wv:first-child .mv { animation-name: fx-tide-5; }
+@keyframes fx-tide-6 { from { transform: translate3d(-14.4%, 0, 0); } to { transform: translate3d(14.4%, 0, 0); } }
+.theme-layer.fx-tide.d-6 .wv:first-child .mv { animation-name: fx-tide-6; }
+@keyframes fx-tide-7 { from { transform: translate3d(-16.8%, 0, 0); } to { transform: translate3d(16.8%, 0, 0); } }
+.theme-layer.fx-tide.d-7 .wv:first-child .mv { animation-name: fx-tide-7; }
+@keyframes fx-tide-8 { from { transform: translate3d(-19.2%, 0, 0); } to { transform: translate3d(19.2%, 0, 0); } }
+.theme-layer.fx-tide.d-8 .wv:first-child .mv { animation-name: fx-tide-8; }
+@keyframes fx-tide-9 { from { transform: translate3d(-21.6%, 0, 0); } to { transform: translate3d(21.6%, 0, 0); } }
+.theme-layer.fx-tide.d-9 .wv:first-child .mv { animation-name: fx-tide-9; }
+@keyframes fx-tide-10 { from { transform: translate3d(-24.0%, 0, 0); } to { transform: translate3d(24.0%, 0, 0); } }
+.theme-layer.fx-tide.d-10 .wv:first-child .mv { animation-name: fx-tide-10; }
+.theme-layer.fx-shimmer .band { animation: calc(5s / var(--spd, 1)) steps(20) infinite; }
+@keyframes fx-shimmer-1 { from { transform: translateX(-120%); opacity: 0; } 20% { opacity: 0.415; } 80% { opacity: 0.415; } to { transform: translateX(300%); opacity: 0; } }
+.theme-layer.fx-shimmer.d-1 .band { animation-name: fx-shimmer-1; }
+@keyframes fx-shimmer-2 { from { transform: translateX(-120%); opacity: 0; } 20% { opacity: 0.480; } 80% { opacity: 0.480; } to { transform: translateX(300%); opacity: 0; } }
+.theme-layer.fx-shimmer.d-2 .band { animation-name: fx-shimmer-2; }
+@keyframes fx-shimmer-3 { from { transform: translateX(-120%); opacity: 0; } 20% { opacity: 0.545; } 80% { opacity: 0.545; } to { transform: translateX(300%); opacity: 0; } }
+.theme-layer.fx-shimmer.d-3 .band { animation-name: fx-shimmer-3; }
+@keyframes fx-shimmer-4 { from { transform: translateX(-120%); opacity: 0; } 20% { opacity: 0.610; } 80% { opacity: 0.610; } to { transform: translateX(300%); opacity: 0; } }
+.theme-layer.fx-shimmer.d-4 .band { animation-name: fx-shimmer-4; }
+@keyframes fx-shimmer-5 { from { transform: translateX(-120%); opacity: 0; } 20% { opacity: 0.675; } 80% { opacity: 0.675; } to { transform: translateX(300%); opacity: 0; } }
+.theme-layer.fx-shimmer.d-5 .band { animation-name: fx-shimmer-5; }
+@keyframes fx-shimmer-6 { from { transform: translateX(-120%); opacity: 0; } 20% { opacity: 0.740; } 80% { opacity: 0.740; } to { transform: translateX(300%); opacity: 0; } }
+.theme-layer.fx-shimmer.d-6 .band { animation-name: fx-shimmer-6; }
+@keyframes fx-shimmer-7 { from { transform: translateX(-120%); opacity: 0; } 20% { opacity: 0.805; } 80% { opacity: 0.805; } to { transform: translateX(300%); opacity: 0; } }
+.theme-layer.fx-shimmer.d-7 .band { animation-name: fx-shimmer-7; }
+@keyframes fx-shimmer-8 { from { transform: translateX(-120%); opacity: 0; } 20% { opacity: 0.870; } 80% { opacity: 0.870; } to { transform: translateX(300%); opacity: 0; } }
+.theme-layer.fx-shimmer.d-8 .band { animation-name: fx-shimmer-8; }
+@keyframes fx-shimmer-9 { from { transform: translateX(-120%); opacity: 0; } 20% { opacity: 0.935; } 80% { opacity: 0.935; } to { transform: translateX(300%); opacity: 0; } }
+.theme-layer.fx-shimmer.d-9 .band { animation-name: fx-shimmer-9; }
+@keyframes fx-shimmer-10 { from { transform: translateX(-120%); opacity: 0; } 20% { opacity: 1.000; } 80% { opacity: 1.000; } to { transform: translateX(300%); opacity: 0; } }
+.theme-layer.fx-shimmer.d-10 .band { animation-name: fx-shimmer-10; }
+.theme-layer.fx-parallax .wv .mv { animation: calc(24s / var(--spd, 1)) steps(96) infinite; }
+.theme-layer.fx-parallax .wv2 .mv { animation: calc(12s / var(--spd, 1)) steps(96) alternate infinite; }
+@keyframes fx-parallax-back-1 { from { transform: translate3d(-1.2%, 0, 0); } to { transform: translate3d(1.2%, 0, 0); } }
+@keyframes fx-parallax-front-1 { from { transform: translate3d(2.4%, 0.6%, 0); } to { transform: translate3d(-2.4%, -0.6%, 0); } }
+.theme-layer.fx-parallax.d-1 .wv:first-child .mv { animation-name: fx-parallax-back-1; } .theme-layer.fx-parallax.d-1 .wv2 .mv { animation-name: fx-parallax-front-1; }
+@keyframes fx-parallax-back-2 { from { transform: translate3d(-2.4%, 0, 0); } to { transform: translate3d(2.4%, 0, 0); } }
+@keyframes fx-parallax-front-2 { from { transform: translate3d(4.8%, 1.2%, 0); } to { transform: translate3d(-4.8%, -1.2%, 0); } }
+.theme-layer.fx-parallax.d-2 .wv:first-child .mv { animation-name: fx-parallax-back-2; } .theme-layer.fx-parallax.d-2 .wv2 .mv { animation-name: fx-parallax-front-2; }
+@keyframes fx-parallax-back-3 { from { transform: translate3d(-3.6%, 0, 0); } to { transform: translate3d(3.6%, 0, 0); } }
+@keyframes fx-parallax-front-3 { from { transform: translate3d(7.2%, 1.8%, 0); } to { transform: translate3d(-7.2%, -1.8%, 0); } }
+.theme-layer.fx-parallax.d-3 .wv:first-child .mv { animation-name: fx-parallax-back-3; } .theme-layer.fx-parallax.d-3 .wv2 .mv { animation-name: fx-parallax-front-3; }
+@keyframes fx-parallax-back-4 { from { transform: translate3d(-4.8%, 0, 0); } to { transform: translate3d(4.8%, 0, 0); } }
+@keyframes fx-parallax-front-4 { from { transform: translate3d(9.6%, 2.4%, 0); } to { transform: translate3d(-9.6%, -2.4%, 0); } }
+.theme-layer.fx-parallax.d-4 .wv:first-child .mv { animation-name: fx-parallax-back-4; } .theme-layer.fx-parallax.d-4 .wv2 .mv { animation-name: fx-parallax-front-4; }
+@keyframes fx-parallax-back-5 { from { transform: translate3d(-6.0%, 0, 0); } to { transform: translate3d(6.0%, 0, 0); } }
+@keyframes fx-parallax-front-5 { from { transform: translate3d(12.0%, 3.0%, 0); } to { transform: translate3d(-12.0%, -3.0%, 0); } }
+.theme-layer.fx-parallax.d-5 .wv:first-child .mv { animation-name: fx-parallax-back-5; } .theme-layer.fx-parallax.d-5 .wv2 .mv { animation-name: fx-parallax-front-5; }
+@keyframes fx-parallax-back-6 { from { transform: translate3d(-7.2%, 0, 0); } to { transform: translate3d(7.2%, 0, 0); } }
+@keyframes fx-parallax-front-6 { from { transform: translate3d(14.4%, 3.6%, 0); } to { transform: translate3d(-14.4%, -3.6%, 0); } }
+.theme-layer.fx-parallax.d-6 .wv:first-child .mv { animation-name: fx-parallax-back-6; } .theme-layer.fx-parallax.d-6 .wv2 .mv { animation-name: fx-parallax-front-6; }
+@keyframes fx-parallax-back-7 { from { transform: translate3d(-8.4%, 0, 0); } to { transform: translate3d(8.4%, 0, 0); } }
+@keyframes fx-parallax-front-7 { from { transform: translate3d(16.8%, 4.2%, 0); } to { transform: translate3d(-16.8%, -4.2%, 0); } }
+.theme-layer.fx-parallax.d-7 .wv:first-child .mv { animation-name: fx-parallax-back-7; } .theme-layer.fx-parallax.d-7 .wv2 .mv { animation-name: fx-parallax-front-7; }
+@keyframes fx-parallax-back-8 { from { transform: translate3d(-9.6%, 0, 0); } to { transform: translate3d(9.6%, 0, 0); } }
+@keyframes fx-parallax-front-8 { from { transform: translate3d(19.2%, 4.8%, 0); } to { transform: translate3d(-19.2%, -4.8%, 0); } }
+.theme-layer.fx-parallax.d-8 .wv:first-child .mv { animation-name: fx-parallax-back-8; } .theme-layer.fx-parallax.d-8 .wv2 .mv { animation-name: fx-parallax-front-8; }
+@keyframes fx-parallax-back-9 { from { transform: translate3d(-10.8%, 0, 0); } to { transform: translate3d(10.8%, 0, 0); } }
+@keyframes fx-parallax-front-9 { from { transform: translate3d(21.6%, 5.4%, 0); } to { transform: translate3d(-21.6%, -5.4%, 0); } }
+.theme-layer.fx-parallax.d-9 .wv:first-child .mv { animation-name: fx-parallax-back-9; } .theme-layer.fx-parallax.d-9 .wv2 .mv { animation-name: fx-parallax-front-9; }
+@keyframes fx-parallax-back-10 { from { transform: translate3d(-12.0%, 0, 0); } to { transform: translate3d(12.0%, 0, 0); } }
+@keyframes fx-parallax-front-10 { from { transform: translate3d(24.0%, 6.0%, 0); } to { transform: translate3d(-24.0%, -6.0%, 0); } }
+.theme-layer.fx-parallax.d-10 .wv:first-child .mv { animation-name: fx-parallax-back-10; } .theme-layer.fx-parallax.d-10 .wv2 .mv { animation-name: fx-parallax-front-10; }

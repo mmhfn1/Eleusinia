@@ -83,7 +83,9 @@ export async function audit(win, screen, ev, cdp) {
 let shotNo = 0
 async function states(c, cdp, ev) {
   if (!c.rect.w || !c.rect.h) return []
-  const dir = join(auditDir, 'buttons')
+  // each run's state pictures in its own folder, so an after run never overwrites the before pictures
+  const run = process.env.ELEUSINIA_SMOKE_AUDIT_NAME ?? 'before'
+  const dir = join(auditDir, run === 'before' ? 'buttons' : `buttons-${run}`)
   mkdirSync(dir, { recursive: true })
   await cdp('DOM.enable')
   await cdp('CSS.enable')

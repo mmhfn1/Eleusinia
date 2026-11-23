@@ -5,7 +5,6 @@ import { type Key, type ServerView, type State } from '../shared/protocol'
 import { Avatar, CopyButton, Dialog, GroupEmblem, Icon, ServerBannerArt, WeavePick, cover, gifPicture } from './ui'
 import { GifPicker, type Picked, gifFile } from './Gifs'
 import { NOBODY, type Run, api, labelOf } from './common'
-import './server-settings.css'
 
 type Srv = State['servers'][string]
 type Role = Srv['roles'][number]

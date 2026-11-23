@@ -1,0 +1,283 @@
+/* A server's column (design/system s=server, s=channel): the banner head with the menu, categories, channels and the
+   people in voice channels. Server.tsx. */
+
+aside.server-side {
+  position: relative;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  --banner-h: 172px;
+  --banner-fade: 56px;
+}
+.server-head {
+  position: absolute;
+  inset: 0 0 auto;
+  z-index: 2;
+  isolation: isolate;
+  display: flex;
+  align-items: flex-end;
+  gap: var(--sp-3);
+  height: var(--banner-h);
+  padding: 0 var(--sp-3) calc(var(--banner-fade) + 6px) var(--sp-4);
+  border: 0;
+  background: none;
+  color: var(--on-art);
+  text-align: left;
+}
+.server-head > .icon {
+  flex: none;
+  color: var(--on-art);
+}
+.server-head .avatar,
+.server-head .crest {
+  align-self: flex-end;
+}
+.server-banner {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.server-head .server-banner {
+  mask-image: linear-gradient(180deg, #000 calc(100% - var(--banner-fade)), transparent);
+}
+.server-banner > img,
+.server-banner > svg,
+.server-banner > .woven {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* The scrim holds behind the whole name (it ends where the banner's own fade starts, 56 px up) and is gone 24 px before
+   the bottom, so on-art keeps AA over any art and the fade into the column stays clean in Ivory */
+.server-banner::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    180deg,
+    rgb(10 12 16 / calc(0.1 + var(--dark, 0) * 0.004)) 0%,
+    rgb(10 12 16 / calc(0.7 + var(--dark, 0) * 0.003)) 45%,
+    rgb(10 12 16 / calc(0.7 + var(--dark, 0) * 0.003)) calc(100% - var(--banner-fade)),
+    rgb(10 12 16 / 0) calc(100% - 24px)
+  );
+}
+.server-head:hover .server-banner::after,
+.server-head.open .server-banner::after {
+  opacity: 0.85;
+}
+.server-title {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+.server-name {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: var(--type-section);
+}
+.server-head .server-name {
+  display: -webkit-box;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.server-count {
+  font: var(--type-meta);
+  font-variant-numeric: tabular-nums;
+}
+aside.server-side .channels {
+  padding-top: var(--banner-h);
+}
+
+/* Channels */
+.channels {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  padding: var(--sp-3) var(--sp-2);
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.channels details {
+  display: grid;
+  gap: 2px;
+  margin-top: var(--sp-3);
+}
+.channels summary {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+  height: var(--h-sm);
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-1);
+  font: var(--type-label);
+  color: var(--ink-2);
+  list-style: none;
+  cursor: pointer;
+}
+.channels summary::-webkit-details-marker {
+  display: none;
+}
+.channels summary:hover {
+  color: var(--ink);
+}
+.channels summary h2 {
+  display: inline;
+  font: inherit;
+}
+.channel-row {
+  position: relative;
+}
+.channel {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  width: 100%;
+  height: var(--h-md);
+  padding: 0 var(--sp-2);
+  border: 0;
+  border-radius: var(--r-1);
+  background: none;
+  color: var(--ink-2);
+  font: var(--type-name);
+  text-align: left;
+}
+.channel > .icon {
+  flex: none;
+  color: var(--ink-3);
+}
+.channel:hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+.channel.active {
+  background: var(--raised);
+  color: var(--ink);
+}
+.channel.active::before {
+  content: '';
+  position: absolute;
+  top: var(--sp-2);
+  bottom: var(--sp-2);
+  left: 0;
+  width: var(--lit-w);
+  border-radius: 1px;
+  background: var(--gold);
+}
+/* Unread is told by colour and the count, never by weight */
+.channel.unread {
+  color: var(--ink);
+}
+.channel-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.channel-lock {
+  display: inline-grid;
+  color: var(--ink-3);
+}
+.channel .tail {
+  font: var(--type-time);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.channel-tools {
+  position: absolute;
+  top: var(--sp-1);
+  right: var(--sp-1);
+  display: none;
+  gap: 2px;
+}
+.channel-tools .icon-button {
+  width: var(--h-sm);
+  height: var(--h-sm);
+}
+.channel-row:hover .channel-tools,
+.channel-row:focus-within .channel-tools {
+  display: flex;
+}
+.channel-row:hover .channel .tail,
+.channel-row:focus-within .channel .tail,
+.channel-row:hover .channel-count,
+.channel-row:focus-within .channel-count {
+  visibility: hidden;
+}
+.voice-people {
+  display: grid;
+  gap: 2px;
+  padding: 2px 0 var(--sp-1) var(--sp-6);
+}
+.voice-person.member {
+  gap: var(--sp-2);
+  min-height: var(--h-sm);
+  padding: 2px var(--sp-2);
+}
+.voice-person .row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: var(--type-meta);
+}
+.voice-person .user {
+  font: var(--type-meta);
+  color: var(--ink);
+}
+.voice-person.speaking .avatar > img,
+.voice-person.speaking .avatar > svg,
+.member.speaking .avatar > img,
+.member.speaking .avatar > svg {
+  outline: var(--lit-w) solid var(--lit);
+  outline-offset: 1px;
+}
+
+/* A channel's head */
+.chat-head .chat-topic {
+  flex: 1;
+  min-width: 0;
+  padding-left: var(--sp-3);
+  border-left: var(--line-w) solid var(--line);
+}
+.chat-invite {
+  margin-left: auto;
+}
+
+/* Pickers in server dialogs */
+.poke-list {
+  display: grid;
+  gap: 2px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+.poke-row {
+  cursor: default;
+}
+.poke-row > :last-child {
+  margin-left: auto;
+}
+.invite-link b,
+.invite-input {
+  font: var(--type-mono);
+}
+/* A members heading's count: the time role beside the label (design/system s=server) */
+aside.members section > h2 > span {
+  margin-left: var(--sp-1);
+  font: var(--type-time);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-3);
+}

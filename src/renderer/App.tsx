@@ -16,7 +16,7 @@ import { REACH_WORDS, callWords, forwardingWords, reachOf, routeWords } from '..
 import { ContextMenu, type Item, Rail, otherIn, railDms, useMenus } from './Rail'
 import { Splash, StillConnecting } from './Splash'
 import { ActivityNotices, DmList, observe as observeFeed } from './Lists'
-import { PersonPanel, PlayDays, ShowcaseView } from './Person'
+import { PersonPanel, PlayDays, RecentlyPlayed, ShowcaseView } from './Person'
 import { TOGETHER_TICK, tick as tickTogether } from './together'
 
 type Poke = { from: Key; server: string; channel: string }
@@ -294,10 +294,10 @@ function TitleBar({ place, call: live, nav }: { place: string; call?: { name: st
     <header className="titlebar">
       {nav && (
         <span className="titlebar-nav">
-          <button aria-label="Back" title="Back" onClick={() => nav.step(true)}>
+          <button className="icon-button small" aria-label="Back" title="Back" onClick={() => nav.step(true)}>
             <Icon name="back" size={16} />
           </button>
-          <button aria-label="Forward" title="Forward" onClick={() => nav.step(false)}>
+          <button className="icon-button small" aria-label="Forward" title="Forward" onClick={() => nav.step(false)}>
             <Icon name="back" size={16} />
           </button>
         </span>
@@ -337,7 +337,7 @@ function TitleBar({ place, call: live, nav }: { place: string; call?: { name: st
   )
 }
 
-// Home (design/mockups/hall.html, A): the column lists Friends, direct messages and groups; the page opens on friends
+// Home (design/system s=home): the column lists Friends, direct messages and groups; the page opens on friends
 // in game as art, then live calls, then everyone online and offline, with friend requests and the search on top.
 function Home({ st, people, run, open, ring, showModal }: { st: State; people: People; run: Run; open: (conv: string) => void; ring: (conv: string) => void; showModal: (m: Modal) => void }) {
   const [width, setWidth] = useWidth('left', leftWidth())
@@ -376,11 +376,8 @@ function Home({ st, people, run, open, ring, showModal }: { st: State; people: P
         ) : null}
       </button>
       <span className="row-actions">
-        <button className="round" aria-label={`Message ${name(k)}`} title="Message" onClick={() => open(dmId(st.me, k))}>
-          <Icon name="send" size={16} />
-        </button>
         {isOnline(k) && (
-          <button className="round" aria-label={`Call ${name(k)}`} title="Call" onClick={() => ring(dmId(st.me, k))}>
+          <button className="icon-button" aria-label={`Call ${name(k)}`} title="Call" onClick={() => ring(dmId(st.me, k))}>
             <Icon name="phone" size={16} />
           </button>
         )}
@@ -567,7 +564,7 @@ function Home({ st, people, run, open, ring, showModal }: { st: State; people: P
 function FriendId({ st }: { st: State }) {
   return (
     <section className="friend-id" aria-labelledby="friend-id-title">
-      <h2 id="friend-id-title">Your friend ID</h2>
+      <h2 id="friend-id-title">Friend ID</h2>
       <div className="id-plate">
         <b>{st.profile.handle}</b>
         <CopyButton text={st.profile.handle} label="Copy friend ID" />
@@ -942,6 +939,7 @@ function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
         {p.about && <p className="about">{p.about}</p>}
         <ProfileActivity st={st} k={k} />
         <ShowcaseView items={p.showcase} />
+        <RecentlyPlayed st={st} k={k} />
         <dl className="identity">
           <dt>Friend ID</dt>
           <dd>
@@ -955,7 +953,7 @@ function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
           {k !== st.me && (
             <dd className="key-verify">
               <button
-                className="button subtle"
+                className="link-button"
                 onClick={() => {
                   const v = st.settings.verified ?? []
                   run(api.call('setSettings', { verified: v.includes(k) ? v.filter((x) => x !== k) : [...v, k] }))
@@ -1452,7 +1450,7 @@ function Bars({ st, people, where, back, show }: { st: State; people: People; wh
   const set = (p: Partial<State['settings']>) => api.call('setSettings', p)
   const noise = st.settings.noiseSuppression !== false
   // An icon-only button; its name stays readable to screen readers (and to the smoke test).
-  const control = (label: string, icon: Parameters<typeof Icon>[0]['name'], onClick: () => void, pressed?: boolean, extra = 'round') => (
+  const control = (label: string, icon: Parameters<typeof Icon>[0]['name'], onClick: () => void, pressed?: boolean, extra = 'icon-button') => (
     <button className={`${extra} ${pressed ? 'on' : ''}`} aria-pressed={pressed} title={label} onClick={onClick}>
       <Icon name={icon} size={18} />
       <span className="visually-hidden">{label}</span>
@@ -1524,9 +1522,9 @@ function Bars({ st, people, where, back, show }: { st: State; people: People; wh
             {control('Disconnect', 'phone', call.leave, undefined, 'icon-button leave')}
           </div>
           <div className="voice-bar-row">
-            {control(call.filming() ? 'Camera settings' : 'Turn on camera', 'camera', () => setDialog('camera'), !!call.filming(), 'round wide')}
+            {control(call.filming() ? 'Camera settings' : 'Turn on camera', 'camera', () => setDialog('camera'), !!call.filming(), 'icon-button wide')}
             {call.filming() && control('Turn off camera', 'cameraOff', call.stopCamera)}
-            {control(call.sharing() ? 'Stream settings' : 'Share screen', 'screen', () => setDialog('share'), !!call.sharing(), 'round wide')}
+            {control(call.sharing() ? 'Stream settings' : 'Share screen', 'screen', () => setDialog('share'), !!call.sharing(), 'icon-button wide')}
             {call.sharing() && control('Stop sharing', 'screenOff', () => call.stopShare())}
           </div>
         </div>

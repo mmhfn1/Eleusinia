@@ -24,7 +24,6 @@
   "type": "commonjs",
   "dependencies": {
     "@fontsource-variable/bodoni-moda": "^5.3.0",
-    "@fontsource-variable/commissioner": "^5.3.0",
     "@fontsource/alegreya-sans": "^5.3.0",
     "@fontsource/cascadia-mono": "^5.3.0",
     "@sapphi-red/web-noise-suppressor": "^0.4.1",
@@ -163,8 +162,8 @@
         "to": "licenses/fonts/Alegreya-Sans-OFL.txt"
       },
       {
-        "from": "node_modules/@fontsource-variable/commissioner/LICENSE",
-        "to": "licenses/fonts/Commissioner-OFL.txt"
+        "from": "node_modules/@fontsource/cascadia-mono/LICENSE",
+        "to": "licenses/fonts/Cascadia-Mono-OFL.txt"
       }
     ]
   }

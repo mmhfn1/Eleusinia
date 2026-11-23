@@ -1,0 +1,665 @@
+/* The call (design/system s=call, call-stage, call-pip): its structure is kept from the build: tall user cards side by
+   side, whoever talks lit by voice level, the stage with the foldable people row, cameras and the floating player.
+   Media.tsx, the callers in App.tsx. The one light is a 2 px edge in --lit and a seam down from its top; no blur. */
+
+/* Oculus: a card per person */
+.oculus {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  align-items: stretch;
+  gap: var(--sp-4);
+  height: min(46vh, 300px);
+  min-height: 0;
+  padding: var(--sp-5) var(--sp-5) var(--sp-4);
+  overflow-x: auto;
+  border-bottom: var(--line-w) solid var(--line);
+  background: var(--ground);
+}
+.oculus-person {
+  position: relative;
+  isolation: isolate;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+  flex: 1 1 0;
+  min-width: 120px;
+  max-width: 180px;
+  margin: 0;
+  padding: 0 var(--sp-2) var(--sp-4);
+  overflow: hidden;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.oculus-person.speaking {
+  border: var(--lit-w) solid var(--lit);
+}
+.oculus-banner {
+  position: absolute;
+  inset: 0 0 40%;
+  z-index: -2;
+  overflow: hidden;
+}
+.oculus-banner > * {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+/* The banner fades into the card's colour so the name below never sits on art */
+.oculus-person::before,
+.person-tile::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 40%;
+  z-index: -1;
+  background: linear-gradient(180deg, transparent 30%, var(--surface));
+  pointer-events: none;
+}
+.seam {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 1;
+  width: var(--lit-w);
+  height: var(--lvl, 0px);
+  margin-left: -1px;
+  background: var(--lit);
+  box-shadow: 0 0 0 1px var(--surface); /* a solid keyline so it reads on any art */
+  opacity: 0;
+  transition: height 100ms linear;
+  pointer-events: none;
+}
+.speaking > .seam {
+  opacity: 1;
+}
+.oculus-who {
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-round);
+  background: none;
+}
+.oculus-person .avatar > img,
+.oculus-person .avatar > svg {
+  box-shadow: 0 0 0 3px var(--surface);
+}
+.oculus-person figcaption {
+  display: grid;
+  justify-items: center;
+  max-width: 100%;
+}
+.oculus-person figcaption > * {
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.oculus-person .row-title {
+  font: var(--type-name);
+  color: var(--ink);
+}
+.oculus-person .row-sub {
+  font: var(--type-meta);
+  color: var(--ink-3);
+}
+.oculus-person .row-sub.held {
+  color: var(--danger);
+}
+.oculus-person .row-sub.live {
+  color: var(--gold);
+}
+
+/* The callers list in a DM or group's left column */
+.callers {
+  display: grid;
+  gap: 2px;
+}
+.caller {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--h-lg);
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-1);
+}
+.caller:hover {
+  background: var(--raised);
+}
+.caller-who {
+  flex: none;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-round);
+  background: none;
+}
+.caller.speaking .avatar > img,
+.caller.speaking .avatar > svg {
+  outline: var(--lit-w) solid var(--lit);
+  outline-offset: 1px;
+}
+.caller.state-disconnected .row-sub,
+.caller.state-failed .row-sub,
+.call-notice {
+  color: var(--danger);
+}
+.call-notice {
+  font: var(--type-meta);
+}
+
+/* The connection sign and its tooltip */
+.signal {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  color: var(--ink);
+  font: var(--type-name);
+}
+.signal-icon {
+  display: inline-grid;
+  place-items: center;
+  width: var(--h-sm);
+  height: var(--h-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-1);
+  background: none;
+  color: var(--ink-3);
+}
+.signal-icon:hover {
+  background: var(--raised);
+}
+.signal.good .signal-icon {
+  color: var(--online);
+}
+.signal.fair .signal-icon {
+  color: var(--gold);
+}
+.signal.poor .signal-icon {
+  color: var(--danger);
+}
+.ping-row {
+  display: block;
+}
+.ping-steady {
+  margin-left: 6px;
+  color: var(--ink-3);
+}
+.ping-steady.varies {
+  color: var(--gold);
+}
+.ping-steady.unstable {
+  color: var(--danger);
+}
+.voice-mark {
+  display: inline-flex;
+  margin-left: var(--sp-1);
+  vertical-align: -2px;
+  color: var(--danger);
+}
+
+/* Ringing */
+.ring-bar {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  margin: var(--sp-3) var(--sp-5) 0;
+  padding: var(--sp-3) var(--sp-4);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.ring-bar .row-text {
+  display: grid;
+  flex: 1;
+  min-width: 0;
+}
+.ring-bar .row-title {
+  font: var(--type-name);
+}
+.incoming-calls {
+  position: fixed;
+  top: 44px;
+  left: 50%;
+  z-index: 30;
+  display: grid;
+  gap: var(--sp-2);
+  width: min(520px, calc(100vw - 32px));
+  translate: -50% 0;
+}
+.incoming-calls .ring-bar {
+  margin: 0;
+  border: 0;
+  box-shadow: var(--shadow-float);
+}
+.ring-bar.ringing > .avatar {
+  animation: ring 1.6s ease-in-out 25;
+}
+@keyframes ring {
+  0%,
+  100% {
+    transform: none;
+  }
+  10%,
+  30% {
+    transform: rotate(-6deg);
+  }
+  20%,
+  40% {
+    transform: rotate(6deg);
+  }
+  50% {
+    transform: none;
+  }
+}
+
+/* The stage: screens and cameras */
+.stage {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-2);
+  max-height: 62%;
+  padding: var(--sp-3) var(--sp-5) var(--sp-2);
+  border-bottom: var(--line-w) solid var(--line);
+  background: var(--ground);
+}
+.stage-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.stage-bar > :first-child {
+  margin-right: auto;
+}
+.sharing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font: var(--type-meta);
+  color: var(--ink-2);
+}
+.sharing-badge b {
+  font: var(--type-name);
+  color: var(--ink);
+}
+.live-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-round);
+  background: var(--danger);
+}
+.screen {
+  position: relative;
+  min-height: 0;
+  margin: 0;
+  overflow: hidden;
+  border-radius: var(--r-2);
+  background: var(--video);
+}
+.screen.big {
+  flex: 1 1 auto;
+  display: flex;
+}
+.screen.big:has(.people-row) {
+  flex-direction: column;
+}
+.screen video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.screen.big:has(.people-row) video {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.screen.mirror video {
+  transform: scaleX(-1);
+}
+.screen figcaption {
+  position: absolute;
+  left: var(--sp-3);
+  bottom: var(--sp-3);
+  max-width: calc(100% - 120px);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  padding: var(--sp-1) var(--sp-2);
+  border-radius: var(--r-1);
+  background: var(--scrim-art);
+  color: var(--on-art);
+  font: var(--type-meta);
+}
+.screen-controls {
+  position: absolute;
+  right: var(--sp-3);
+  bottom: var(--sp-3);
+  display: flex;
+  align-items: center;
+  gap: var(--sp-1);
+}
+.screen-controls .icon-button,
+.screen-full {
+  background: var(--scrim-art);
+  color: var(--on-art);
+}
+.screen-controls .icon-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--scrim-art) 70%, var(--on-art) 18%);
+  color: var(--on-art);
+}
+.screen-volume {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--h-md);
+  padding: 0 var(--sp-3) 0 0;
+  border-radius: var(--r-1);
+  background: var(--scrim-art);
+  color: var(--on-art);
+}
+.screen-volume .icon-button {
+  background: none;
+}
+.screen-volume input {
+  width: 96px;
+}
+.screen.big:has(.people-row:not(.folded)) figcaption,
+.screen.big:has(.people-row:not(.folded)) .screen-controls {
+  bottom: 108px;
+}
+.screen.big figcaption,
+.screen.big .screen-controls {
+  transition: opacity var(--dur-2);
+}
+.screen.big.idle:not(:focus-within) figcaption,
+.screen.big.idle:not(:focus-within) .screen-controls {
+  opacity: 0;
+  pointer-events: none;
+}
+.screen.big.idle:not(:focus-within) {
+  cursor: none;
+}
+.screen.invite {
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+}
+.screen.invite.big {
+  min-height: 240px;
+}
+.invite-preview {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  filter: brightness(0.45);
+}
+.invite-body {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: var(--sp-2);
+  font: var(--type-meta);
+  color: var(--ink-2);
+}
+.screen.invite:has(.invite-preview) .invite-body {
+  color: var(--on-art);
+}
+.stage-thumb .invite-body {
+  gap: var(--sp-1);
+}
+.stage-thumb .invite-body .button {
+  height: var(--h-sm);
+  padding: 0 var(--sp-3);
+}
+.stage-thumb .screen.invite figcaption {
+  display: none;
+}
+.stage-strip {
+  flex: none;
+  display: flex;
+  gap: var(--sp-2);
+  overflow-x: auto;
+}
+.stage-thumb {
+  flex: none;
+  width: 160px;
+  height: 90px;
+  padding: 0;
+  overflow: hidden;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--video);
+}
+.stage-thumb .screen {
+  height: 100%;
+  border-radius: 0;
+}
+button.stage-thumb:hover {
+  border-color: var(--line-strong);
+}
+.video-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--sp-2);
+  min-height: 0;
+  overflow-y: auto;
+}
+.video-grid > .stage-thumb,
+.video-grid > .screen {
+  width: auto;
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
+
+/* The people row along a big stream's bottom, foldable */
+.people-row {
+  position: relative;
+  flex: none;
+  border-top: var(--line-w) solid var(--line);
+  background: var(--ground);
+}
+.people-row.folded {
+  border-top-color: transparent;
+}
+.people-toggle {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: var(--h-md);
+  height: var(--h-sm);
+  translate: -50% -100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-1) var(--r-1) 0 0;
+  background: var(--ground);
+  color: var(--ink-2);
+}
+.people-toggle:hover {
+  color: var(--ink);
+}
+.people-row.folded .people-toggle {
+  background: var(--scrim-art);
+  color: var(--on-art);
+}
+.people-row.folded .people-toggle .icon {
+  rotate: 180deg;
+}
+.people-tiles {
+  display: flex;
+  justify-content: center;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  overflow-x: auto;
+}
+.person-tile {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 132px;
+  height: 80px;
+  overflow: hidden;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.person-tile::before {
+  inset: 0;
+  background: linear-gradient(180deg, transparent 20%, var(--surface));
+}
+.person-tile.speaking {
+  border: var(--lit-w) solid var(--lit);
+}
+.person-tile .oculus-banner {
+  inset: 0;
+}
+.person-tile .seam {
+  max-height: 60%;
+}
+.person-tile .screen {
+  width: 100%;
+  height: 100%;
+  border-radius: 0;
+}
+.person-tile .screen figcaption {
+  left: var(--sp-1);
+  bottom: var(--sp-1);
+  padding: 0 var(--sp-2);
+  font: var(--type-time);
+}
+.person-tile .avatar {
+  margin-bottom: var(--sp-3);
+}
+.person-tile .person-name {
+  position: absolute;
+  right: var(--sp-1);
+  bottom: var(--sp-1);
+  left: var(--sp-1);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  text-align: center;
+  font: var(--type-time);
+  color: var(--ink);
+}
+
+/* Share and camera dialogs */
+.share-dialog .dialog-body {
+  width: 640px;
+}
+.tabs {
+  display: flex;
+  gap: var(--sp-1);
+  margin-bottom: var(--sp-3);
+  border-bottom: var(--line-w) solid var(--line);
+}
+.tab {
+  position: relative;
+  height: var(--h-md);
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r-1) var(--r-1) 0 0;
+  background: none;
+  color: var(--ink-2);
+  font: var(--type-name);
+}
+.tab:hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+.tab[aria-selected='true'] {
+  color: var(--ink);
+}
+.tab[aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  right: var(--sp-2);
+  bottom: -1px;
+  left: var(--sp-2);
+  height: var(--lit-w);
+  background: var(--gold);
+}
+.sources {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: var(--sp-2);
+  max-height: 300px;
+  overflow-y: auto;
+}
+.source {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-2);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--sunk);
+  text-align: left;
+}
+.source:hover {
+  border-color: var(--line-strong);
+}
+.source img,
+.source .no-preview {
+  display: block;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: var(--r-1);
+  background: var(--video);
+  object-fit: contain;
+}
+.source .no-preview {
+  object-fit: scale-down;
+}
+.source span {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: var(--type-meta);
+}
+.source.chosen {
+  border: var(--lit-w) solid var(--gold);
+  padding: calc(var(--sp-2) - 1px);
+}
+.sources-hint {
+  grid-column: 1 / -1;
+}
+.quality {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--sp-3);
+  margin-top: var(--sp-3);
+}
+.quality .estimate,
+.sound-row {
+  grid-column: 1 / -1;
+}
+.quality .estimate {
+  white-space: normal;
+}
+.camera-preview {
+  aspect-ratio: 16 / 9;
+  max-height: 320px;
+}
+.camera-preview .screen {
+  height: 100%;
+}
+.ring-bar .icon-button {
+  width: var(--h-lg);
+  height: var(--h-lg);
+}
+.ring-bar .icon-button:not(.primary, .leave) {
+  background: var(--raised);
+}
