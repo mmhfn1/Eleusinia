@@ -1,0 +1,126 @@
+/* Eleusinia's design tokens: the only source of type, colour, spacing, radius, shadow and motion.
+   Approved in design/system (README.md); the mockups there load this same set of values.
+   Themes: Ink (dark, the default) and Ivory (:root[data-theme='light']). Gold is Leaf: a flat metallic gold, a fill only on a
+   surface's one primary action. No glow anywhere: light is a 2 px line, never a blur. */
+
+:root {
+  /* ---------- Type: one display face, one text face, one mono ---------- */
+  --f-display: 'Bodoni Moda Variable', 'Bodoni Moda', Georgia, 'Noto Serif', 'Yu Mincho', serif;
+  --f-text: 'Alegreya Sans', 'Segoe UI', 'Noto Sans', 'Yu Gothic UI', 'Microsoft YaHei UI', 'Malgun Gothic', system-ui, sans-serif;
+  --f-mono: 'Cascadia Mono', Consolas, ui-monospace, monospace; /* bundled (@fontsource/cascadia-mono), as the friend ID has always been */
+  --f-emoji: 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji';
+
+  /* Seven sizes, nothing between them */
+  --s-11: 11px;
+  --s-12: 12.5px;
+  --s-13: 13.5px;
+  --s-15: 15px;
+  --s-20: 20px;
+  --s-26: 26px;
+  --s-44: 44px;
+
+  /* Roles: every text job in design/audit/type-roles.md is one of these, and nothing else is set. Weights: Bodoni 500,
+     600; Alegreya 400, 500, 700; Cascadia Mono 500. Bodoni only from 20 px, where its hairlines hold; no italics. */
+  --type-wordmark: 600 var(--s-44) / 1 var(--f-display);
+  --type-title: 600 var(--s-26) / 1.1 var(--f-display); /* screen and conversation title; a person's name on their cards */
+  --type-number: 700 var(--s-26) / 1 var(--f-text); /* scores, light levels: Bodoni's hairline dashes and figures break up */
+  --type-section: 500 var(--s-20) / 1.2 var(--f-display); /* section heading; empty-state title; server name on its banner */
+  --type-label: 500 var(--s-13) / 1.3 var(--f-text); /* the quiet heading above a list, a field or a column; --ink-2 */
+  --type-body: 400 var(--s-15) / 1.45 var(--f-text); /* messages, about lines, toasts, inputs, links, menu items */
+  --type-name: 500 var(--s-15) / 1.3 var(--f-text); /* a person or row in a list, a message's author, menu items, tabs */
+  --type-button: 700 var(--s-13) / 1 var(--f-text);
+  --type-meta: 400 var(--s-13) / 1.35 var(--f-text); /* the line under a name, hints, tooltips */
+  --type-time: 400 var(--s-12) / 1.3 var(--f-text); /* timestamps, delivery state; always tabular */
+  --type-badge: 700 var(--s-11) / 1 var(--f-text); /* counts; always tabular */
+  --type-mono: 500 var(--s-12) / 1.4 var(--f-mono); /* friend IDs, keys, codes */
+  --track-tight: -0.01em; /* 26 px and up */
+  --track-button: 0.01em;
+
+  /* ---------- Space, size and shape ---------- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 24px;
+  --sp-6: 32px;
+  --sp-7: 48px;
+  --h-sm: 28px; /* chips, compact icon buttons, segmented in a row, table controls */
+  --h-md: 36px; /* every button, input, select and one-line row */
+  --h-lg: 44px; /* two-line rows, rail tiles, the call's controls */
+  --r-1: 4px; /* controls */
+  --r-2: 8px; /* cards, menus, dialogs, tiles */
+  --r-round: 999px; /* pictures, switches, counts */
+  --line-w: 1px;
+  --lit-w: 2px; /* the one light: a speaker's edge, the selected row's mark, focus */
+
+  /* ---------- Motion ---------- */
+  --dur-1: 120ms;
+  --dur-2: 200ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+
+  /* ---------- Colour: Ink ---------- */
+  --ground: #0f121a; /* the window */
+  --surface: #151a24; /* columns, cards, the composer */
+  --raised: #1c2230; /* hover, selected rows, secondary buttons */
+  --sunk: #0b0e14; /* inputs, wells */
+  --line: #2a3142;
+  --line-strong: #3a4257;
+  --ink: #ece3d1; /* text */
+  --ink-2: #b7ae9c; /* secondary text */
+  --ink-3: #969080; /* hints, timestamps (4.9:1 on --surface) */
+  --voice: #93a9cf; /* voice, links, focus */
+  --online: #9fb07f;
+  --danger: #e0705a;
+  --danger-fill: #b3412d;
+  --on-art: #f5efe2; /* text on pictures and banners, always over --scrim-art */
+  --on-danger: #fff8f2;
+  --video: #000; /* behind a stream or camera, letterboxing */
+  --scrim-art: rgb(10 12 16 / 0.62);
+  --shadow-float: 0 18px 44px -12px rgb(0 0 0 / 0.65), 0 0 0 1px var(--line-strong); /* menus, popovers, dialogs only */
+  --backdrop: rgb(5 7 10 / 0.62);
+  color-scheme: dark;
+}
+
+:root[data-theme='light'] {
+  --ground: #ebe4d4;
+  --surface: #f5f0e5;
+  --raised: #e3d9c6;
+  --sunk: #fbf8f1;
+  --line: #cbbea6;
+  --line-strong: #b4a68a;
+  --ink: #1f1b17;
+  --ink-2: #4c453c;
+  --ink-3: #5e574b; /* 6.2:1 on --surface, 4.9:1 on --raised */
+  --voice: #2d4062;
+  --online: #4f5d3b;
+  --danger: #a3381f;
+  --danger-fill: #a3381f;
+  --on-art: #f8f3e8;
+  --on-danger: #fff8f2;
+  --video: #000;
+  --scrim-art: rgb(16 12 8 / 0.64); /* 4.5:1 for --on-art even over white art (contrast.mjs) */
+  --shadow-float: 0 18px 40px -14px rgb(70 50 20 / 0.38), 0 0 0 1px var(--line-strong);
+  --backdrop: rgb(40 32 20 / 0.32);
+  color-scheme: light;
+}
+
+/* ---------- Gold: Leaf ----------
+   --gold: the accent as text, lines and marks. --gold-fill / --on-gold: a primary button. --lit: the speaker's edge. */
+:root {
+  --gold: #d2b06a;
+  --gold-fill: #cfae69;
+  --gold-fill-hover: #dbbd7d;
+  --gold-fill-press: #bf9d58;
+  --on-gold: #1b160e;
+  --gold-soft: rgb(207 174 105 / 0.14); /* selected chips and segments */
+  --lit: #f2c76b; /* brighter and more saturated than any fill, so speaking never reads as chosen */
+}
+:root[data-theme='light'] {
+  --gold: #735520;
+  --gold-fill: #8a6a2c;
+  --gold-fill-hover: #7a5c22;
+  --gold-fill-press: #6a4f1b;
+  --on-gold: #fffaf0;
+  --gold-soft: rgb(138 106 44 / 0.13);
+  --lit: #a8640f;
+}

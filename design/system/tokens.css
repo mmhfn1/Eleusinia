@@ -98,7 +98,7 @@
   --on-art: #f8f3e8;
   --on-danger: #fff8f2;
   --video: #000;
-  --scrim-art: rgb(16 12 8 / 0.58);
+  --scrim-art: rgb(16 12 8 / 0.64); /* 4.5:1 for --on-art even over white art (contrast.mjs) */
   --shadow-float: 0 18px 40px -14px rgb(70 50 20 / 0.38), 0 0 0 1px var(--line-strong);
   --backdrop: rgb(40 32 20 / 0.32);
   color-scheme: light;

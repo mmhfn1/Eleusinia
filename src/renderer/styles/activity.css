@@ -1,0 +1,587 @@
+/* What someone plays (design/system s=profile-full, settings-activity): the glance on a card, the full activity card
+   with CS2, Dota 2 and Destiny 2 details, achievements, and Settings → Activity's connections. Activity.tsx.
+   Scores and light levels are --type-number; team colours: CT and Radiant cool, T and Dire warm. */
+
+.activity-line {
+  color: var(--ink-2);
+}
+.activity-line b {
+  font-weight: 500;
+  color: var(--ink);
+}
+.row-sub .activity-line,
+.row-sub .activity-line b {
+  color: var(--ink-2);
+  font-weight: 400;
+}
+
+/* The glance: a line on the small card */
+.glance {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--h-lg);
+  padding: 0 var(--sp-3) 0 var(--sp-1);
+}
+/* On a card the glance is one two-line row; the rest is a click away on the full card */
+.pop-glance .glance-meta {
+  display: none;
+}
+.glance-art {
+  display: block;
+  width: 64px;
+  aspect-ratio: 460 / 215;
+  border-radius: var(--r-1);
+  background: var(--sunk);
+  object-fit: cover;
+}
+.glance-text {
+  display: grid;
+  min-width: 0;
+}
+.glance-game,
+.glance-place,
+.glance-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.glance-game {
+  font: var(--type-name);
+  color: var(--ink);
+}
+.glance-place {
+  font: var(--type-meta);
+  color: var(--ink-2);
+}
+.glance-meta {
+  font: var(--type-time);
+  color: var(--ink-3);
+}
+.glance-score {
+  display: flex;
+  gap: 2px;
+  font: var(--type-number);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+}
+.glance-score > span {
+  color: var(--ink-3);
+}
+.glance-score.ahead {
+  color: var(--ink);
+}
+.glance-score.behind {
+  color: var(--ink-3);
+}
+
+/* The full activity card */
+.activity-card {
+  width: 100%;
+  overflow: hidden;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface);
+  text-align: left;
+}
+.activity-art {
+  display: block;
+  width: 100%;
+  aspect-ratio: 460 / 215;
+  border-bottom: var(--line-w) solid var(--line);
+  background: var(--sunk);
+  object-fit: cover;
+}
+.activity-body {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3) var(--sp-4) var(--sp-4);
+}
+.activity-kicker {
+  font: var(--type-label);
+  color: var(--ink-2);
+}
+.activity-body h3 {
+  overflow-wrap: anywhere;
+  font: var(--type-section);
+  color: var(--ink);
+}
+.activity-facts,
+.activity-about {
+  font: var(--type-meta);
+  color: var(--ink-2);
+}
+.activity-about {
+  color: var(--ink-3);
+}
+.activity-achievements {
+  display: grid;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+.achievement-head {
+  display: flex;
+  justify-content: space-between;
+  font: var(--type-meta);
+  color: var(--ink-3);
+}
+.achievement-bar {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--sunk);
+}
+.achievement-bar span {
+  display: block;
+  height: 100%;
+  background: var(--gold);
+}
+.achievement-list {
+  display: grid;
+  gap: var(--sp-2);
+}
+.achievement {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--sp-3);
+}
+.achievement img,
+.achievement-blank {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--r-1);
+  background: var(--sunk);
+}
+.achievement .row-text {
+  display: grid;
+  min-width: 0;
+}
+.achievement-desc {
+  font: var(--type-meta);
+  color: var(--ink-2);
+}
+.activity-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  margin-top: var(--sp-1);
+}
+.activity-hide {
+  align-self: stretch;
+}
+.activity-details {
+  display: grid;
+  padding-left: var(--sp-5);
+}
+.activity-preview,
+.activity-hidden,
+.activity-extra {
+  display: grid;
+  gap: var(--sp-2);
+}
+.activity-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+}
+.activity-add select {
+  flex: 1 1 220px;
+}
+.activity-add input {
+  flex: 1 1 160px;
+}
+
+/* A match: CS2 (Dota 2 and Destiny 2 share the frame) */
+.cs2 {
+  display: grid;
+  gap: var(--sp-2);
+  padding: var(--sp-3);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--raised);
+}
+.cs2-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--sp-1) var(--sp-3);
+}
+.cs2-head .row-sub,
+.dota-hero .row-sub,
+.destiny-guardian .row-sub {
+  white-space: normal;
+}
+.cs2-map {
+  font: var(--type-section);
+}
+.cs2-score {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.cs2-team {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font: var(--type-meta);
+  color: var(--ink-3);
+}
+.cs2-team b {
+  font: var(--type-number);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.cs2-team.ct b,
+.cs2-team.radiant b {
+  color: var(--voice);
+}
+.cs2-team.t b,
+.cs2-team.dire b {
+  color: var(--gold);
+}
+.cs2-team.t,
+.cs2-team.dire {
+  justify-content: flex-end;
+}
+.cs2-team.ours::after {
+  content: 'you';
+  font: var(--type-time);
+  color: var(--ink-2);
+}
+.cs2-team.t.ours::after,
+.cs2-team.dire.ours::after {
+  order: -1;
+}
+.cs2-mid {
+  font: var(--type-mono);
+  color: var(--ink-2);
+}
+.cs2-bomb {
+  font: var(--type-name);
+  color: var(--danger);
+}
+.cs2-rounds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+}
+.cs2-rounds li {
+  width: 9px;
+  height: 13px;
+  border-radius: 2px;
+  background: var(--sunk);
+}
+.cs2-rounds li.ct {
+  background: var(--voice);
+}
+.cs2-rounds li.t {
+  background: var(--gold);
+}
+.cs2-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-4);
+}
+.cs2-stats dt {
+  font: var(--type-time);
+  color: var(--ink-3);
+}
+.cs2-stats dd {
+  margin: 0;
+  font: var(--type-name);
+  font-variant-numeric: tabular-nums;
+}
+.cs2-menu {
+  color: var(--ink-2);
+}
+
+/* Dota 2 */
+.dota-hero {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.dota-hero img {
+  width: 64px;
+  height: 36px;
+  border-radius: var(--r-1);
+  background: var(--sunk);
+  object-fit: cover;
+}
+.dota-bars {
+  display: grid;
+  gap: var(--sp-1);
+}
+.dota-bar {
+  position: relative;
+  height: 16px;
+  overflow: hidden;
+  border-radius: var(--r-1);
+  background: var(--sunk);
+}
+.dota-bar span {
+  position: absolute;
+  inset: 0 auto 0 0;
+}
+.dota-bar.health span {
+  background: color-mix(in srgb, var(--online) 55%, transparent);
+}
+.dota-bar.mana span {
+  background: color-mix(in srgb, var(--voice) 55%, transparent);
+}
+.dota-bar b {
+  position: relative;
+  display: block;
+  font: var(--type-badge);
+  line-height: 16px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.dota-dead {
+  font: var(--type-name);
+  color: var(--danger);
+}
+.dota-items {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.dota-items ul {
+  display: grid;
+  grid-template-columns: repeat(3, 44px);
+  gap: 3px;
+}
+.dota-items ul.neutral {
+  grid-template-columns: 32px;
+}
+.dota-items ul.backpack {
+  opacity: 0.6;
+}
+.dota-items li {
+  height: 32px;
+  overflow: hidden;
+  border-radius: var(--r-1);
+  background: var(--sunk);
+}
+.dota-items ul.neutral li {
+  border-radius: var(--r-round);
+}
+.dota-items img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* Destiny 2 */
+.destiny {
+  grid-template-columns: minmax(0, 1fr);
+}
+.destiny-activity {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-content: end;
+  min-height: 72px;
+  margin: calc(var(--sp-3) * -1) calc(var(--sp-3) * -1) 0;
+  padding: var(--sp-3);
+  border-radius: var(--r-2) var(--r-2) 0 0;
+  background: var(--sunk) center / cover no-repeat;
+  box-shadow: inset 0 -80px 60px -30px var(--scrim-art);
+  color: var(--on-art);
+}
+.destiny-activity-name {
+  font: var(--type-section);
+}
+.destiny-activity-mode {
+  grid-column: 1;
+  font: var(--type-meta);
+}
+.destiny-activity-light {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  align-self: end;
+  font: var(--type-meta);
+}
+.destiny-where {
+  margin: 0;
+}
+.destiny-guardian {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--sp-3);
+  min-height: 48px;
+  padding: var(--sp-1) var(--sp-3) var(--sp-1) 60px;
+  border-radius: var(--r-1);
+  background: var(--sunk) left center / cover no-repeat;
+  box-shadow: inset 0 0 0 999px var(--scrim-art);
+  color: var(--on-art);
+}
+.destiny-guardian .row-sub {
+  color: var(--on-art);
+}
+.destiny-title {
+  font: var(--type-name);
+}
+.destiny-light {
+  font: var(--type-number);
+  font-variant-numeric: tabular-nums;
+}
+.destiny-fireteam p {
+  margin-bottom: var(--sp-1);
+}
+.destiny-fireteam ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1) var(--sp-3);
+}
+.destiny-fireteam li {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-2);
+  font: var(--type-meta);
+}
+.destiny-fireteam img,
+.destiny-blank {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--r-1);
+  background: var(--sunk);
+}
+.destiny-loadout {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-1);
+}
+.destiny-loadout li {
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-1);
+  background: var(--sunk);
+}
+.destiny-loadout li.exotic {
+  border-color: var(--gold);
+}
+.destiny-loadout img {
+  width: 100%;
+  height: 100%;
+}
+.destiny-clan b {
+  font: var(--type-name);
+  color: var(--ink);
+}
+
+/* Settings → Activity: the Steam and Bungie.net tiles and their panels */
+.connections-wrap {
+  display: grid;
+  gap: var(--sp-2);
+}
+.connections {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: var(--sp-3);
+}
+.connection {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  grid-template-rows: auto auto;
+  align-content: center;
+  align-items: center;
+  column-gap: var(--sp-3);
+  height: var(--h-lg);
+  padding: 0 var(--sp-3);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface);
+  color: var(--ink);
+  text-align: left;
+}
+.connection:hover {
+  background: var(--raised);
+}
+.connection.open {
+  border-color: var(--line-strong);
+  background: var(--raised);
+}
+.connection .brand {
+  grid-row: span 2;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--r-1);
+  background: var(--raised);
+}
+.connection-name {
+  font: var(--type-name);
+}
+.connection-state {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font: var(--type-meta);
+  color: var(--ink-3);
+}
+.connection-state.on {
+  color: var(--online);
+}
+.connection.waiting .connection-state {
+  color: var(--ink-2);
+}
+.connection-panel {
+  display: grid;
+  justify-items: start;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.connection-game {
+  display: grid;
+  gap: var(--sp-2);
+  width: 100%;
+}
+.connection-game-head {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+}
+.connection-game-head img {
+  width: 64px;
+  height: 30px;
+  border-radius: var(--r-1);
+  background: var(--sunk);
+  object-fit: cover;
+}
+.connection-game-head .row-title {
+  flex: 1;
+  font: var(--type-name);
+}
+.connection-note {
+  font: var(--type-meta);
+  color: var(--ink-2);
+}
+.connection-note code {
+  font: var(--type-mono);
+  color: var(--ink);
+}
+.gsi-state {
+  font: var(--type-meta);
+  color: var(--ink-3);
+}
+.gsi-state.live {
+  color: var(--online);
+}
+.gsi-state.live::before {
+  content: '● ';
+}
+.gsi-state.problem {
+  color: var(--danger);
+}

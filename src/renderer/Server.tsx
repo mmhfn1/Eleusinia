@@ -277,7 +277,7 @@ export function Server({ st, sv, channel, people: everyone, run, go, show }: Pro
               .map(([title, color, ks]) => (
                 <section key={title} aria-label={title}>
                   <h2 style={{ color }}>
-                    {title} — {ks.length}
+                    {title} <span>{ks.length}</span>
                   </h2>
                   {ks.map((k) => (
                     <MemberRow

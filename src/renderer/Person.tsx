@@ -220,3 +220,33 @@ function SharedMedia({ st, conv }: { st: State; conv: string }) {
     </section>
   )
 }
+
+// Recently played (the full card): the last games they played, newest first, with when. Hidden when they share none,
+// or played nothing yet; the art comes from Steam by id, like every game picture.
+export function RecentlyPlayed({ st, k }: { st: State; k: Key }) {
+  const recent = st.activity[k]?.recent
+  if (!recent?.length) return null
+  return (
+    <section className="recent">
+      <h3>Recently played</h3>
+      <ol>
+        {recent.map((r) => (
+          <li key={r.g}>
+            {r.app ? <img className="recent-art" src={`eleusinia-art://steam/${r.app}/header`} alt="" onError={(e) => (e.currentTarget.style.visibility = 'hidden')} /> : <span className="recent-art" aria-hidden="true" />}
+            <span className="recent-game">{r.g}</span>
+            <time className="recent-when" dateTime={new Date(r.at).toISOString()}>
+              {whenPlayed(r.at)}
+            </time>
+          </li>
+        ))}
+      </ol>
+    </section>
+  )
+}
+// Today, 21:10; Yesterday; then the date
+function whenPlayed(at: number, now = Date.now()) {
+  const days = Math.round((daysBack(now, 0) - daysBack(at, 0)) / 864e5)
+  if (days <= 0) return `Today, ${new Date(at).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
+  if (days === 1) return 'Yesterday'
+  return new Date(at).toLocaleDateString(undefined, { day: 'numeric', month: 'long' })
+}

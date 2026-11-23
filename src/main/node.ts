@@ -47,7 +47,7 @@ import type { Layer } from '../shared/vp8layers'
 import { type InviteCard, type InviteLink, type JoinReason, askOrder, checkJoinAsk, cleanInviteCard, inviteCard, isJoinAnswer, isJoinAsk, joinTopic, limiter, makeInvite, newInvite, parseInvite, serverTopic } from '../shared/invite'
 import { type ServerState, joinProof, verifyJoin } from '../shared/server'
 import { createFiles } from './files'
-import { type Activity, type Game, cleanActivity, dayKey, daysBack, prunePlayed, shareable, sharing as activityOn, weekOf } from '../shared/activity'
+import { type Activity, type Game, type Recent, cleanActivity, dayKey, daysBack, noteRecent, prunePlayed, recentFromPlayed, shareable, sharing as activityOn, weekOf } from '../shared/activity'
 import { type RelayLimits, RELAY_LIMITS, createNet } from './network'
 import { pickRelays } from '../shared/relaypick'
 import { type Hop, nearest, routeFor } from '../shared/relays'
@@ -57,6 +57,7 @@ import { type Check, type StartupEvent, type StepId, startupEvent } from '../sha
 
 type Saved = {
   played?: Record<string, Record<string, number>> // our minutes per game per day (YYYY-MM-DD), the last 14 days, for the two weeks we share
+  recent?: Recent // the last games we played, newest first (Recently played on the full card)
   unread?: Record<string, number> // per conversation: messages from others and missed calls since it was last read
   lastAt?: Record<string, number> // per conversation: when its newest message arrived here
   blocked?: Record<Key, number> // people we blocked, and when: no friend requests, no links, their messages uncounted
@@ -239,20 +240,22 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
   const theirs = new Map<Key, Activity>()
   const sentActivity = new Map<Key, string>()
   if (testPlayed) for (const [d, games] of Object.entries(testPlayed)) (s.played ??= {})[dayKey(daysBack(Date.now(), +d))] = games
-  const ourActivity = () => shareable({ now: Date.now(), ...(mine && { game: mine }), week: weekOf(s.played ?? {}) }, s.settings.activity)
+  if (!s.recent && s.played) s.recent = recentFromPlayed(s.played) // a data folder from before the record
+  const ourActivity = () => shareable({ now: Date.now(), ...(mine && { game: mine }), week: weekOf(s.played ?? {}), recent: s.recent ?? [] }, s.settings.activity)
   // Each minute of a game counts toward today, unless activity is off; days older than two weeks are dropped
   const playClock = setInterval(() => {
     if (!mine || !activityOn(s.settings.activity)) return
     const day = dayKey(Date.now())
     const played = prunePlayed((s.played ??= {}))
     played[day] = { ...played[day], [mine.name]: Math.min(1440, (played[day]?.[mine.name] ?? 0) + 1) }
+    s.recent = noteRecent(s.recent, mine)
     saveSoon()
     shareActivity()
   }, 60000)
   function sendActivity(key: Key) {
     if (!known(key) || !net.linked(key)) return
     const a = s.settings.activity?.hidden?.includes(key) ? { now: Date.now() } : ourActivity()
-    const body = JSON.stringify([a.game ?? null, a.week ?? null])
+    const body = JSON.stringify([a.game ?? null, a.week ?? null, a.recent ?? null])
     if (sentActivity.get(key) === body) return
     sentActivity.set(key, body)
     net.send(key, { t: 'activity', a })

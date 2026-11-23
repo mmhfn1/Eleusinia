@@ -7,6 +7,7 @@ import { join } from 'node:path'
 
 const dir = process.argv[2] ?? 'design/audit'
 const name = process.argv[3] ?? 'before'
+const pics = name === 'before' ? 'buttons' : `buttons-${name}` // test/audit.mjs: each run's state pictures
 const texts = JSON.parse(readFileSync(join(dir, `text-${name}.json`), 'utf8'))
 const clicks = JSON.parse(readFileSync(join(dir, `buttons-${name}.json`), 'utf8'))
 
@@ -126,7 +127,7 @@ let html = `<!doctype html><meta charset="utf-8"><title>Clickable looks (${name}
 for (const [kind, n] of byKind) {
   html += `<h2>${kind} (${n})</h2><table><tr><td></td><td>rest</td><td>hover</td><td>pressed</td><td>focus</td></tr>`
   for (const v of [...looks.values()].filter((v) => v.kind === kind).sort((a, b) => b.n - a.n)) {
-    const imgs = ['rest', 'hover', 'pressed', 'focus'].map((s) => { const f = v.shots?.find((x) => x.endsWith(`-${s}.png`)); return `<td class="s">${f ? `<img src="buttons/${f}">` : ''}</td>` }).join('')
+    const imgs = ['rest', 'hover', 'pressed', 'focus'].map((s) => { const f = v.shots?.find((x) => x.endsWith(`-${s}.png`)); return `<td class="s">${f ? `<img src="${pics}/${f}">` : ''}</td>` }).join('')
     html += `<tr><td><b>${esc(v.examples[0]?.text || '(icon)')}</b><br><small>${esc(v.examples[0]?.path ?? '')} · seen ${v.n} · ${v.look.size} ${v.look.weight} · r ${v.look.radius}${flags(v.look).length ? ' · ' + flags(v.look).join(', ') : ''}</small></td>${imgs}</tr>`
   }
   html += `</table>`
@@ -143,7 +144,7 @@ for (let p = 0; p * 40 < rows.length; p++) {
   for (const [kind, v] of rows.slice(p * 40, p * 40 + 40)) {
     if (kind !== last) page += `<tr><td colspan="5"><h2>${kind}</h2></td></tr><tr><td></td><td>rest</td><td>hover</td><td>pressed</td><td>focus</td></tr>`
     last = kind
-    const imgs = ['rest', 'hover', 'pressed', 'focus'].map((s) => { const f = v.shots?.find((x) => x.endsWith(`-${s}.png`)); return `<td class="s">${f ? `<img src="buttons/${f}">` : ''}</td>` }).join('')
+    const imgs = ['rest', 'hover', 'pressed', 'focus'].map((s) => { const f = v.shots?.find((x) => x.endsWith(`-${s}.png`)); return `<td class="s">${f ? `<img src="${pics}/${f}">` : ''}</td>` }).join('')
     page += `<tr><td><b>${esc(v.examples[0]?.text || '(icon)')}</b><br><small>${esc(v.examples[0]?.path ?? '')} · seen ${v.n} · ${v.look.size} ${v.look.weight} · r ${v.look.radius}${flags(v.look).length ? ' · ' + flags(v.look).join(', ') : ''}</small></td>${imgs}</tr>`
   }
   writeFileSync(join(dir, `buttons-${name}-${p + 1}.html`), page + '</table>')

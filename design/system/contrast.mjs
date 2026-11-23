@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs'
 
 const css = readFileSync(new URL('./tokens.css', import.meta.url), 'utf8')
-const blocks = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(([, sel, body]) => [sel.trim(), Object.fromEntries([...body.matchAll(/--([\w-]+):\s*(#[0-9a-f]{6})/gi)].map(([, k, v]) => [k, v]))])
+const blocks = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].map(([, sel, body]) => [sel.trim(), Object.fromEntries([...body.matchAll(/--([\w-]+):\s*(#[0-9a-f]{6}|rgb\([^)]*\))/gi)].map(([, k, v]) => [k, v]))])
 const tokens = (theme, gold) => {
   const t = {}
   for (const [sel, vars] of blocks) {
@@ -36,6 +36,12 @@ for (const theme of ['dark', 'light']) for (const gold of ['leaf']) {
   const dangerFill = t['danger-fill'] && ratio('#fff8f2', t['danger-fill'])
   rows.push(`white on danger-fill ${dangerFill?.toFixed(2)}`)
   if (dangerFill < 4.5) fails.push(`${theme} ${gold}: white on danger-fill ${dangerFill.toFixed(2)}`)
+  // Text on pictures: --on-art over --scrim-art laid on the worst art there is, plain white
+  const [r, g, b, al] = t['scrim-art'].match(/[\d.]+/g).map(Number)
+  const over = '#' + [r, g, b].map((c) => Math.round(c * al + 255 * (1 - al)).toString(16).padStart(2, '0')).join('')
+  const art = ratio(t['on-art'], over)
+  rows.push(`on-art over scrim-art over white ${art.toFixed(2)}`)
+  if (art < 4.5) fails.push(`${theme} ${gold}: on-art over scrim-art over white = ${art.toFixed(2)}`)
   console.log(`${theme === 'dark' ? 'Ink' : 'Ivory'} · ${gold}: lowest ${Math.min(...rows.map((r) => +r.split(' ').pop())).toFixed(2)}`)
 }
 console.log(fails.length ? 'Below AA:\n' + fails.join('\n') : 'Every pair meets AA.')

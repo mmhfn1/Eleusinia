@@ -1,16 +1,26 @@
-// Bundled, so every system shows the same type: Commissioner with all its axes (titles flare at their stroke ends).
-import '@fontsource-variable/commissioner/full.css'
-// Court's type (design/type-plan.md), bundled too: Bodoni Moda for titles and quiet labels, Alegreya Sans for text
+// The type (design/system/README.md), bundled so every system shows the same: Bodoni Moda for titles and sections,
+// Alegreya Sans for everything else, Cascadia Mono for friend IDs, keys and codes. Their OFL licences ship in
+// resources/licenses/fonts (package.json extraResources).
 import '@fontsource-variable/bodoni-moda/standard.css'
-import '@fontsource-variable/bodoni-moda/standard-italic.css'
 import '@fontsource/alegreya-sans/400.css'
-import '@fontsource/alegreya-sans/400-italic.css'
 import '@fontsource/alegreya-sans/500.css'
 import '@fontsource/alegreya-sans/700.css'
+import '@fontsource/cascadia-mono/500.css'
 import { createRoot } from 'react-dom/client'
 import App from './App'
-import './style.css'
-import './hall.css'
+import './styles/tokens.css'
+import './styles/base.css'
+import './styles/components.css'
+import './styles/shell.css'
+import './styles/home.css'
+import './styles/chat.css'
+import './styles/server.css'
+import './styles/call.css'
+import './styles/profile.css'
+import './styles/theme-fx.css'
+import './styles/activity.css'
+import './styles/settings.css'
+import './styles/overlays.css'
 import * as theme from './theme'
 
 // Errors in the window go to the diagnostics a problem or crash report can include (scrubbed, in memory only).

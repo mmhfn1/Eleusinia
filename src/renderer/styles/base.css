@@ -1,0 +1,165 @@
+/* The ground every screen stands on: reset, the page, type roles, focus, scrollbars and the logo. Values come only from
+   tokens.css (design/system/README.md). */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+body {
+  overflow: hidden;
+  background: var(--ground);
+  color: var(--ink);
+  font: var(--type-body);
+  -webkit-font-smoothing: antialiased;
+  user-select: none;
+}
+:where(p, h1, h2, h3, h4, h5, h6, figure, dl, dd, ul, ol, blockquote) {
+  margin: 0;
+  padding: 0;
+}
+:where(h1, h2, h3, h4, h5, h6) {
+  font: inherit;
+}
+:where(ul, ol) {
+  list-style: none;
+}
+b,
+strong {
+  font-weight: 700;
+}
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button {
+  cursor: pointer;
+}
+button:disabled {
+  cursor: not-allowed;
+}
+a {
+  color: var(--voice);
+}
+img {
+  display: block;
+}
+::selection {
+  background: color-mix(in srgb, var(--voice) 35%, transparent);
+}
+:where(input, textarea, [contenteditable]) {
+  user-select: text;
+}
+
+/* Focus: one ring, everywhere you can tab to */
+:focus-visible {
+  outline: var(--lit-w) solid var(--voice);
+  outline-offset: 2px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Scrollbars: thin, a line until pointed at */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: var(--r-round);
+  background: var(--line-strong) padding-box;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--ink-3) padding-box;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Type roles as classes, for markup that has no element of its own */
+.t-title {
+  font: var(--type-title);
+  letter-spacing: var(--track-tight);
+}
+.t-section {
+  font: var(--type-section);
+}
+.t-label {
+  font: var(--type-label);
+  color: var(--ink-2);
+}
+.t-name {
+  font: var(--type-name);
+}
+.t-meta,
+.row-sub {
+  font: var(--type-meta);
+  color: var(--ink-3);
+}
+.t-time {
+  font: var(--type-time);
+  color: var(--ink-3);
+  font-variant-numeric: tabular-nums;
+}
+.t-number {
+  font: var(--type-number);
+  font-variant-numeric: tabular-nums;
+}
+.tail,
+.mono {
+  font: var(--type-mono);
+}
+.hint {
+  font: var(--type-meta);
+  color: var(--ink-3);
+}
+.quiet {
+  font: var(--type-meta);
+  color: var(--ink-3);
+}
+
+/* The logo: the koi in its ring (assets/emblem.png), shaded by the colour it stands in */
+.emblem {
+  display: inline-block;
+  flex: none;
+  background: currentColor;
+  color: var(--gold);
+  -webkit-mask: url('../assets/emblem.png') center / contain no-repeat;
+  mask: url('../assets/emblem.png') center / contain no-repeat;
+}
+.emblem.faint {
+  color: var(--ink-3);
+}
+.wordmark {
+  font: var(--type-wordmark);
+  letter-spacing: var(--track-tight);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,0 +1,877 @@
+/* The components (design/system/ui.css), on the app's own class names. One button family; every state: :hover, :active
+   (pressed), :focus-visible, :disabled, [aria-busy=true] (loading), and selected ([aria-checked] / [aria-selected] /
+   [aria-current] / .on). Nothing you press has a shadow, a gradient, a clip-path or a border beyond the line of a
+   secondary button, a field or a chip. Heights: --h-sm, --h-md, --h-lg; radii: --r-1, --r-2, --r-round. */
+
+/* ---------- Buttons ---------- */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--sp-2);
+  height: var(--h-md);
+  padding: 0 var(--sp-4);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-1);
+  background: var(--raised);
+  color: var(--ink);
+  font: var(--type-button);
+  letter-spacing: var(--track-button);
+  white-space: nowrap;
+  text-decoration: none;
+  transition:
+    background-color var(--dur-1) var(--ease),
+    border-color var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease);
+}
+.button .icon {
+  flex: none;
+}
+.button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--raised) 70%, var(--ink) 8%);
+  border-color: var(--line-strong);
+}
+.button:active:not(:disabled),
+.button.active {
+  background: color-mix(in srgb, var(--raised) 80%, var(--ground));
+}
+.button.primary {
+  background: var(--gold-fill);
+  border-color: var(--gold-fill);
+  color: var(--on-gold);
+}
+.button.primary:hover:not(:disabled) {
+  background: var(--gold-fill-hover);
+  border-color: var(--gold-fill-hover);
+}
+.button.primary:active:not(:disabled) {
+  background: var(--gold-fill-press);
+  border-color: var(--gold-fill-press);
+}
+.button.subtle {
+  padding: 0 var(--sp-3);
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-2);
+}
+.button.subtle:hover:not(:disabled) {
+  border-color: transparent;
+  background: var(--raised);
+  color: var(--ink);
+}
+.button.subtle:active:not(:disabled) {
+  background: color-mix(in srgb, var(--raised) 70%, var(--ground));
+}
+.button.danger {
+  background: var(--danger-fill);
+  border-color: var(--danger-fill);
+  color: var(--on-danger);
+}
+.button.danger:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger-fill) 88%, var(--on-danger));
+  border-color: transparent;
+}
+.button.danger:active:not(:disabled) {
+  background: color-mix(in srgb, var(--danger-fill) 85%, var(--ground));
+}
+.button:disabled {
+  background: var(--raised);
+  border-color: var(--line);
+  color: var(--ink-3);
+}
+.button.subtle:disabled {
+  background: transparent;
+  border-color: transparent;
+}
+.button.wide {
+  width: 100%;
+}
+.button.small {
+  height: var(--h-sm);
+  padding: 0 var(--sp-3);
+}
+.button[aria-busy='true'] {
+  position: relative;
+  color: transparent;
+  cursor: progress;
+}
+.button[aria-busy='true']::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 14px;
+  height: 14px;
+  margin: -7px 0 0 -7px;
+  border-radius: var(--r-round);
+  border: 2px solid var(--ink-2);
+  border-right-color: transparent;
+  animation: spin 0.8s linear infinite;
+}
+.button.primary[aria-busy='true']::after {
+  border-color: var(--on-gold);
+  border-right-color: transparent;
+}
+@keyframes spin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+/* A file picker that looks like a button: the input sits invisibly over it */
+.file-button {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+.file-button input[type='file'] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+.file-button:focus-within {
+  outline: var(--lit-w) solid var(--voice);
+  outline-offset: 2px;
+}
+
+/* Icon buttons: square, quiet until pointed at; pressed (muted, deafened) turns red */
+.icon-button {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: var(--h-md);
+  height: var(--h-md);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--ink-2);
+  transition:
+    background-color var(--dur-1) var(--ease),
+    color var(--dur-1) var(--ease);
+}
+.icon-button:hover:not(:disabled) {
+  background: var(--raised);
+  color: var(--ink);
+}
+.icon-button:active:not(:disabled) {
+  background: color-mix(in srgb, var(--raised) 70%, var(--ground));
+}
+.icon-button:disabled {
+  color: var(--ink-3);
+  opacity: 0.6;
+}
+.icon-button.small {
+  width: var(--h-sm);
+  height: var(--h-sm);
+}
+.icon-button.on,
+.icon-button[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+.icon-button.danger,
+.icon-button.leave {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+.icon-button.danger:hover:not(:disabled),
+.icon-button.leave:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--danger) 22%, transparent);
+  color: var(--danger);
+}
+/* On pictures and streams: the art's scrim behind it */
+.icon-button.on-art {
+  background: var(--scrim-art);
+  color: var(--on-art);
+}
+.icon-button.on-art:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--scrim-art) 70%, var(--on-art) 18%);
+  color: var(--on-art);
+}
+
+/* Links, and buttons that read as links */
+.link-button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--voice);
+  font: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+.link-button:hover {
+  text-decoration-thickness: 2px;
+}
+
+/* ---------- Fields ---------- */
+/* :where() keeps these at zero specificity, so any class that styles a field wins */
+:where(input:not([type='checkbox'], [type='radio'], [type='range'], [type='file']), textarea, select) {
+  width: 100%;
+  min-width: 0;
+  height: var(--h-md);
+  padding: 0 var(--sp-3);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-1);
+  background: var(--sunk);
+  color: var(--ink);
+  font: var(--type-body);
+  transition: border-color var(--dur-1) var(--ease);
+}
+:where(textarea) {
+  height: auto;
+  padding: var(--sp-2) var(--sp-3);
+  resize: none;
+}
+::placeholder {
+  color: var(--ink-3);
+  opacity: 1;
+}
+:where(input:not([type='checkbox'], [type='radio'], [type='range']), textarea, select):hover {
+  border-color: var(--line-strong);
+}
+:where(input:not([type='checkbox'], [type='radio'], [type='range']), textarea):focus,
+:where(select):focus-visible {
+  outline: none;
+  border-color: var(--voice);
+  box-shadow: inset 0 0 0 1px var(--voice);
+}
+input:user-invalid,
+input[aria-invalid='true'] {
+  border-color: var(--danger);
+}
+:where(select) {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: var(--sp-6);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--ink-2) 50%),
+    linear-gradient(135deg, var(--ink-2) 50%, transparent 50%);
+  background-position:
+    calc(100% - 17px) 15px,
+    calc(100% - 12px) 15px;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+.field-label {
+  display: grid;
+  gap: var(--sp-2);
+  font: var(--type-label);
+  color: var(--ink-2);
+}
+.field-label > .hint {
+  font: var(--type-meta);
+}
+.field.with-icon {
+  position: relative;
+  display: block;
+}
+.field.with-icon > .icon {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  translate: 0 -50%;
+  color: var(--ink-3);
+  pointer-events: none;
+}
+.field.with-icon > input {
+  padding-left: var(--sp-6);
+}
+.form-error {
+  font: var(--type-meta);
+  color: var(--danger);
+}
+.form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--sp-2);
+}
+
+/* ---------- Toggles ---------- */
+/* A switch: a 28 px hit area with the track and knob drawn inside */
+input[type='checkbox'] {
+  -webkit-appearance: none;
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: var(--h-sm);
+  height: var(--h-sm);
+  margin: 0;
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  cursor: pointer;
+}
+input[type='checkbox']::before {
+  content: '';
+  position: absolute;
+  inset: 5px;
+  border: var(--line-w) solid var(--line-strong);
+  border-radius: var(--r-1);
+  background: var(--sunk);
+  transition:
+    background-color var(--dur-1) var(--ease),
+    border-color var(--dur-1) var(--ease);
+}
+input[type='checkbox']::after {
+  content: '';
+  position: absolute;
+  left: 11px;
+  top: 7px;
+  width: 5px;
+  height: 10px;
+  border: solid var(--on-gold);
+  border-width: 0 2px 2px 0;
+  rotate: 45deg;
+  opacity: 0;
+}
+input[type='checkbox']:checked::before {
+  background: var(--gold-fill);
+  border-color: var(--gold-fill);
+}
+input[type='checkbox']:checked::after {
+  opacity: 1;
+}
+input[type='checkbox'][role='switch'] {
+  width: 40px;
+}
+input[type='checkbox'][role='switch']::before {
+  inset: 4px 2px;
+  border-radius: var(--r-round);
+}
+input[type='checkbox'][role='switch']::after {
+  left: 6px;
+  top: 7px;
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: var(--r-round);
+  background: var(--ink-3);
+  rotate: none;
+  opacity: 1;
+  transition:
+    translate var(--dur-1) var(--ease),
+    background-color var(--dur-1) var(--ease);
+}
+input[type='checkbox'][role='switch']:hover::after {
+  background: var(--ink-2);
+}
+input[type='checkbox'][role='switch']:checked::after {
+  translate: 14px 0;
+  background: var(--on-gold);
+}
+input[type='checkbox']:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+.check-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  min-height: var(--h-lg);
+  cursor: pointer;
+}
+.check-row > span:not(.avatar) {
+  flex: 1;
+  min-width: 0;
+}
+.check-row > input[role='switch'] {
+  order: 2;
+}
+.check-row.inline {
+  min-height: var(--h-md);
+}
+
+/* Sliders */
+input[type='range'] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: var(--h-sm);
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+input[type='range']::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: var(--r-round);
+  background: var(--line-strong);
+}
+input[type='range']::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 2px solid var(--surface);
+  border-radius: var(--r-round);
+  background: var(--ink);
+}
+input[type='range']:focus-visible {
+  outline-offset: 0;
+}
+.range-ends {
+  display: flex;
+  justify-content: space-between;
+  grid-column: 1 / -1;
+  font: var(--type-time);
+  color: var(--ink-3);
+}
+
+/* Segmented: one of a few, the chosen one lit by a line, not a fill */
+.segmented {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: var(--h-md);
+  padding: 3px;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-1);
+  background: var(--sunk);
+}
+.segmented > button,
+.segmented > label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--h-sm);
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--ink-2);
+  font: var(--type-button);
+  letter-spacing: var(--track-button);
+  white-space: nowrap;
+  cursor: pointer;
+}
+.segmented > :hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+.segmented > .on,
+.segmented > [aria-checked='true'],
+.segmented > [aria-selected='true'] {
+  color: var(--ink);
+}
+.segmented > .on::after,
+.segmented > [aria-checked='true']::after,
+.segmented > [aria-selected='true']::after {
+  content: '';
+  position: absolute;
+  left: var(--sp-3);
+  right: var(--sp-3);
+  bottom: 3px;
+  height: var(--lit-w);
+  background: var(--gold);
+}
+.segmented > .disabled,
+.segmented > :disabled {
+  color: var(--ink-3);
+  cursor: not-allowed;
+}
+.segmented > label input[type='file'] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+/* Choice tiles: a picture you pick (weaves, themes, game art); chosen has a 2 px gold edge */
+.weave-kind,
+.theme-card {
+  position: relative;
+  display: grid;
+  align-content: end;
+  min-height: 58px;
+  padding: 0;
+  overflow: hidden;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--sunk);
+  color: var(--on-art);
+  text-align: left;
+  cursor: pointer;
+}
+.weave-kind > svg,
+.weave-kind > img,
+.weave-kind > .woven {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.weave-kind > span {
+  position: relative;
+  padding: var(--sp-1) var(--sp-2);
+  background: var(--scrim-art);
+  font: var(--type-button);
+}
+.weave-kind:hover,
+.theme-card:hover {
+  border-color: var(--line-strong);
+}
+.weave-kind.on,
+.weave-kind[aria-checked='true'],
+.theme-card.on,
+.theme-card[aria-checked='true'] {
+  border: var(--lit-w) solid var(--gold);
+}
+/* A theme to choose: its swatch above, its name below on the card's own colour */
+.theme-card {
+  align-content: start;
+  gap: var(--sp-2);
+  padding: var(--sp-1) var(--sp-1) var(--sp-2);
+  background: var(--surface);
+  color: var(--ink);
+  font: var(--type-button);
+}
+.theme-card > .theme-swatch {
+  border-radius: var(--r-1);
+}
+.theme-card > :not(.theme-swatch) {
+  padding: 0 var(--sp-1);
+}
+.weave-kind.upload {
+  place-content: center;
+  color: var(--ink-2);
+}
+.weave-kind.upload > span {
+  background: none;
+}
+
+/* ---------- Counts, badges, chips ---------- */
+.side-count,
+.rail-count,
+.channel-count,
+.counter {
+  display: inline-grid;
+  place-items: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: var(--r-round);
+  background: var(--ink);
+  color: var(--surface);
+  font: var(--type-badge);
+  font-variant-numeric: tabular-nums;
+}
+.game-card-live {
+  display: inline-flex;
+  align-items: center;
+  height: 18px;
+  padding: 0 var(--sp-2);
+  border-radius: var(--r-round);
+  background: var(--danger-fill);
+  color: var(--on-danger);
+  font: var(--type-badge);
+  letter-spacing: var(--track-button);
+}
+kbd {
+  display: inline-grid;
+  place-items: center;
+  height: 20px;
+  padding: 0 6px;
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-1);
+  color: var(--ink-3);
+  font: var(--type-badge);
+}
+.keep-chip,
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+  height: var(--h-sm);
+  padding: 0 var(--sp-3);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-round);
+  background: transparent;
+  color: var(--ink-2);
+  font: var(--type-meta);
+  white-space: nowrap;
+}
+.keep-chip:hover,
+.chip:hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+.keep-chip {
+  color: var(--online);
+  border-color: color-mix(in srgb, var(--online) 45%, transparent);
+}
+
+/* ---------- Pictures ---------- */
+.avatar {
+  position: relative;
+  display: inline-block;
+  flex: none;
+  border-radius: var(--r-round);
+}
+.avatar > img,
+.avatar > svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+  object-fit: cover;
+}
+.presence {
+  position: absolute;
+  right: 4%;
+  bottom: 4%;
+  width: clamp(10px, 32%, 18px);
+  height: clamp(10px, 32%, 18px);
+  border: 2px solid var(--surface);
+  border-radius: var(--r-round);
+  background: var(--ink-3);
+}
+.presence.on {
+  background: var(--online);
+}
+
+/* ---------- Tooltips ---------- */
+.info {
+  position: relative;
+  display: inline-flex;
+}
+.info-icon {
+  display: inline-grid;
+  place-items: center;
+  width: var(--h-sm);
+  height: var(--h-sm);
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-round);
+  background: transparent;
+  color: var(--ink-3);
+}
+.info-icon:hover {
+  background: var(--raised);
+  color: var(--ink);
+}
+.tip {
+  display: none;
+  position: absolute;
+  left: 0;
+  top: calc(100% + var(--sp-2));
+  z-index: 20;
+  width: max-content;
+  max-width: 280px;
+  padding: var(--sp-2) var(--sp-3);
+  border-radius: var(--r-2);
+  background: var(--surface);
+  box-shadow: var(--shadow-float);
+  color: var(--ink-2);
+  font: var(--type-meta);
+  white-space: normal;
+}
+.tip b {
+  display: block;
+  color: var(--ink);
+  font-weight: 400;
+}
+.info:hover .tip,
+.info:focus-within .tip {
+  display: block;
+}
+
+/* ---------- Menus ---------- */
+.context-menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 220px;
+  max-height: calc(100vh - 16px);
+  overflow-y: auto;
+  padding: var(--sp-1);
+  border-radius: var(--r-2);
+  background: var(--surface);
+  box-shadow: var(--shadow-float);
+}
+.context-section + .context-section {
+  margin-top: var(--sp-1);
+  padding-top: var(--sp-1);
+  border-top: var(--line-w) solid var(--line);
+}
+.context-item {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  width: 100%;
+  height: var(--h-md);
+  padding: 0 var(--sp-3);
+  border: 0;
+  border-radius: var(--r-1);
+  background: transparent;
+  color: var(--ink);
+  font: var(--type-name);
+  text-align: left;
+}
+.context-item .icon {
+  color: var(--ink-3);
+}
+.context-item:hover,
+.context-item:focus-visible,
+.context-item[aria-expanded='true'] {
+  outline: none;
+  background: var(--raised);
+}
+.context-item.nested {
+  padding-left: var(--sp-5);
+}
+.context-item.danger,
+.context-item.danger .icon {
+  color: var(--danger);
+}
+.context-item.has-check .check {
+  margin-left: auto;
+  color: var(--gold);
+}
+.context-item > .chevron,
+.context-item > :last-child.icon {
+  margin-left: auto;
+}
+.context-head {
+  padding: var(--sp-2) var(--sp-3) var(--sp-1);
+  font: var(--type-label);
+  color: var(--ink-3);
+}
+.context-node {
+  padding: 0 var(--sp-3) var(--sp-2);
+}
+
+/* ---------- Dialogs ---------- */
+dialog {
+  max-width: min(560px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  padding: 0;
+  overflow: auto;
+  border: 0;
+  border-radius: var(--r-2);
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-float);
+}
+dialog::backdrop {
+  background: var(--backdrop);
+}
+dialog[open] {
+  animation: appear var(--dur-2) var(--ease);
+}
+@keyframes appear {
+  from {
+    opacity: 0;
+    translate: 0 6px;
+  }
+}
+.dialog-body {
+  position: relative;
+  display: grid;
+  gap: var(--sp-4);
+  width: 460px;
+  max-width: 100%;
+  padding: var(--sp-5);
+}
+.dialog-body:focus {
+  outline: none;
+}
+.dialog-body > h2:first-of-type,
+.dialog-body > h1:first-of-type {
+  font: var(--type-section);
+  padding-right: var(--sp-6);
+}
+.dialog-close {
+  position: absolute;
+  right: var(--sp-3);
+  top: var(--sp-3);
+}
+
+/* ---------- Toasts ---------- */
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: var(--sp-5);
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  max-width: min(560px, calc(100vw - 32px));
+  min-height: var(--h-lg);
+  padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-4);
+  translate: -50% 0;
+  border-radius: var(--r-2);
+  background: var(--surface);
+  box-shadow: var(--shadow-float);
+  color: var(--ink);
+  animation: appear var(--dur-2) var(--ease);
+}
+.toast + .toast {
+  bottom: calc(var(--sp-5) + var(--h-lg) + var(--sp-3));
+}
+
+/* An error said in place: a plain row on the surface, the icon carries the colour */
+.error-row {
+  display: flex;
+  align-items: center;
+  gap: var(--sp-3);
+  padding: var(--sp-3) var(--sp-4);
+  border: var(--line-w) solid var(--line);
+  border-radius: var(--r-2);
+  background: var(--surface);
+}
+.error-row > .icon {
+  color: var(--danger);
+}
+
+/* Quiet headings above a list, a field or a column */
+.side-cat,
+.group-label {
+  display: flex;
+  align-items: baseline;
+  gap: var(--sp-2);
+  font: var(--type-label);
+  color: var(--ink-2);
+}
+.icon-button.wide {
+  flex: 1;
+  width: auto;
+}
+.icon-button.wide.on,
+.icon-button.wide[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--online) 14%, transparent);
+  color: var(--online);
+}
+.icon-button.primary {
+  background: var(--gold-fill);
+  color: var(--on-gold);
+}
+.icon-button.primary:hover:not(:disabled) {
+  background: var(--gold-fill-hover);
+  color: var(--on-gold);
+}
+.icon-button.primary:active:not(:disabled) {
+  background: var(--gold-fill-press);
+}
+.icon-button.large {
+  width: var(--h-lg);
+  height: var(--h-lg);
+}
+.icon-button.held {
+  cursor: not-allowed;
+}
+
+/* Forms in dialogs: one column */
+.new-group,
+.settings-section {
+  display: grid;
+  gap: var(--sp-4);
+}
+.settings-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--sp-3);
+}

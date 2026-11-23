@@ -34,7 +34,10 @@ export type Game = {
 // week: minutes played per game on each of the last 14 days (d: 0 today, 1 yesterday...), counted by their own app;
 // an empty list says they share it and played nothing, no list that they do not share it (or run an older copy)
 export type Week = { d: number; g: string; m: number }[]
-export type Activity = { now: number; game?: Game; week?: Week }
+// recent: the last games played, newest first, each named once, with when it was last played (shared with the week,
+// under the same switch; an empty list says nothing played yet, no list not shared or an older copy)
+export type Recent = { g: string; app?: number; at: number }[]
+export type Activity = { now: number; game?: Game; week?: Week; recent?: Recent }
 
 // What may be shared, set in Settings → Activity. On unless `games` is turned off; each detail is on unless turned
 // off, except the store `details`, which are off unless turned on.
@@ -58,7 +61,7 @@ export const sharing = (set: ActivitySettings | undefined) => set?.games !== fal
 // Only what the user chose to share leaves this computer.
 export function shareable(a: Activity, set: ActivitySettings | undefined): Activity {
   if (!sharing(set)) return { now: a.now }
-  const week = set?.playtime !== false && a.week ? { week: a.week } : {}
+  const week = set?.playtime !== false ? { ...(a.week && { week: a.week }), ...(a.recent && { recent: a.recent }) } : {}
   if (!a.game) return { now: a.now, ...week }
   const g: Game = { ...a.game }
   if (set?.playtime === false) delete g.played
@@ -115,6 +118,37 @@ export function prunePlayed(played: Record<string, Record<string, number>>, now 
   for (const d of Object.keys(played)) if (d < oldest) delete played[d]
   return played
 }
+
+// Recently played (the full card): our own small record, the last RECENT_GAMES games by when each was last played.
+// Times are kept to 5 minutes, so what we share changes only every few minutes while a game runs.
+export const RECENT_GAMES = 5
+const FIVE_MIN = 3e5
+export function noteRecent(list: Recent | undefined, game: { name: string; app?: number }, now = Date.now()): Recent {
+  const at = Math.floor(now / FIVE_MIN) * FIVE_MIN
+  return [{ g: game.name, ...(game.app && { app: game.app }), at }, ...(list ?? []).filter((x) => x.g !== game.name)].slice(0, RECENT_GAMES)
+}
+// A first record from the two weeks already counted (an older data folder): each game at noon of the last day it was played
+export function recentFromPlayed(played: Record<string, Record<string, number>>): Recent {
+  const last = new Map<string, string>()
+  for (const day of Object.keys(played).sort()) for (const g of Object.keys(played[day])) last.set(g, day)
+  return [...last].sort((a, b) => (a[1] < b[1] ? 1 : a[1] > b[1] ? -1 : 0)).slice(0, RECENT_GAMES).map(([g, day]) => {
+    const [y, m, d] = day.split('-').map(Number)
+    return { g, at: new Date(y, m - 1, d, 12).getTime() }
+  })
+}
+// A friend's list, capped: at most RECENT_GAMES, each name once and cleaned, times moved onto our clock and never ahead
+export function cleanRecent(r: unknown, shift = 0, now = Date.now()): Recent {
+  if (!Array.isArray(r)) return []
+  const seen = new Set<string>()
+  return r.slice(0, RECENT_GAMES).flatMap((x: any) => {
+    const g = str(x?.g, 100)?.replace(/[\u0000-\u001f\u007f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, '').trim()
+    const at = Number.isFinite(x?.at) ? Math.min(now, x.at + shift) : NaN
+    if (!g || seen.has(g) || !(at > 0)) return []
+    seen.add(g)
+    const app = int(x.app, 1, 1e8)
+    return [{ g, ...(app && { app }), at: Math.round(at) }]
+  })
+}
 export const dayKey = (t: number) => {
   const d = new Date(t)
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -125,7 +159,7 @@ export function cleanActivity(x: unknown, now = Date.now()): Activity | null {
   const a = x as Record<string, any>
   const shift = Number.isFinite(a.now) ? now - a.now : 0
   const week = cleanWeek(a.week)
-  const base = Array.isArray(a.week) ? { now, week } : { now }
+  const base = { now, ...(Array.isArray(a.week) && { week }), ...(Array.isArray(a.recent) && { recent: cleanRecent(a.recent, shift, now) }) }
   const g = a.game
   if (!g || typeof g !== 'object') return base
   const name = str(g.name, 100)
