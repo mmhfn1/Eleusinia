@@ -521,10 +521,16 @@ button.member:hover .user {
 }
 dialog.image-view {
   max-width: calc(100vw - 48px);
+  overflow: hidden;
+}
+/* The viewer is as wide as its picture, not a form dialog's 460 px, so a wide picture fits instead of scrolling */
+dialog.image-view .dialog-body {
+  width: auto;
 }
 .image-view img {
   display: block;
-  max-width: calc(100vw - 96px);
+  max-width: 100%;
+  object-fit: contain;
   max-height: calc(100vh - 160px);
   margin: 0 auto var(--sp-2);
   border-radius: var(--r-2);
