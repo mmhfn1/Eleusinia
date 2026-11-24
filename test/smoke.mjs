@@ -932,6 +932,13 @@ try {
   await until('B downloads it and can show it in its folder', () => b.ev(`[...document.querySelectorAll('.file-card')].some((x) => x.textContent.includes('Show in folder'))`), 60)
   if (createHash('sha256').update(readFileSync(saved)).digest('hex') !== bigHash) throw new Error('the saved file does not match')
   console.log('ok   the saved file matches what Ann sent, byte for byte')
+  // The picture opens to scale: a wide one (drawn here, 3000x400) fits the window without scrolling sideways
+  await b.ev(`document.querySelector('.msg-image .image-button').click()`)
+  await until('the picture opens in its viewer', () => b.ev(`!!document.querySelector('dialog.image-view[open] img')`), 5)
+  await b.ev(`(() => { const c = document.createElement('canvas'); c.width = 3000; c.height = 400; c.getContext('2d').fillRect(0, 0, 3000, 400); document.querySelector('dialog.image-view img').src = c.toDataURL() })()`)
+  await until('a wide picture fits its viewer, with no sideways scrolling', () => b.ev(`(() => { const d = document.querySelector('dialog.image-view[open]'), i = d.querySelector('img'), body = d.querySelector('.dialog-body'); return i.complete && i.naturalWidth === 3000 && i.getBoundingClientRect().right <= d.getBoundingClientRect().right + 1 && d.scrollWidth <= d.clientWidth && body.scrollWidth <= body.clientWidth + 1 && d.getBoundingClientRect().width <= innerWidth })()`), 5)
+  await b.shot('image-view')
+  await b.ev(`document.querySelector('dialog.image-view[open] .dialog-close').click()`)
 
   console.log('--- Links')
   // A page on this machine stands in for a site. B's own app reads it while B types the link; Ann's app fetches nothing.
