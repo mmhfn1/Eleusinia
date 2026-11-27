@@ -1,8 +1,8 @@
 // Server settings: a wide dialog with its pages on the left. Every change is one signed op through `serverAct`;
 // what the replay would refuse (src/shared/server.ts) is disabled here first, with the reason beside it.
 import { type DragEvent, type FormEvent, type KeyboardEvent, useEffect, useState } from 'react'
-import { type Key, type ServerView, type State } from '../shared/protocol'
-import { Avatar, CopyButton, Dialog, GroupEmblem, Icon, ServerBannerArt, WeavePick, cover, gifPicture } from './ui'
+import { type Crop, type Key, type ServerView, type State } from '../shared/protocol'
+import { Avatar, CopyButton, Dialog, GroupEmblem, Icon, ServerBannerArt, WeavePick, cover, cropStyle, gifPicture, useCropper } from './ui'
 import { GifPicker, type Picked, gifFile } from './Gifs'
 import { NOBODY, type Run, api, labelOf } from './common'
 
@@ -141,7 +141,21 @@ function BannerSection({ s, can, act, run }: { s: Srv; can: boolean; act: P['act
     run(act('server.edit', { banner: draft }).finally(() => setBusy(false)))
   }
   const [gifs, setGifs] = useState(false)
-  const banner = (p: Promise<Picked>) => run(p.then((g) => asGif(g, 600, 360)).then(({ still, gif }) => pick({ pic: still, gif })))
+  // A picture or GIF is cropped first, then cut to 600 x 360 at that crop (a GIF keeps moving, drawn at its crop)
+  const crop = useCropper(600, 360, 60000, (b) => pick(b), (why) => run(Promise.reject(new Error(why))))
+  const banner = (p: Promise<Picked>) => run(p.then((picked) => crop.open({ picked })))
+  // The column's head as it will be drawn: the banner, its scrim and fade, and the server's name on it
+  const headPreview = (src: string, c: Crop) => (
+    <figure>
+      <figcaption>The channel column</figcaption>
+      <div className="banner-preview">
+        <span className="server-banner" style={{ ['--dark' as string]: dark }}>
+          <img src={src} alt="" style={cropStyle(c)} />
+        </span>
+        <span className="server-name">{s.name}</span>
+      </div>
+    </figure>
+  )
   return (
     <section className="settings-section banner-section">
       <h2>Banner</h2>
@@ -164,7 +178,7 @@ function BannerSection({ s, can, act, run }: { s: Srv; can: boolean; act: P['act
               const f = e.target.files?.[0]
               e.target.value = '' // so the same file can be chosen again
               if (f?.type === 'image/gif') banner(gifFile(f))
-              else if (f) run(shrink(f, 600, 360).then((pic) => pick({ pic })))
+              else if (f) crop.open({ file: f })
             }}
           />
         </label>
@@ -189,6 +203,12 @@ function BannerSection({ s, can, act, run }: { s: Srv; can: boolean; act: P['act
           })}
         </div>
       )}
+      {draft && 'pic' in draft && draft.gif && (
+        <button type="button" className="button subtle" disabled={!can} onClick={() => crop.recrop(draft.gif!, draft.crop)}>
+          Adjust crop
+        </button>
+      )}
+      {crop.dialog(headPreview)}
       <label className="weave-tones">
         Darkness
         <input type="range" min={0} max={90} value={dark} disabled={!can} onChange={(e) => setDraft({ ...(draft ?? { kind: 0, shift: 0 }), dark: +e.target.value })} />

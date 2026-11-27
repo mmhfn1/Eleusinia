@@ -1,11 +1,11 @@
 // The type (design/system/README.md), bundled so every system shows the same: Bodoni Moda for titles and sections,
-// Alegreya Sans for everything else, Cascadia Mono for friend IDs, keys and codes. Their OFL licences ship in
+// Libre Franklin for everything else, Google Sans Code for friend IDs, keys and codes. Their OFL licences ship in
 // resources/licenses/fonts (package.json extraResources).
 import '@fontsource-variable/bodoni-moda/standard.css'
-import '@fontsource/alegreya-sans/400.css'
-import '@fontsource/alegreya-sans/500.css'
-import '@fontsource/alegreya-sans/700.css'
-import '@fontsource/cascadia-mono/500.css'
+import '@fontsource/libre-franklin/400.css'
+import '@fontsource/libre-franklin/500.css'
+import '@fontsource/libre-franklin/700.css'
+import '@fontsource/google-sans-code/500.css'
 import { createRoot } from 'react-dom/client'
 import App from './App'
 import './styles/tokens.css'

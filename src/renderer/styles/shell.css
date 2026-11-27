@@ -349,13 +349,15 @@ aside.members {
 .home-column .side-title {
   margin: 0;
 }
+/* One column as wide as the list (minmax 0), so a long line ends in an ellipsis instead of widening it sideways */
 .side-list {
   flex: 1;
   min-height: 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   align-content: start;
   gap: 2px;
-  overflow-y: auto;
+  overflow: hidden auto;
   padding: var(--sp-2);
 }
 .side-cat {
@@ -553,11 +555,12 @@ aside.members {
 }
 
 /* ---------- Bars under the rail and the left column ---------- */
+/* The bars sit on the window's ground under a strong line, so the call controls stand apart from the column above */
 .bars {
   display: grid;
-  border-top: var(--line-w) solid var(--line);
+  border-top: var(--line-w) solid var(--line-strong);
   border-right: var(--line-w) solid var(--line);
-  background: var(--surface);
+  background: var(--ground);
 }
 .voice-bar {
   display: grid;

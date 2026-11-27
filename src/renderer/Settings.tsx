@@ -272,7 +272,7 @@ function MyProfile({ st, edit, draft, setDraft }: { st: State; edit: () => void;
         Banner
         <BannerPick id={st.me} p={st.profile} set={(banner) => save({ banner })} />
         <label className="check-row">
-          <input type="checkbox" role="switch" checked={st.profile.gameArt !== false} onChange={(e) => save({ gameArt: e.target.checked ? undefined : false })} />
+          <input type="checkbox" role="switch" checked={st.profile.gameArt === true} onChange={(e) => save({ gameArt: e.target.checked })} />
           <span>Show the game's art as my banner while I play</span>
         </label>
       </div>
@@ -367,7 +367,11 @@ function ShowcasePick({ st, save }: { st: State; save: (p: Partial<State['profil
   const [game, setGame] = useState<{ app: number; name: string } | null>(null)
   const [achs, setAchs] = useState<{ ach: string; icon: string }[] | null>(null)
   const set = (next: NonNullable<State['profile']['showcase']>) => save({ showcase: next.length ? next : undefined })
-  const pin = (x: NonNullable<State['profile']['showcase']>[number]) => (set([...items, x].slice(0, 3)), setOpen(false), setGame(null))
+  // The picker stays open after a pin, so several can be pinned in a row; Done closes it
+  const pin = (x: NonNullable<State['profile']['showcase']>[number]) => set([...items, x].slice(0, 3))
+  const full = items.length >= 3
+  const gamePinned = (app: number) => items.some((x) => !('ach' in x) && x.app === app)
+  const achPinned = (app: number, ach: string) => items.some((x) => 'ach' in x && x.app === app && x.ach === ach)
   const start = () => {
     setOpen(true)
     if (!games) window.api.steamGames().then(setGames)
@@ -409,8 +413,8 @@ function ShowcasePick({ st, save }: { st: State; save: (p: Partial<State['profil
                     <span className="row-title">{g.name}</span>
                     <span className="row-sub">{g.hours.toLocaleString()} h</span>
                   </span>
-                  <button className="button subtle" onClick={() => pin({ app: g.app, game: g.name, hours: g.hours })}>
-                    Pin game
+                  <button className="button subtle" disabled={full || gamePinned(g.app)} onClick={() => pin({ app: g.app, game: g.name, hours: g.hours })}>
+                    {gamePinned(g.app) ? 'Game pinned' : 'Pin game'}
                   </button>
                   <button className="button subtle" onClick={() => pickGame(g)}>
                     Achievements
@@ -427,7 +431,7 @@ function ShowcasePick({ st, save }: { st: State; save: (p: Partial<State['profil
               {!achs && <p className="quiet">Reading achievements…</p>}
               {achs && !achs.length && <p className="quiet">No unlocked achievements found for this game.</p>}
               {achs?.map((a) => (
-                <button key={a.ach} className="show-row ach" onClick={() => pin({ app: game.app, game: game.name, ach: a.ach, icon: a.icon })}>
+                <button key={a.ach} className="show-row ach" disabled={full || achPinned(game.app, a.ach)} aria-pressed={achPinned(game.app, a.ach)} onClick={() => pin({ app: game.app, game: game.name, ach: a.ach, icon: a.icon })}>
                   <img src={`eleusinia-art://achievement/${game.app}/${a.icon}`} alt="" />
                   <span className="row-title">{a.ach}</span>
                 </button>
@@ -509,7 +513,7 @@ function Preview({ st, draft }: { st: State; draft: ThemeDraft }) {
         </div>
         <div className="preview-body">
           <b className="preview-name">{st.profile.name}</b>
-          <span className="row-sub">{st.profile.handle}</span>
+          <span className="row-sub"><span className="handle">{st.profile.handle}</span></span>
           {statusOf(st.profile) && <p className="pop-status">{statusOf(st.profile)!.text}</p>}
           <PlayDays st={st} k={st.me} />
           {st.profile.about && <p className="preview-about">{st.profile.about}</p>}
@@ -600,6 +604,7 @@ export function SettingsDialog({ st, close, edit, remove }: { st: State; close: 
               <input type="checkbox" role="switch" checked={st.settings.closeToTray !== false} onChange={(e) => api.call('setSettings', { closeToTray: e.target.checked })} />
               <span>Minimize to the system tray when the window is closed</span>
             </label>
+            <StartAtLogin />
           </section>
           <section className="settings-section" data-pane="voice">
             <h2>Voice and video</h2>
@@ -684,6 +689,25 @@ function MediaCache({ st }: { st: State }) {
         Clear cache
       </button>
     </div>
+  )
+}
+
+// Opening Eleusinia with the computer: the operating system keeps it (main's loginItem), so the switch reads it from there.
+// null: not offered here (a copy run from source, or Linux).
+function StartAtLogin() {
+  const [on, setOn] = useState<boolean | null>(null)
+  useEffect(() => {
+    window.api.loginItem().then(setOn, () => setOn(null))
+  }, [])
+  const mac = window.api.platform === 'darwin'
+  return (
+    <label className="check-row">
+      <input type="checkbox" role="switch" checked={!!on} disabled={on === null} onChange={(e) => window.api.loginItem(e.target.checked).then(setOn)} />
+      <span>
+        Open Eleusinia when {mac ? 'you log in to your Mac' : 'Windows starts'}
+        {on === null && <span className="hint"> · only in the installed app on Windows and macOS</span>}
+      </span>
+    </label>
   )
 }
 
@@ -880,7 +904,7 @@ export function ReportDialog({ st, close }: { st: State; close: () => void }) {
           <label className="check-row">
             <input type="checkbox" role="switch" checked={contact} onChange={(e) => setContact(e.target.checked)} />
             <span>
-              Include my friend ID so the developers can reply<span className="hint"> · {st.profile.handle}</span>
+              Include my friend ID so the developers can reply<span className="hint"> · <span className="handle">{st.profile.handle}</span></span>
             </span>
           </label>
           <p className="hint">Never included: your messages, names, pictures, window titles, device names, full keys or network addresses.</p>
@@ -933,7 +957,7 @@ export function DeleteAccount({ st, close }: { st: State; close: () => void }) {
         </p>
         <label className="field-label">
           <span>
-            Type <b>{st.profile.handle}</b> to confirm
+            Type <b className="handle">{st.profile.handle}</b> to confirm
           </span>
           <input value={typed} onChange={(e) => setTyped(e.target.value)} autoComplete="off" spellCheck={false} />
         </label>

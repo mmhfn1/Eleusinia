@@ -213,7 +213,7 @@ export function Chat({ st, conv, title, people, run, home, go, menu, stage, head
             <span className="row-text">
               <span className="chat-title">{title}</span>
               <span className="row-sub">
-                {prof(other).handle} · {isOnline(other) ? 'Online' : 'Offline'}
+                <span className="handle">{prof(other).handle}</span> · {isOnline(other) ? 'Online' : 'Offline'}
               </span>
             </span>
           </button>

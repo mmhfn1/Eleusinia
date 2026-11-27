@@ -30,6 +30,17 @@ export function GifPicker({ close, pick }: { close: () => void; pick: (g: Picked
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
   const asked = useRef(0)
+  const paging = useRef(false)
+  // The next page of results, asked once the grid is scrolled near its end (one at a time)
+  const loadMore = () => {
+    if (tab !== 'search' || !more || paging.current) return
+    paging.current = true
+    const n = asked.current
+    api
+      .gif('search', q, hits.length)
+      .then((h) => n === asked.current && (setHits((x) => [...x, ...h]), setMore(h.length === 24)), () => setMore(false))
+      .finally(() => (paging.current = false))
+  }
 
   const loadLocal = () => api.call('localGifs').then(setLocal, () => {})
   useEffect(() => {
@@ -79,7 +90,14 @@ export function GifPicker({ close, pick }: { close: () => void; pick: (g: Picked
         </button>
       </div>
       {tab === 'search' && <input type="search" className="gif-search" value={q} placeholder="Search KLIPY" aria-label="Search KLIPY" onChange={(e) => setQ(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && e.preventDefault()} />}
-      <div className="gif-grid" aria-busy={busy}>
+      <div
+        className="gif-grid"
+        aria-busy={busy}
+        onScroll={(e) => {
+          const el = e.currentTarget
+          if (el.scrollTop + el.clientHeight > el.scrollHeight - 240) loadMore()
+        }}
+      >
         {tab === 'search'
           ? hits.map((g) => (
               <button key={g.id} type="button" className="gif-tile" title={g.title} disabled={busy} onClick={() => choose(() => api.gif('pick', g.gif))}>
@@ -98,11 +116,6 @@ export function GifPicker({ close, pick }: { close: () => void; pick: (g: Picked
             ))}
       </div>
       {tab !== 'search' && !list.length && <p className="hint">{tab === 'stars' ? 'Star a GIF under Recent to keep it here.' : 'GIFs you send, receive or pick show up here.'}</p>}
-      {tab === 'search' && more && (
-        <button type="button" className="button subtle" onClick={() => api.gif('search', q, hits.length).then((h) => (setHits((x) => [...x, ...h]), setMore(h.length === 24)), () => setMore(false))}>
-          More
-        </button>
-      )}
       {err && (
         <p role="alert" className="form-error">
           {err}

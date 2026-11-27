@@ -647,6 +647,10 @@ try {
   const annRow = `[...document.querySelectorAll('.online .row-button')].find((x) => x.textContent.includes('Ann'))`
   const annMe = await a.ev(`api.call('state').then((s) => s.me)`)
   const bobSees = (test) => `api.call('state').then((s) => { const g = s.activity['${annMe}']?.game; return ${test} })`
+  // The game's art as her banner while she plays is off until she turns it on (Settings, My profile)
+  if (await a.ev(`api.call('state').then((s) => s.profile.gameArt === true)`)) throw new Error("the game's art as a banner is on by default")
+  await a.ev(`api.call('state').then((s) => api.call('setProfile', { ...s.profile, gameArt: true }))`)
+  await until("Bob learns Ann shows her game's art as her banner", () => b.ev(`api.call('state').then((s) => s.profiles['${annMe}']?.gameArt === true)`), 15)
   // On by default: Ann's game reaches Bob without her touching Settings, but not the store details
   await until('B gets what Ann plays by default, without store details', () => b.ev(bobSees('!!g && g.played > 0 && g.developer === undefined')))
   // No list of what people did: the news flashes in the bottom left corner and fades (Lists.tsx ActivityNotices)
@@ -783,10 +787,10 @@ try {
   await sleep(400)
   await a.shot('theme-owner')
   await a.ev(`[...document.querySelectorAll('dialog[open] button')].find(x => x.textContent === 'Close').click()`)
-  const fonts = await b.ev(`document.fonts.ready.then(() => JSON.stringify({ bodoni: document.fonts.check('600 26px "Bodoni Moda Variable"') && document.fonts.check('500 20px "Bodoni Moda Variable"'), alegreya: document.fonts.check('500 15px "Alegreya Sans"') && document.fonts.check('700 13.5px "Alegreya Sans"'), mono: document.fonts.check('500 12.5px "Cascadia Mono"') && [...document.fonts].some((x) => x.family.includes('Cascadia Mono') && x.status === 'loaded'), google: performance.getEntriesByType('resource').filter((e) => /fonts\.(googleapis|gstatic)\.com/.test(e.name)).length, local: performance.getEntriesByType('resource').filter((e) => /bodoni-moda|alegreya-sans|cascadia-mono/.test(e.name) && !/^https?:/.test(e.name)).length }))`)
+  const fonts = await b.ev(`document.fonts.ready.then(() => JSON.stringify({ bodoni: document.fonts.check('600 26px "Bodoni Moda Variable"') && document.fonts.check('500 20px "Bodoni Moda Variable"'), text: document.fonts.check('500 15px "Libre Franklin"') && document.fonts.check('700 13.5px "Libre Franklin"'), mono: document.fonts.check('500 12.5px "Google Sans Code"') && [...document.fonts].some((x) => x.family.includes('Google Sans Code') && x.status === 'loaded'), google: performance.getEntriesByType('resource').filter((e) => /fonts\.(googleapis|gstatic)\.com/.test(e.name)).length, local: performance.getEntriesByType('resource').filter((e) => /bodoni-moda|libre-franklin|google-sans-code/.test(e.name) && !/^https?:/.test(e.name)).length }))`)
   const f = JSON.parse(fonts)
-  if (!f.bodoni || !f.alegreya || !f.mono || f.google) throw new Error('the type is not loaded from the app: ' + fonts)
-  console.log(`ok   Bodoni Moda, Alegreya Sans and Cascadia Mono load from the app (${f.local} font files), none from Google`)
+  if (!f.bodoni || !f.text || !f.mono || f.google) throw new Error('the type is not loaded from the app: ' + fonts)
+  console.log(`ok   Bodoni Moda, Libre Franklin and Google Sans Code load from the app (${f.local} font files), none from Google`)
   console.log('ok   the grid and the theme crossed the wire: Bob drew both from what Ann shares')
   // ELEUSINIA_SMOKE_PERF=1 (Windows): what an open themed card costs Bob's renderer and GPU processes, against none open
   let perfMeasure = null // set by the perf block, for the reading in a call further on

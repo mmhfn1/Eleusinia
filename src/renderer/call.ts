@@ -50,6 +50,7 @@ declare global {
       recordHotkey(): Promise<import('../shared/hotkeys').Hotkey | null>
       stopRecording(): Promise<void>
       isAdmin(): Promise<boolean>
+      loginItem(on?: boolean): Promise<boolean | null>
       restartAsAdmin(): Promise<boolean>
       diag(area: import('../shared/reports').Area, text: string): void
       installUpdate(): Promise<void>

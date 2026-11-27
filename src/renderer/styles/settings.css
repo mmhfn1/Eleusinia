@@ -320,23 +320,36 @@ dialog.settings-dialog {
 .weave-tones input[type='range'] {
   flex: 1;
 }
+/* The banner previews are drawn as the real thing: a server's at the channel column's head (its width, 172 px, the name
+   on its scrim, the last 56 px fading), a profile's at the small card's 320 x 112 with its fade */
 .banner-preview {
   position: relative;
   isolation: isolate;
   display: flex;
   align-items: flex-end;
-  width: 260px;
-  height: 96px;
+  width: 280px;
+  height: 172px;
   margin: var(--sp-1) 0 var(--sp-3);
-  padding: 0 var(--sp-3) var(--sp-3);
+  padding: 0 var(--sp-3) 62px var(--sp-4);
   overflow: hidden;
   border-radius: var(--r-2);
   color: var(--on-art);
+  --banner-fade: 56px;
+}
+.banner-preview > .server-banner {
+  mask-image: linear-gradient(180deg, #000 calc(100% - var(--banner-fade)), transparent);
+}
+.banner-preview .server-name {
+  display: -webkit-box;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 .banner-preview.profile {
-  width: 100%;
-  max-width: 440px;
-  height: 90px;
+  width: 320px;
+  height: 112px;
+  padding: 0;
+  mask-image: linear-gradient(180deg, #000 40%, transparent);
 }
 .banner-preview > img,
 .banner-preview > svg,
@@ -606,4 +619,57 @@ dialog.settings-dialog {
 .report-dialog textarea {
   width: 100%;
   resize: vertical;
+}
+.show-row:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+.show-row:disabled:hover {
+  background: none;
+}
+
+/* The crop dialog: the picture under a frame of the banner's shape, then every place it shows, as drawn there */
+.crop-dialog .dialog-body {
+  width: auto;
+}
+.crop-banner {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--r-2);
+  background: var(--video);
+  cursor: grab;
+  touch-action: none;
+  outline: var(--lit-w) solid var(--gold);
+  outline-offset: 0;
+}
+.crop-banner:active {
+  cursor: grabbing;
+}
+.crop-banner > img {
+  position: absolute;
+  max-width: none;
+  user-select: none;
+  pointer-events: none;
+}
+.crop-previews {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: var(--sp-4);
+}
+.crop-previews figure {
+  display: grid;
+  gap: var(--sp-1);
+  margin: 0;
+}
+.crop-previews figcaption {
+  font: var(--type-label);
+  color: var(--ink-2);
+}
+.crop-small {
+  width: 320px;
+}
+.crop-full {
+  width: 320px;
+  height: 86px; /* the full card's 640 x 172, at half size */
 }

@@ -389,11 +389,15 @@ dialog.gif-picker[open] > .dialog-body {
 .gif-search {
   width: 100%;
 }
+/* Three across, scrolling down (columns: would add columns sideways once the box is full); the next page loads near
+   the end (Gifs.tsx loadMore) */
 .gif-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-content: start;
+  gap: var(--sp-2);
   max-height: min(420px, 55vh);
-  overflow-y: auto;
-  columns: 3 120px;
-  column-gap: var(--sp-2);
+  overflow: hidden auto;
 }
 .gif-grid[aria-busy='true'] {
   opacity: 0.6;
@@ -402,10 +406,9 @@ dialog.gif-picker[open] > .dialog-body {
   position: relative;
   display: block;
   width: 100%;
-  margin: 0 0 var(--sp-2);
+  aspect-ratio: 4 / 3;
   padding: 0;
   overflow: hidden;
-  break-inside: avoid;
   border: var(--line-w) solid var(--line);
   border-radius: var(--r-1);
   background: var(--raised);
@@ -414,11 +417,13 @@ dialog.gif-picker[open] > .dialog-body {
 .gif-use img {
   display: block;
   width: 100%;
-  height: auto;
+  height: 100%;
+  object-fit: cover;
 }
 .gif-use {
   display: block;
   width: 100%;
+  height: 100%;
   padding: 0;
   border: 0;
   background: none;

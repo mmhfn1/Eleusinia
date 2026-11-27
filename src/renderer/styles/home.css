@@ -244,8 +244,9 @@
   padding: var(--sp-7) var(--sp-5);
   text-align: center;
 }
+/* The logo above the words, faint (base.css .emblem.faint) */
 .empty-state > .emblem {
-  display: none;
+  margin-bottom: var(--sp-2);
 }
 .empty-title {
   font: var(--type-section);

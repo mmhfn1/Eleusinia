@@ -32,13 +32,27 @@ export type Msg = { conv: string; author: Key; seq: number; ts: number; text: st
 export type Have = Record<Key, number> // highest seq held, per author
 // handle: the unique-ish ID friends type, username#1234. avatar: small image data URL, or ''.
 // banner: what their banner shows: a weave from their key (shared/mark.ts), their picture softened (`fade`), or a picture
-// or GIF of their own (`pic`); without it, their picture softened, else their key's weave. gameArt: false keeps the
-// banner while they play instead of the game's art.
-export type Banner = Weave | { fade: true } | { pic: string; gif?: GifRef }
+// or GIF of their own (`pic`); without it, their picture softened, else their key's weave. gameArt: true puts the
+// game's art in place of the banner while they play; off by default, and sent as false then, which older copies also read
+// as keep the banner.
+export type Banner = Weave | { fade: true } | { pic: string; gif?: GifRef; crop?: Crop }
+// The part of a GIF a banner shows, as fractions of its frame (left, top, width, height), chosen in the crop dialog; the
+// still beside it is already cut to it. Older copies, which drop it, show that still and the GIF uncut.
+export type Crop = { x: number; y: number; w: number; h: number }
+export function cleanCrop(v: any): Crop | undefined {
+  const n = (x: unknown) => (typeof x === 'number' && Number.isFinite(x) ? Math.round(x * 1000) / 1000 : NaN)
+  const [x, y, w, h] = [n(v?.x), n(v?.y), n(v?.w), n(v?.h)]
+  if (!(x >= 0 && y >= 0 && w >= 0.05 && h >= 0.05 && x + w <= 1.001 && y + h <= 1.001)) return undefined
+  return { x, y, w, h }
+}
+const cropOf = (v: unknown) => {
+  const c = cleanCrop(v)
+  return c ? { crop: c } : {}
+}
 // status: a line under their name, until a time (unix ms) or until cleared; quiet: no pokes reach them while it is set
 export type Status = { text: string; until?: number; quiet?: true }
 // gif: their picture as a GIF too big for a greeting, fetched by hash; avatar is then its first frame
-export type Profile = { handle: string; name: string; about: string; avatar: string; gif?: GifRef; banner?: Banner; gameArt?: false; status?: Status; showcase?: Showcase; theme?: Theme }
+export type Profile = { handle: string; name: string; about: string; avatar: string; gif?: GifRef; banner?: Banner; gameArt?: boolean; status?: Status; showcase?: Showcase; theme?: Theme }
 // Device labels are kept beside the ids, since an id can change while the name stays (see devices.ts).
 // volumes: how loud each person is played in calls, 0 to 1, kept between sessions.
 // hotkeys: only those the user bound; none by default.
@@ -228,7 +242,7 @@ export const gifOf = (v: any) => (isGifRef(v) ? { gif: { h: v.h, s: v.s } } : {}
 export const statusOf = (p: Pick<Profile, 'status'> | undefined, now = Date.now()) => (p?.status && (!p.status.until || p.status.until > now) ? p.status : undefined)
 export function cleanBanner(v: any): Banner | undefined {
   if (v?.fade === true) return { fade: true }
-  if (isMedia(v?.pic)) return { pic: v.pic, ...gifOf(v.gif) }
+  if (isMedia(v?.pic)) return { pic: v.pic, ...gifOf(v.gif), ...(v.gif && cropOf(v.crop)) }
   return cleanWeave(v)
 }
 export function cleanProfile(p: any): Profile {
@@ -240,7 +254,7 @@ export function cleanProfile(p: any): Profile {
   const st = p?.status
   const text = typeof st?.text === 'string' ? st.text.trim().slice(0, 60) : ''
   const status: Status | undefined = text ? { text, ...(Number.isSafeInteger(st.until) && st.until > 0 && { until: st.until }), ...(st.quiet === true && { quiet: true as const }) } : undefined
-  return { handle: isHandle(p?.handle) ? p.handle : '', name: str(p?.name, 40), about: str(p?.about, 200), avatar: ok ? p.avatar : '', ...(ok && gifOf(p.gif)), ...(banner && { banner }), ...(p?.gameArt === false && { gameArt: false as const }), ...(status && { status }), ...(showcase && { showcase }), ...(theme && { theme }) }
+  return { handle: isHandle(p?.handle) ? p.handle : '', name: str(p?.name, 40), about: str(p?.about, 200), avatar: ok ? p.avatar : '', ...(ok && gifOf(p.gif)), ...(banner && { banner }), ...(typeof p?.gameArt === 'boolean' && { gameArt: p.gameArt as boolean }), ...(status && { status }), ...(showcase && { showcase }), ...(theme && { theme }) }
 }
 
 export const isUsername = (s: unknown): s is string => typeof s === 'string' && /^[a-z0-9_.]{2,20}$/.test(s)

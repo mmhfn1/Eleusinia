@@ -398,7 +398,7 @@ export const MemberRow = memo(
             </span>
             {you && <span className="row-sub"> (you)</span>}
           </span>
-          <span className="row-sub">{a?.game ? <ActivityLine a={a} /> : p.handle}</span>
+          <span className="row-sub">{a?.game ? <ActivityLine a={a} /> : <span className="handle">{p.handle}</span>}</span>
         </span>
       </button>
     )

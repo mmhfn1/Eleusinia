@@ -823,6 +823,13 @@ function startApp() {
   // Windows hides keys typed into a program running as administrator (some games, launchers, anti-cheat) from every
   // program that is not, whatever method it uses, so hotkeys over such a game need Eleusinia elevated too.
   const run = (file: string, args: string[]) => new Promise<boolean>((r) => execFile(file, args, { windowsHide: true }, (err) => r(!err)))
+  // Open with the computer (Settings, Appearance): Windows and macOS keep it themselves; a copy run from source would
+  // register the bare Electron binary, so it is offered only installed, and not on Linux, where Electron cannot set it
+  ipcMain.handle('loginItem', (_e, on: unknown) => {
+    if (!app.isPackaged || process.platform === 'linux') return null
+    if (typeof on === 'boolean') app.setLoginItemSettings({ openAtLogin: on })
+    return app.getLoginItemSettings().openAtLogin
+  })
   ipcMain.handle('isAdmin', () => process.platform === 'win32' && run('fltmc', [])) // fltmc only succeeds elevated
   // Relaunches elevated once Windows has asked the user, then closes this copy; the new copy waits for it to be gone,
   // so the two never share the identity and data folder. An elevated process does not inherit the environment, so

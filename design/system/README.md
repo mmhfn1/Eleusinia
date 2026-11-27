@@ -20,10 +20,10 @@ One display face, one text face, one mono.
 | Face | For | Why |
 |---|---|---|
 | **Bodoni Moda** (500, 600) | Titles, section headings, names on cards, the wordmark | Kept from court: the display face gives the app its character. It only appears from 20 px, where its hairlines hold; no italics (the first review found 15 px italic labels shimmering) |
-| **Alegreya Sans** (400, 500, 700) | Everything you read and press | Kept: a humanist sans that sits with Bodoni without fighting it, and covers Latin, Cyrillic, Greek and Vietnamese |
-| **Cascadia Mono** (500) | Friend IDs, keys, codes | The friend ID has always been Cascadia Mono; now it is bundled (`@fontsource/cascadia-mono`) instead of borrowed from Windows, and it is the only mono, for every mono role |
+| **Libre Franklin** (400, 500, 700) | Everything you read and press | Chosen over Alegreya Sans, Source Sans 3, Spectral, Jost and Slabo 27px: a Franklin Gothic grotesque, the classic partner for a Didone, clear at 11 to 15 px, all three weights; covers Latin, Cyrillic and Vietnamese (Greek falls back to the system) |
+| **Google Sans Code** (500) | Friend IDs, keys, codes | Bundled (`@fontsource/google-sans-code`), in place of Cascadia Mono, which was borrowed from Windows, and it is the only mono, for every mono role |
 
-**Seven sizes:** 11, 12.5, 13.5, 15, 20, 26 and 44 px. **Weights:** 2 for Bodoni, 3 for Alegreya and 1 for Cascadia Mono, with nothing in between (no 550 or 650). Measured on the mockups (`npx electron design/system/type-audit.cjs`): 6130 text elements on 51 screens in both themes, 3 families, 7 sizes, 12 combinations, every one a role.
+**Seven sizes:** 11, 12.5, 13.5, 15, 20, 26 and 44 px. **Weights:** 2 for Bodoni, 3 for Libre Franklin and 1 for Google Sans Code, with nothing in between (no 550 or 650). Measured on the mockups (`npx electron design/system/type-audit.cjs`): 6130 text elements on 51 screens in both themes, 3 families, 7 sizes, 12 combinations, every one a role.
 
 ### Every job from `design/audit/type-roles.md` maps to one role token
 
@@ -32,23 +32,23 @@ One display face, one text face, one mono.
 | wordmark | `--type-wordmark` | Bodoni 44 / 1, 600 | −0.01 em |
 | screen title | `--type-title` | Bodoni 26 / 1.1, 600 | −0.01 em |
 | person name, large (cards) | `--type-title` | Bodoni 26 / 1.1, 600 | |
-| big number (score, light level) | `--type-number` | Alegreya 26 / 1, 700 | tabular figures (Bodoni's hairline dash broke up) |
+| big number (score, light level) | `--type-number` | Libre Franklin 26 / 1, 700 | tabular figures (Bodoni's hairline dash broke up) |
 | section heading | `--type-section` | Bodoni 20 / 1.2, 500 | |
 | empty-state title | `--type-section` | Bodoni 20 / 1.2, 500 | |
 | server name on its banner | `--type-section` | Bodoni 20 / 1.2, 500 | at most two lines (was 22 px: 22 would be an eighth size used once) |
-| group label (lists, fields, table columns, menu heads, the day rule) | `--type-label` | Alegreya 13.5 / 1.3, 500 | `--ink-2`, sentence case, never capitals |
-| body text | `--type-body` | Alegreya 15 / 1.45, 400 | messages, about lines, toasts |
-| input text and placeholders | `--type-body` | Alegreya 15 / 1.45, 400 | |
-| link | `--type-body` | Alegreya 15 / 1.45, 400 | underlined, `--voice` |
-| menu and navigation item | `--type-name` | Alegreya 15 / 1.3, 500 | menus, the Settings index, rows |
-| person or row name (lists) | `--type-name` | Alegreya 15 / 1.3, 500 | unread is shown by colour and the count, never by weight |
-| button label | `--type-button` | Alegreya 13.5 / 1, 700 | +0.01 em |
-| secondary line | `--type-meta` | Alegreya 13.5 / 1.35, 400 | |
-| hint, help, empty-state text | `--type-meta` | Alegreya 13.5 / 1.35, 400 | `--ink-3`; a status line too, in `--ink-2` |
-| tooltip and popover | `--type-meta` | Alegreya 13.5 / 1.35, 400 | its first line in `--ink` |
-| timestamp and delivery state | `--type-time` | Alegreya 12.5 / 1.3, 400 | tabular |
-| badge count | `--type-badge` | Alegreya 11 / 1, 700 | tabular |
-| code, keys and IDs | `--type-mono` | Cascadia Mono 12.5 / 1.4, 500 | |
+| group label (lists, fields, table columns, menu heads, the day rule) | `--type-label` | Libre Franklin 13.5 / 1.3, 500 | `--ink-2`, sentence case, never capitals |
+| body text | `--type-body` | Libre Franklin 15 / 1.45, 400 | messages, about lines, toasts |
+| input text and placeholders | `--type-body` | Libre Franklin 15 / 1.45, 400 | |
+| link | `--type-body` | Libre Franklin 15 / 1.45, 400 | underlined, `--voice` |
+| menu and navigation item | `--type-name` | Libre Franklin 15 / 1.3, 500 | menus, the Settings index, rows |
+| person or row name (lists) | `--type-name` | Libre Franklin 15 / 1.3, 500 | unread is shown by colour and the count, never by weight |
+| button label | `--type-button` | Libre Franklin 13.5 / 1, 700 | +0.01 em |
+| secondary line | `--type-meta` | Libre Franklin 13.5 / 1.35, 400 | |
+| hint, help, empty-state text | `--type-meta` | Libre Franklin 13.5 / 1.35, 400 | `--ink-3`; a status line too, in `--ink-2` |
+| tooltip and popover | `--type-meta` | Libre Franklin 13.5 / 1.35, 400 | its first line in `--ink` |
+| timestamp and delivery state | `--type-time` | Libre Franklin 12.5 / 1.3, 400 | tabular |
+| badge count | `--type-badge` | Libre Franklin 11 / 1, 700 | tabular |
+| code, keys and IDs | `--type-mono` | Google Sans Code 12.5 / 1.4, 500 | |
 
 The specimen, made of real app content: `screen.html?s=specimen` (`shots/specimen-*.png`).
 
@@ -99,7 +99,7 @@ Measured on the mockups (`npx electron design/system/click-audit.cjs`): 4 radii 
 
 ## Fonts and their licences
 
-Every font is bundled from `@fontsource`, nothing comes from the web and nothing from the system: `@fontsource-variable/bodoni-moda`, `@fontsource/alegreya-sans` and `@fontsource/cascadia-mono`, all under the SIL Open Font License 1.1. The build copies each package's `LICENSE` into `resources/licenses/fonts/`. The mockups load the same files from `node_modules`.
+Every font is bundled from `@fontsource`, nothing comes from the web and nothing from the system: `@fontsource-variable/bodoni-moda`, `@fontsource/libre-franklin` and `@fontsource/cascadia-mono`, all under the SIL Open Font License 1.1. The build copies each package's `LICENSE` into `resources/licenses/fonts/`. The mockups load the same files from `node_modules`.
 
 ## The logo
 
@@ -210,7 +210,7 @@ It left as acceptable: two saves on My profile (Save and Set status do different
 | Leaf only; Brass and Line removed | `tokens.css`, this README |
 | The real logo (the koi) back in every mockup, shaded as in the app | `ui.css` `.logo`, every screen with the logo |
 | Six theme effects, visible, contrast-safe | `effects.js`, `s=effects`, `s=settings-theme` |
-| Every font bundled; the mono is Cascadia Mono | `screen.html`, `tokens.css` |
+| Every font bundled; the mono is Google Sans Code | `screen.html`, `tokens.css` |
 | Run as administrator moved from Hotkeys to My profile | `s=settings-profile`, `s=settings-hotkeys` |
 | "Your friend ID" is now "Friend ID" | Home's friend ID card |
 
