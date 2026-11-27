@@ -359,7 +359,7 @@ function Home({ st, people, run, open, ring, showModal }: { st: State; people: P
     if (st.activity[k]?.game) return <ActivityLine a={st.activity[k]} />
     const c = callOf(k)
     if (c) return <span className="voice-line">In voice: {callName(c)}</span>
-    return r === 'connecting' || r === 'unreachable' ? REACH_WORDS[r] : isOnline(k) ? 'Online' : prof(k).handle
+    return r === 'connecting' || r === 'unreachable' ? REACH_WORDS[r] : isOnline(k) ? 'Online' : <span className="handle">{prof(k).handle}</span>
   }
   const friend = (k: Key) => (
     <div key={k} className="friend-row">
@@ -440,7 +440,7 @@ function Home({ st, people, run, open, ring, showModal }: { st: State; people: P
                   <span className="row-text">
                     <span className="row-title">{user(k)}</span>
                     <span className="row-sub">
-                      {prof(k).handle} <span className="tail">{keyTail(k)}</span>
+                      <span className="handle">{prof(k).handle}</span> <span className="tail">{keyTail(k)}</span>
                     </span>
                   </span>
                   <button className="button primary" onClick={() => run(api.call('addFriend', k))}>
@@ -654,7 +654,7 @@ function Search({ st, run }: { st: State; run: Run }) {
               <Avatar k={r.key} p={r.profile} size={36} />
               <span className="row-text">
                 <span className="row-title">
-                  <b>{r.profile.handle}</b> {r.profile.name}
+                  <b className="handle">{r.profile.handle}</b> {r.profile.name}
                 </span>
                 <span className="row-sub">{status(r.key) ?? (r.linked ? 'Online' : 'Offline')}</span>
               </span>
@@ -777,7 +777,7 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
   const [gif, setGif] = useState(st.profile.gif) // the picture as a GIF, avatar then being its first frame
   const [gifs, setGifs] = useState(false)
   const [banner, setBanner] = useState(st.profile.banner)
-  const [gameArt, setGameArt] = useState(st.profile.gameArt !== false)
+  const [gameArt, setGameArt] = useState(st.profile.gameArt === true)
   const [picking, setPicking] = useState<File | null>(null)
   const [err, setErr] = useState('')
   const [busy, setBusy] = useState(false)
@@ -789,7 +789,7 @@ function ProfileForm({ st, first, done }: { st: State; first: boolean; done: () 
     setBusy(true)
     // What this form does not edit (status, showcase, theme) is kept: setProfile replaces the whole profile
     const { status, showcase, theme } = st.profile
-    api.call('setProfile', { username: f.get('username'), name: f.get('name'), about: f.get('about'), avatar, ...(gif && { gif }), ...(banner && { banner }), ...(!gameArt && { gameArt: false }), ...(status && { status }), ...(showcase && { showcase }), ...(theme && { theme }) }).then(done, (x) => {
+    api.call('setProfile', { username: f.get('username'), name: f.get('name'), about: f.get('about'), avatar, ...(gif && { gif }), ...(banner && { banner }), gameArt, ...(status && { status }), ...(showcase && { showcase }), ...(theme && { theme }) }).then(done, (x) => {
       setErr(String(x.message ?? x).replace(/^.*Error: /, ''))
       setBusy(false)
     })
@@ -911,7 +911,7 @@ type CardProps = { k: Key; st: State; p: Profile; close: () => void; message: ()
 
 function Card({ k, st, p, close, message, ring, edit, run }: CardProps) {
   const status = st.friends[k]
-  const accent = useAccent(k, p, p.gameArt === false ? undefined : st.activity[k]?.game?.app)
+  const accent = useAccent(k, p, p.gameArt === true ? st.activity[k]?.game?.app : undefined)
   const shared = k === st.me ? [] : Object.values(st.groups).filter((g) => g.members.includes(k)).map(groupName)
   const then = (fn: () => void) => () => {
     fn()
@@ -1185,7 +1185,7 @@ function Menu({ st, people, close, go, report }: { st: State; people: People; cl
             {h.g ? <GroupEmblem g={h.g} size={28} /> : <Avatar k={h.k!} p={people.prof(h.k!)} size={28} online={people.isOnline(h.k!)} />}
             <span className="row-text">
               <span className="row-title">{h.label}</span>
-              <span className="row-sub">{h.sub}</span>
+              <span className="row-sub">{h.k ? <span className="handle">{h.sub}</span> : h.sub}</span>
             </span>
           </button>
         ))}
@@ -1200,7 +1200,7 @@ function Menu({ st, people, close, go, report }: { st: State; people: People; cl
         >
           <Icon name="copy" size={16} />
           <span className="row-title">{copied ? 'Copied' : 'Copy my friend ID'}</span>
-          <span className="tail">{st.profile.handle}</span>
+          <span className="handle">{st.profile.handle}</span>
         </button>
         <button className="menu-item" onClick={check}>
           <Icon name="rotate" size={16} />
@@ -1534,7 +1534,7 @@ function Bars({ st, people, where, back, show }: { st: State; people: People; wh
           <Avatar k={st.me} p={st.profile} size={32} online />
           <span className="row-text">
             <span className="row-title">{st.profile.name || st.profile.handle}</span>
-            <span className="row-sub">{call.conv ? 'In voice' : st.activity[st.me]?.game ? <ActivityLine a={st.activity[st.me]} /> : st.profile.handle}</span>
+            <span className="row-sub">{call.conv ? 'In voice' : st.activity[st.me]?.game ? <ActivityLine a={st.activity[st.me]} /> : <span className="handle">{st.profile.handle}</span>}</span>
           </span>
         </button>
         {held.mute || held.deafen

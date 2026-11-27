@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { THEME_DEFAULT, THEME_LIMITS, banner, bytesOf, cleanTheme, cleanWeave, defaultWeave, picture, THEME_FX, themeFlat, tones } from '../src/shared/mark'
-import { MAX_MEDIA, cleanProfile, statusOf } from '../src/shared/protocol'
+import { MAX_MEDIA, cleanBanner, cleanCrop, cleanProfile, statusOf } from '../src/shared/protocol'
+import { cleanBanner as cleanServerBanner } from '../src/shared/server'
 import { profileVersion } from '../src/shared/sync'
 
 const key = (seed: number) => Array.from({ length: 32 }, (_, i) => ((seed * 97 + i * 31) & 255).toString(16).padStart(2, '0')).join('')
@@ -57,7 +58,24 @@ describe('a profile banner', () => {
     expect(cleanProfile({ ...base, banner: { pic: gif } }).banner).toEqual({ pic: gif })
     expect(cleanProfile({ ...base, avatar: gif }).avatar).toBe(gif)
     expect(cleanProfile({ ...base, gameArt: false }).gameArt).toBe(false)
+    expect(cleanProfile({ ...base, gameArt: true }).gameArt).toBe(true)
     expect(cleanProfile({ ...base, gameArt: 'no' }).gameArt).toBeUndefined()
+    // on and off are different profiles, and a profile that never set it stays what older copies compute
+    const v = (gameArt?: boolean) => profileVersion(cleanProfile({ ...base, ...(gameArt !== undefined && { gameArt }) }))
+    expect(new Set([v(), v(true), v(false)]).size).toBe(3)
+  })
+  it('keeps the crop of a GIF banner when it is a real part of the frame, and only on a GIF', () => {
+    const pic = 'data:image/jpeg;base64,' + 'A'.repeat(100), gif = { h: 'a'.repeat(64), s: 1000 }
+    expect(cleanCrop({ x: 0.1, y: 0.2, w: 0.5, h: 0.4 })).toEqual({ x: 0.1, y: 0.2, w: 0.5, h: 0.4 })
+    expect(cleanCrop({ x: 0.12345, y: 0, w: 0.5, h: 1 })).toEqual({ x: 0.123, y: 0, w: 0.5, h: 1 })
+    for (const bad of [null, {}, { x: -0.1, y: 0, w: 0.5, h: 0.5 }, { x: 0.6, y: 0, w: 0.5, h: 0.5 }, { x: 0, y: 0, w: 0.01, h: 0.5 }, { x: 0, y: 0, w: NaN, h: 1 }, { x: '0', y: 0, w: 1, h: 1 }])
+      expect(cleanCrop(bad)).toBeUndefined()
+    const crop = { x: 0, y: 0.25, w: 1, h: 0.5 }
+    expect(cleanBanner({ pic, gif, crop })).toEqual({ pic, gif, crop })
+    expect(cleanBanner({ pic, crop })).toEqual({ pic }) // a still picture is already cut
+    expect(cleanBanner({ pic, gif, crop: { x: 2, y: 0, w: 1, h: 1 } })).toEqual({ pic, gif })
+    expect(cleanServerBanner({ pic, gif, crop, dark: 30 })).toEqual({ pic, gif, crop, dark: 30 })
+    expect(cleanServerBanner({ pic, crop })).toEqual({ pic })
   })
   it('drops what is not a picture, or too large to travel', () => {
     expect(cleanProfile({ ...base, banner: { pic: 'javascript:alert(1)' } }).banner).toBeUndefined()

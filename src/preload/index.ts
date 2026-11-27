@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('api', {
   recordHotkey: () => ipcRenderer.invoke('recordHotkey'),
   stopRecording: () => ipcRenderer.invoke('stopRecording'),
   isAdmin: () => ipcRenderer.invoke('isAdmin'),
+  loginItem: (on?: boolean) => ipcRenderer.invoke('loginItem', on),
   restartAsAdmin: () => ipcRenderer.invoke('restartAsAdmin'),
   diag: (area: string, text: string) => ipcRenderer.send('diag', area, text),
   diagnostics: () => ipcRenderer.invoke('diagnostics'),

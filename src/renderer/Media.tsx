@@ -66,7 +66,7 @@ export function Oculus({ st, name, show }: { st: State; name: (k: Key) => string
       {people.map((k) => (
         <figure key={k} data-k={k} className={`oculus-person ${call.speaking.has(k) ? 'speaking' : ''}`}>
           <span className="oculus-banner" aria-hidden="true">
-            <BannerArt id={k} p={prof(k) ?? { handle: '', name: '', about: '', avatar: '' }} tall still />
+            <BannerArt id={k} p={prof(k) ?? { handle: '', name: '', about: '', avatar: '' }} tall />
           </span>
           <span className="seam" aria-hidden="true" />
           <button className="oculus-who" onClick={(e) => show(k, e.currentTarget)} aria-label={`${k === st.me ? 'Your' : `${name(k)}'s`} profile`}>
@@ -698,7 +698,7 @@ export function Stage({ st, name, settings }: { st: State; name: (k: Key) => str
       <div key={k} data-k={k} className={`person-tile ${call.speaking.has(k) ? 'speaking' : ''}`}>
         {!stream && (
           <span className="oculus-banner" aria-hidden="true">
-            <BannerArt id={k} p={(own ? st.profile : st.profiles[k]) ?? { handle: '', name: '', about: '', avatar: '' }} tall still />
+            <BannerArt id={k} p={(own ? st.profile : st.profiles[k]) ?? { handle: '', name: '', about: '', avatar: '' }} tall />
           </span>
         )}
         {!stream && <span className="seam" aria-hidden="true" />}

@@ -1,7 +1,7 @@
 import { cleanWeave } from './mark'
 import { createHash } from 'node:crypto'
 import crypto from 'hypercore-crypto'
-import { type GifRef, type Key, gifOf, isGifRef, isGroupId, isKey, isPicture } from './protocol'
+import { type Crop, type GifRef, type Key, cleanCrop, gifOf, isGifRef, isGroupId, isKey, isPicture } from './protocol'
 import { EDIT_AHEAD_MS } from './sync'
 
 // A server is an append-only log of signed operations. Every member replays the same ops in one order (`order`) and
@@ -26,12 +26,15 @@ export type Member = { roles: string[]; nick?: string; joinedAt: number }
 export type Invite = { id: string; pub: Key; by: Key; expires?: number; maxUses?: number; uses: number; revoked: boolean }
 // A server's banner: woven from its id (shared/mark.ts), a picture, or a game's art (Steam's, by app id), with how
 // dark it is drawn so the name stays readable. Without one, the weave its id gives.
-export type ServerBanner = ({ kind: number; shift: number } | { pic: string; gif?: GifRef } | { app: number }) & { dark?: number }
+export type ServerBanner = ({ kind: number; shift: number } | { pic: string; gif?: GifRef; crop?: Crop } | { app: number }) & { dark?: number }
 export const BANNER_GAMES = [730, 570, 1085660] // Counter-Strike 2, Dota 2, Destiny 2
 export function cleanBanner(v: any): ServerBanner | undefined {
   if (!v || typeof v !== 'object') return undefined
   const dark = Number.isInteger(v.dark) && v.dark >= 0 && v.dark <= 90 ? { dark: v.dark as number } : {}
-  if (isPicture(v.pic)) return { pic: v.pic, ...gifOf(v.gif), ...dark }
+  if (isPicture(v.pic)) {
+    const crop = v.gif && cleanCrop(v.crop)
+    return { pic: v.pic, ...gifOf(v.gif), ...(crop && { crop }), ...dark }
+  }
   if (BANNER_GAMES.includes(v.app)) return { app: v.app, ...dark }
   const w = cleanWeave(v)
   return w && { ...w, ...dark }

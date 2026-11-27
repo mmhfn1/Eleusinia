@@ -25,7 +25,7 @@ export function PersonPanel({ st, k, conv, people }: { st: State; k: Key; conv: 
   const verified = !!st.settings.verified?.includes(k)
   const groups = Object.values(st.groups).filter((g) => g.members.includes(k) && g.members.includes(st.me))
   const servers = Object.values(st.servers).filter((v) => v.members[k])
-  const accent = useAccent(k, p, p.gameArt === false ? undefined : game?.app)
+  const accent = useAccent(k, p, p.gameArt === true ? game?.app : undefined)
   return (
     <div className="person-panel" style={{ ['--person' as string]: accent }}>
       <button className="person-head" onClick={(e) => show(k, e.currentTarget)} aria-label={`Open ${name(k)}'s profile`}>
@@ -38,7 +38,7 @@ export function PersonPanel({ st, k, conv, people }: { st: State; k: Key; conv: 
         <div className="person-name">
           {name(k)} {verified && <VerifiedSeal />}
         </div>
-        <span className="row-sub">{p.handle}</span>
+        <span className="row-sub"><span className="handle">{p.handle}</span></span>
         {status && (
           <p className="person-status">
             {status.text}

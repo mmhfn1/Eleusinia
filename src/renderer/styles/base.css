@@ -124,8 +124,10 @@ img {
   font: var(--type-number);
   font-variant-numeric: tabular-nums;
 }
+/* Friend IDs, keys and codes: every friend ID in the window is a .handle, so they all read the same */
 .tail,
-.mono {
+.mono,
+.handle {
   font: var(--type-mono);
 }
 .hint {

@@ -24,8 +24,8 @@
   "type": "commonjs",
   "dependencies": {
     "@fontsource-variable/bodoni-moda": "^5.3.0",
-    "@fontsource/alegreya-sans": "^5.3.0",
-    "@fontsource/cascadia-mono": "^5.3.0",
+    "@fontsource/google-sans-code": "^5.3.2",
+    "@fontsource/libre-franklin": "^5.3.0",
     "@sapphi-red/web-noise-suppressor": "^0.4.1",
     "blind-relay": "^1.3.0",
     "electron-updater": "^6.8.9",
@@ -158,12 +158,12 @@
         "to": "licenses/fonts/Bodoni-Moda-OFL.txt"
       },
       {
-        "from": "node_modules/@fontsource/alegreya-sans/LICENSE",
-        "to": "licenses/fonts/Alegreya-Sans-OFL.txt"
+        "from": "node_modules/@fontsource/libre-franklin/LICENSE",
+        "to": "licenses/fonts/Libre-Franklin-OFL.txt"
       },
       {
-        "from": "node_modules/@fontsource/cascadia-mono/LICENSE",
-        "to": "licenses/fonts/Cascadia-Mono-OFL.txt"
+        "from": "node_modules/@fontsource/google-sans-code/LICENSE",
+        "to": "licenses/fonts/Google-Sans-Code-OFL.txt"
       }
     ]
   }

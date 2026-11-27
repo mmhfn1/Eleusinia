@@ -100,7 +100,7 @@ export function DmList({ st, people, here, go, menu }: { st: State; people: Peop
     const c = [...call.active].find(([, ks]) => ks.has(k))?.[0]
     if (st.activity[k]?.game) return <ActivityLine a={st.activity[k]} />
     if (c) return <span className="voice-line">In voice: {callName(st, name, c)}</span>
-    return statusOf(prof(k))?.text ?? (isOnline(k) ? 'Online' : prof(k).handle)
+    return statusOf(prof(k))?.text ?? (isOnline(k) ? 'Online' : <span className="handle">{prof(k).handle}</span>)
   }
   return (
     <section className="dms" aria-label="Direct messages">

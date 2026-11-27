@@ -12,7 +12,7 @@ import { type Add, type Group, type Have, type Key, type Msg, type Profile, MAX_
 // preview, since older copies check the note's body as it was and would turn away every note with it inside.
 export type Presence = { key: Key; at: number; call: string | null; v: string; sig: string; nat?: Nat; nsig?: string }
 const presenceBody = (key: string, at: number, call: string | null, v: string) => Buffer.from(`presence:${key}:${at}:${call ?? ''}:${v}`)
-export const profileVersion = (p: Profile) => createHash('sha256').update(JSON.stringify([p.handle, p.name, p.about, p.avatar, ...(p.banner || p.gameArt === false || p.status || p.showcase ? [p.banner ?? null, p.gameArt ?? true, p.status ?? null, p.showcase ?? null] : []), ...(p.gif ? [p.gif] : []), ...(p.theme ? [p.theme] : [])])).digest('hex').slice(0, 16)
+export const profileVersion = (p: Profile) => createHash('sha256').update(JSON.stringify([p.handle, p.name, p.about, p.avatar, ...(p.banner || p.gameArt !== undefined || p.status || p.showcase ? [p.banner ?? null, p.gameArt ?? true, p.status ?? null, p.showcase ?? null] : []), ...(p.gif ? [p.gif] : []), ...(p.theme ? [p.theme] : [])])).digest('hex').slice(0, 16)
 export const signPresence = (at: number, call: string | null, v: string, kp: { publicKey: Buffer; secretKey: Buffer }): Presence => {
   const key = kp.publicKey.toString('hex')
   return { key, at, call, v, sig: crypto.sign(presenceBody(key, at, call, v), kp.secretKey).toString('hex') }

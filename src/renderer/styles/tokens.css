@@ -6,8 +6,8 @@
 :root {
   /* ---------- Type: one display face, one text face, one mono ---------- */
   --f-display: 'Bodoni Moda Variable', 'Bodoni Moda', Georgia, 'Noto Serif', 'Yu Mincho', serif;
-  --f-text: 'Alegreya Sans', 'Segoe UI', 'Noto Sans', 'Yu Gothic UI', 'Microsoft YaHei UI', 'Malgun Gothic', system-ui, sans-serif;
-  --f-mono: 'Cascadia Mono', Consolas, ui-monospace, monospace; /* bundled (@fontsource/cascadia-mono), as the friend ID has always been */
+  --f-text: 'Libre Franklin', 'Segoe UI', 'Noto Sans', 'Yu Gothic UI', 'Microsoft YaHei UI', 'Malgun Gothic', system-ui, sans-serif;
+  --f-mono: 'Google Sans Code', Consolas, ui-monospace, monospace; /* bundled (@fontsource/google-sans-code): every friend ID, key and code */
   --f-emoji: 'Segoe UI Emoji', 'Apple Color Emoji', 'Noto Color Emoji';
 
   /* Seven sizes, nothing between them */
@@ -20,7 +20,7 @@
   --s-44: 44px;
 
   /* Roles: every text job in design/audit/type-roles.md is one of these, and nothing else is set. Weights: Bodoni 500,
-     600; Alegreya 400, 500, 700; Cascadia Mono 500. Bodoni only from 20 px, where its hairlines hold; no italics. */
+     600; Libre Franklin 400, 500, 700; Google Sans Code 500. Bodoni only from 20 px, where its hairlines hold; no italics. */
   --type-wordmark: 600 var(--s-44) / 1 var(--f-display);
   --type-title: 600 var(--s-26) / 1.1 var(--f-display); /* screen and conversation title; a person's name on their cards */
   --type-number: 700 var(--s-26) / 1 var(--f-text); /* scores, light levels: Bodoni's hairline dashes and figures break up */

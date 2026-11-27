@@ -24,7 +24,7 @@ const untilt = (e: React.MouseEvent<HTMLElement>) => (e.currentTarget.style.remo
 // The banner behind a profile: the art of the game they are playing (unless they turned that off), else their banner
 // (BannerArt). It is what makes each profile look like its person.
 export function ProfileBanner({ st, k, p }: { st: State; k: Key; p: Profile }) {
-  const app = p.gameArt === false ? undefined : st.activity[k]?.game?.app
+  const app = p.gameArt === true ? st.activity[k]?.game?.app : undefined
   return (
     <div className={`pop-banner ${app ? 'game' : 'weave'}`} aria-hidden="true" onMouseMove={tilt} onMouseLeave={untilt}>
       {app ? <img src={`eleusinia-art://steam/${app}/header`} alt="" onError={(e) => (e.currentTarget.style.display = 'none')} /> : <BannerArt id={k} p={p} />}
@@ -46,7 +46,7 @@ export function ProfilePop({ k, from, st, people, run, close, expand, chat, edit
   const inCall = !me && !!call.conv && call.peers.has(k)
   const voice = call.voices.get(k)
   const game = st.activity[k]?.game
-  const accent = useAccent(k, p, p.gameArt === false ? undefined : game?.app)
+  const accent = useAccent(k, p, p.gameArt === true ? game?.app : undefined)
   const blocked = st.blocked.includes(k)
   const [blocking, setBlocking] = useState(false) // asked "are you sure" first
 

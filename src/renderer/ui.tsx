@@ -1,7 +1,7 @@
 // Small shared pieces of the Eleusinia interface: icons, portraits, emblems, dialogs and ornaments.
 import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useRef, useState } from 'react'
 import { type Drawing, type Theme, type Weave, WEAVES, banner, bytesOf, defaultWeave, picture, themeFlat, tones } from '../shared/mark'
-import { type Banner, type GifRef, type Group, type Key, MAX_MEDIA, type Profile, type ServerView } from '../shared/protocol'
+import { type Banner, type Crop, type GifRef, type Group, type Key, MAX_MEDIA, type Profile, type ServerView } from '../shared/protocol'
 import { api } from './common'
 import { GifPicker, type Picked, gifFile } from './Gifs'
 
@@ -205,7 +205,7 @@ export function Avatar({ k, p, size = 32, online }: { k: Key; p: Profile; size?:
 // owner or anyone showing it. One listener for all of them, so a member list full of GIFs adds no more.
 const gifWaits = new Map<string, Set<() => void>>()
 let gifEvents: (() => void) | null = null
-export function GifImg({ g, by, still, className }: { g: GifRef; by?: Key; still: string; className?: string }) {
+export function GifImg({ g, by, still, className, crop }: { g: GifRef; by?: Key; still: string; className?: string; crop?: Crop }) {
   const [done, setDone] = useState(false)
   useEffect(() => {
     let gone = false
@@ -221,7 +221,8 @@ export function GifImg({ g, by, still, className }: { g: GifRef; by?: Key; still
       if (!waits.size) gifWaits.delete(g.h)
     }
   }, [g.h, by])
-  return <img className={className} src={done ? `eleusinia-file://${g.h}` : still} alt="" />
+  // The still is already cut to the crop; the GIF is cut as it is drawn
+  return <img className={className} src={done ? `eleusinia-file://${g.h}` : still} alt="" style={done ? cropStyle(crop) : undefined} />
 }
 
 // A group's (or server's) tile: its picture, or a built form drawn from its id.
@@ -256,13 +257,19 @@ export function ThemeLayer({ k, theme, still }: { k: Key; theme?: Theme; still?:
     // had before it was positioned (below the window) and never said when it moved into view
     const look = () => {
       const r = el.getBoundingClientRect()
-      setSeen(r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth)
+      const v = r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth
+      setSeen(v)
+      return v
     }
-    look()
+    // A card is drawn off screen before it is placed: look every frame until it is in view, so it plays the moment
+    // it opens rather than at the next once-a-second look
+    let raf = 0, frames = 0
+    const early = () => void (!look() && ++frames < 60 && (raf = requestAnimationFrame(early)))
+    early()
     const every = setInterval(look, 1000)
     const vis = () => setShown(!document.hidden)
     document.addEventListener('visibilitychange', vis)
-    return () => (clearInterval(every), document.removeEventListener('visibilitychange', vis))
+    return () => (cancelAnimationFrame(raf), clearInterval(every), document.removeEventListener('visibilitychange', vis))
   }, [theme?.fx])
   if (!theme) return null
   const moving = theme.fx && !still && seen && shown
@@ -393,20 +400,21 @@ export function VerifiedSeal() {
 // still: drawn from the first frame, so a GIF banner does not move (call banners, cards on Home)
 export function BannerArt({ id, p, tall, still }: { id: string; p: Profile; tall?: boolean; still?: boolean }) {
   const b = p.banner
-  if (b && 'pic' in b) return still ? <StillImg className="woven banner-pic" src={b.pic} /> : b.gif ? <GifImg className="woven banner-pic" g={b.gif} by={id} still={b.pic} /> : <img className="woven banner-pic" src={b.pic} alt="" />
+  if (b && 'pic' in b) return still ? <StillImg className="woven banner-pic" src={b.pic} /> : b.gif ? <GifImg className="woven banner-pic" g={b.gif} by={id} still={b.pic} crop={b.crop} /> : <img className="woven banner-pic" src={b.pic} alt="" />
   if ((!b || 'fade' in b) && p.avatar) return still ? <StillImg className="woven banner-fade" src={p.avatar} /> : <img className="woven banner-fade" src={p.avatar} alt="" />
   return <Woven id={id} weave={b && 'kind' in b ? b : undefined} tall={tall} />
 }
 
 // A picture cut to cover w x h, as a JPEG data URL of at most max characters: for a GIF, its first frame, the still
-// a profile or server keeps beside it
-export async function cover(file: Blob, w: number, h: number, max = MAX_MEDIA): Promise<string> {
+// a profile or server keeps beside it. crop: the part of the picture to cover from (the crop dialog), else its middle
+export async function cover(file: Blob, w: number, h: number, max = MAX_MEDIA, crop?: Crop): Promise<string> {
   const img = await createImageBitmap(file)
-  const scale = Math.min(img.width / w, img.height / h), sw = w * scale, sh = h * scale
+  const [cx, cy, cw, ch] = crop ? [crop.x * img.width, crop.y * img.height, crop.w * img.width, crop.h * img.height] : [0, 0, img.width, img.height]
+  const scale = Math.min(cw / w, ch / h), sw = w * scale, sh = h * scale
   const c = document.createElement('canvas')
   c.width = w
   c.height = h
-  c.getContext('2d')!.drawImage(img, (img.width - sw) / 2, (img.height - sh) / 2, sw, sh, 0, 0, w, h)
+  c.getContext('2d')!.drawImage(img, cx + (cw - sw) / 2, cy + (ch - sh) / 2, sw, sh, 0, 0, w, h)
   img.close()
   for (let q = 0.85; q > 0.2; q -= 0.1) {
     const url = c.toDataURL('image/jpeg', q)
@@ -417,18 +425,111 @@ export async function cover(file: Blob, w: number, h: number, max = MAX_MEDIA): 
 // A GIF picked or uploaded as a picture or banner: its still at that size, and the GIF itself by hash
 export const gifPicture = async ({ ref, data }: Picked, w: number, h: number, max = MAX_MEDIA) => ({ still: await cover(new Blob([data as BlobPart]), w, h, max), gif: { h: ref.h, s: ref.s } })
 
-// A chosen banner picture: a GIF as it is (so it still moves), anything else cut to a wide 1200 x 440 JPEG
-const bannerFrom = async (file: File): Promise<Banner> => {
-  if (file.type !== 'image/gif') return { pic: await cover(file, 1200, 440) }
-  const { still, gif } = await gifPicture(await gifFile(file), 1200, 440)
-  return { pic: still, gif }
+
+// A crop as CSS: the part of the picture an <img> shows (object-view-box), before object-fit: cover fills its box
+export const cropStyle = (c?: Crop) => (c ? { ['objectViewBox' as string]: `inset(${c.y * 100}% ${(1 - c.x - c.w) * 100}% ${(1 - c.y - c.h) * 100}% ${c.x * 100}%)` } : undefined)
+
+// Choosing the part of a picture or GIF a banner shows: drag it, zoom with the slider or the wheel, and every place it
+// appears is shown beside it exactly as it will be drawn there (preview)
+export function CropDialog({ src, aspect, start, preview, done, close }: { src: string; aspect: number; start?: Crop; preview: (src: string, c: Crop) => ReactNode; done: (c: Crop) => void; close: () => void }) {
+  const [nat, setNat] = useState<{ w: number; h: number } | null>(null)
+  const [z, setZ] = useState(1)
+  const [at, setAt] = useState({ x: 0.5, y: 0.5 })
+  const drag = useRef<{ x: number; y: number } | null>(null)
+  const FRAME = 480
+  // The widest part of the picture with the banner's shape, then smaller as it zooms, kept inside the picture
+  const base = !nat ? { w: 1, h: 1 } : nat.w / nat.h > aspect ? { w: (aspect * nat.h) / nat.w, h: 1 } : { w: 1, h: nat.w / aspect / nat.h }
+  const w = base.w / z, h = base.h / z
+  const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v))
+  const crop: Crop = { x: clamp(at.x - w / 2, 0, 1 - w), y: clamp(at.y - h / 2, 0, 1 - h), w, h }
+  const imgW = FRAME / w, imgH = nat ? (imgW * nat.h) / nat.w : FRAME
+  const loaded = (e: React.SyntheticEvent<HTMLImageElement>) => {
+    const n = { w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight }
+    setNat(n)
+    if (!start) return
+    const b = n.w / n.h > aspect ? (aspect * n.h) / n.w : 1
+    setZ(clamp(b / start.w, 1, 4))
+    setAt({ x: start.x + start.w / 2, y: start.y + start.h / 2 })
+  }
+  const move = (e: PointerEvent<HTMLDivElement>) => {
+    if (!drag.current) return
+    const dx = e.clientX - drag.current.x, dy = e.clientY - drag.current.y
+    drag.current = { x: e.clientX, y: e.clientY }
+    setAt({ x: clamp(crop.x + w / 2 - dx / imgW, w / 2, 1 - w / 2), y: clamp(crop.y + h / 2 - dy / imgH, h / 2, 1 - h / 2) })
+  }
+  return (
+    <Dialog label="Crop the banner" close={close} className="crop-dialog">
+      <h2>Crop the banner</h2>
+      <div
+        className="crop-banner"
+        style={{ width: FRAME, height: FRAME / aspect }}
+        onPointerDown={(e) => (e.currentTarget.setPointerCapture(e.pointerId), (drag.current = { x: e.clientX, y: e.clientY }))}
+        onPointerMove={move}
+        onPointerUp={() => (drag.current = null)}
+        onWheel={(e) => setZ((v) => clamp(v * (e.deltaY < 0 ? 1.1 : 1 / 1.1), 1, 4))}
+      >
+        <img src={src} alt="" draggable={false} onLoad={loaded} style={{ width: imgW, height: imgH, left: -crop.x * imgW, top: -crop.y * imgH }} />
+      </div>
+      <label className="weave-tones">
+        Zoom
+        <input type="range" min={1} max={4} step={0.01} value={z} onChange={(e) => setZ(+e.target.value)} aria-label="Zoom" />
+      </label>
+      <div className="crop-previews">{nat && preview(src, crop)}</div>
+      <div className="form-actions">
+        <button type="button" className="button" onClick={close}>
+          Cancel
+        </button>
+        <button type="button" className="button primary" disabled={!nat} onClick={() => done(crop)}>
+          Use this crop
+        </button>
+      </div>
+    </Dialog>
+  )
 }
+
+// What a crop dialog is opened for: a picture file, or a GIF (its bytes, so its still can be cut to the crop too)
+type CropAsk = { src: string; picked?: Picked; file?: Blob; start?: Crop }
+// The crop dialog and what it makes: a picture cut to w x h at the crop, or a GIF with its crop and a still cut the same
+export function useCropper(w: number, h: number, max: number, apply: (b: { pic: string; gif?: GifRef; crop?: Crop }) => void, fail: (why: string) => void) {
+  const [ask, setAsk] = useState<CropAsk | null>(null)
+  const open = (a: Omit<CropAsk, 'src'>) => setAsk({ ...a, src: URL.createObjectURL(a.picked ? new Blob([a.picked.data as BlobPart], { type: 'image/gif' }) : a.file!) })
+  const close = () => (ask && URL.revokeObjectURL(ask.src), setAsk(null))
+  const finish = (c: Crop) => {
+    const a = ask!
+    close()
+    const g = a.picked
+    ;(g ? cover(new Blob([g.data as BlobPart]), w, h, max, c).then((pic) => apply({ pic, gif: { h: g.ref.h, s: g.ref.s }, crop: c })) : cover(a.file!, w, h, max, c).then((pic) => apply({ pic }))).catch((x) => fail(String(x.message ?? x)))
+  }
+  // An already chosen GIF banner, cropped again from its own bytes
+  const recrop = (gif: GifRef, start?: Crop) => api.gif('data', gif.h).then((picked: Picked) => open({ picked, start }), (x: Error) => fail(String(x.message ?? x)))
+  return { open, recrop, dialog: (preview: (src: string, c: Crop) => ReactNode) => ask && <CropDialog src={ask.src} aspect={w / h} start={ask.start} preview={preview} done={finish} close={close} /> }
+}
+
+// A profile banner as the small card and the full card will draw it
+export const profileCropPreview = (src: string, c: Crop) => (
+  <>
+    <figure>
+      <figcaption>Small card</figcaption>
+      <div className="pop-banner crop-small">
+        <img className="woven banner-pic" src={src} alt="" style={cropStyle(c)} />
+      </div>
+    </figure>
+    <figure>
+      <figcaption>Full card</figcaption>
+      <div className="pop-banner crop-full">
+        <img className="woven banner-pic" src={src} alt="" style={cropStyle(c)} />
+      </div>
+    </figure>
+  </>
+)
 
 // The banner choices: your picture softened, the four weaves of your key (with their tones), or an upload
 export function BannerPick({ id, p, set }: { id: string; p: Profile; set: (b: Banner) => void }) {
   const [err, setErr] = useState('')
   const [gifs, setGifs] = useState(false)
   const b = p.banner
+  // A picture is cut to a wide 1200 x 440 JPEG at the crop chosen; a GIF keeps moving, drawn at its crop
+  const crop = useCropper(1200, 440, MAX_MEDIA, (nb) => (setErr(''), set(nb)), setErr)
   const on = b && 'pic' in b ? 'pic' : b && 'kind' in b ? b.kind : b || p.avatar ? 'fade' : defaultWeave(id).kind
   const weave = b && 'kind' in b ? b : { kind: defaultWeave(id).kind, shift: 0 }
   return (
@@ -454,7 +555,8 @@ export function BannerPick({ id, p, set }: { id: string; p: Profile; set: (b: Ba
             onChange={(e) => {
               const f = e.target.files?.[0]
               e.target.value = '' // so the same file can be chosen again
-              if (f) bannerFrom(f).then((b) => (setErr(''), set(b)), (x) => setErr(String(x.message ?? x)))
+              if (f?.type === 'image/gif') gifFile(f).then((picked) => crop.open({ picked }), (x) => setErr(String(x.message ?? x)))
+              else if (f) crop.open({ file: f })
             }}
           />
         </label>
@@ -472,8 +574,14 @@ export function BannerPick({ id, p, set }: { id: string; p: Profile; set: (b: Ba
           </button>
         </label>
       )}
+      {b && 'pic' in b && b.gif && (
+        <button type="button" className="button subtle" onClick={() => crop.recrop(b.gif!, b.crop)}>
+          Adjust crop
+        </button>
+      )}
       {err && <span className="form-error">{err}</span>}
-      {gifs && <GifPicker close={() => setGifs(false)} pick={(g) => gifPicture(g, 1200, 440).then(({ still, gif }) => (setErr(''), set({ pic: still, gif })))} />}
+      {gifs && <GifPicker close={() => setGifs(false)} pick={(g) => crop.open({ picked: g })} />}
+      {crop.dialog(profileCropPreview)}
     </div>
   )
 }
@@ -484,7 +592,7 @@ export function ServerBannerArt({ sv, b = sv.banner }: { sv: Pick<ServerView, 'i
   const src = b && 'pic' in b ? b.pic : b && 'app' in b ? `eleusinia-art://steam/${b.app}/header` : null
   return (
     <span className="server-banner" aria-hidden="true" style={{ ['--dark' as string]: b?.dark ?? 45 }}>
-      {b && 'pic' in b && b.gif ? <GifImg g={b.gif} still={b.pic} /> : src ? <img src={src} alt="" /> : <Woven id={sv.id} weave={b && 'kind' in b ? b : undefined} />}
+      {b && 'pic' in b && b.gif ? <GifImg g={b.gif} still={b.pic} crop={b.crop} /> : src ? <img src={src} alt="" /> : <Woven id={sv.id} weave={b && 'kind' in b ? b : undefined} />}
     </span>
   )
 }
