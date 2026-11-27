@@ -1737,8 +1737,9 @@ test('a node that starts while two members it is not linked with are in a group 
   await expect.poll(() => b.node.state().online.includes(a.key), { timeout: 20000, interval: 5 }).toBe(true)
   const linked = Date.now()
   const joined = (k: string) => heard.some((e) => e.from === k && e.conv === gid && e.data.k === 'join')
-  // Delivery only: the notes come in A's greeting, right behind the link opening
-  await expect.poll(() => [c.key, d.key].every((k) => b.node.state().present.includes(k) && joined(k)), { timeout: 1000, interval: 5 }).toBe(true).catch((e) => {
+  // Delivery only: the notes come in A's greeting, right behind the link opening. Seconds, not one: on a busy runner, and
+  // late in the full run, the greeting can take over a second to be handled (the release run failed at 1 s)
+  await expect.poll(() => [c.key, d.key].every((k) => b.node.state().present.includes(k) && joined(k)), { timeout: 5000, interval: 5 }).toBe(true).catch((e) => {
     const t = (k: string) => k.slice(-6)
     console.log('what B had when the check gave up', JSON.stringify({ c: t(c.key), d: t(d.key), present: b.node.state().present.map(t), online: b.node.state().online.map(t), heard: heard.map((e) => [t(e.from), e.data?.k]), aOnline: a.node.state().online.map(t), aPresent: a.node.state().present.map(t) }))
     throw e
