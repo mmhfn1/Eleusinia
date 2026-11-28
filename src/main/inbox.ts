@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { join } from 'node:path'
 import DHT from 'hyperdht'
 import { type Key, keyTail } from '../shared/protocol'
-import { INBOX_KEY, type Pull, type Report, cleanReport, describe, eventLine, pullRecord, pullTargets } from '../shared/reports'
+import { INBOX_KEY, type Pull, type Report, cleanReport, describe, eventLine, pullRecord, pullTargets, pullsIn } from '../shared/reports'
 import { createNet } from './network'
 
 // The developers' inbox, run with `npm run inbox`: receives problem and crash reports from anyone with the app,
@@ -61,9 +61,32 @@ export function createInbox({ dir, keyPair, dht, github, log = () => {}, fileEve
   } catch {}
   const savePulls = () => writeFileSync(pullsFile, JSON.stringify(pulls.slice(-50), null, 2))
   // A tester's answer names its pull by the first 6 characters (index.ts), the newest pull with them is it
-  const pullOf = (r: Report) => {
-    const m = r.kind === 'logs' && /^Logs for pull ([0-9a-f]{6})$/.exec(r.title)
-    return m ? [...pulls].reverse().find((p) => p.id.startsWith(m[1])) : undefined
+  const pullName = (r: Report) => (r.kind === 'logs' && /^Logs for pull ([0-9a-f]{6})$/.exec(r.title)?.[1]) || null
+  const pullOf = (r: Report) => ((m) => (m ? [...pulls].reverse().find((p) => p.id.startsWith(m)) : undefined))(pullName(r))
+  // The pulls in the record under our key, which another inbox with the same identity may have published (the server's
+  // and a developer's own, docs/reports.md): taken in, so their answers are filed here too (28 Nov: five pulls' answers
+  // reached the inbox that had not made them, and sat unfiled), and so our next pull keeps them in the record, with a
+  // higher number than theirs, instead of replacing them or being turned down for a lower one
+  let recordSeq = 0
+  async function adopt() {
+    const r = await net.record(keyPair.publicKey.toString('hex'))
+    if (r) recordSeq = Math.max(recordSeq, r.seq)
+    const theirs = pullsIn(r?.value ?? null)
+    const fresh = theirs.filter((p) => !pulls.some((q) => q.id === p.id))
+    if (!fresh.length) return
+    pulls.push(...fresh.map((p) => ({ ...p, reports: [], posted: [], issue: null })))
+    pulls.sort((a, b) => a.at - b.at)
+    savePulls()
+  }
+  // An answer to a pull this inbox did not make: matched once the record is read, else saved only, as before
+  function placeAnswer(r: Report) {
+    adopt().then(() => {
+      const p = pullOf(r)
+      if (!p) return log(`logs for pull ${pullName(r)}, which this inbox does not know: saved only`)
+      if (!p.reports.includes(r.id)) p.reports.push(r.id), savePulls()
+      log(`pull ${p.id.slice(0, 6)} was made by another inbox with this identity: its answers are filed here too`)
+      fileIssues()
+    }, () => {})
   }
 
   const net = createNet(
@@ -82,6 +105,7 @@ export function createInbox({ dir, keyPair, dht, github, log = () => {}, fileEve
           if (files(s)) unfiled.add(r.id + '.json')
           const p = pullOf(r)
           if (p && !p.reports.includes(r.id)) p.reports.push(r.id), savePulls()
+          else if (!p && pullName(r)) placeAnswer(r)
           writeFileSync(join(saved, r.id + '.txt'), describe(r))
           log(`received ${r.kind} from …${s.from}: ${r.title}`)
           fileIssues()
@@ -144,12 +168,14 @@ export function createInbox({ dir, keyPair, dht, github, log = () => {}, fileEve
     // answer within a few minutes, or when they next start within a day. Resolves null when the DHT did not take it.
     async pull(to: Pull['to']): Promise<Pull | null> {
       await net.listening
+      await adopt().catch(() => {})
       const p: Pull = { id: randomBytes(8).toString('hex'), at: Date.now(), to }
       // The day's earlier pulls go along (pullRecord), so this one does not hide them; the record's number only rises,
       // even for two pulls in one second
-      const seq = Math.max(Math.floor(p.at / 1000), ...pulls.map((q) => q.seq ?? 0).map((n) => n + 1))
+      const seq = Math.max(Math.floor(p.at / 1000), recordSeq + 1, ...pulls.map((q) => q.seq ?? 0).map((n) => n + 1))
       if (!(await net.publish(pullRecord([...pulls, p]), seq))) return null
       pulls.push({ ...p, seq, reports: [], posted: [], issue: null })
+      recordSeq = seq
       savePulls()
       return p
     },

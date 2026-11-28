@@ -19,7 +19,7 @@ themselves, unless a tester turns that off in the same place. Nobody needs a Git
 Only the installed app sends to the real inbox. Copies run from source (`npm run dev`) send nowhere unless
 `ELEUSINIA_INBOX` names a test inbox, as `npm run smoke` does, so stopping a development run never files a report.
 
-Every report also says how much memory the app was using (`appMemoryMb`, all its processes together). Diagnostics cover the last 15 minutes of this session, plus up to 200 lines from earlier sessions in the last day: those are kept, already scrubbed, in `diagnostics.json` in the app's owner-only data folder, so a crash report or a log pull after a restart or a crash still shows what happened before it (a call that failed and was followed by a restart used to leave nothing to pull). A report over the size limit loses its oldest lines rather than being turned away. A crash report never contains a memory dump. When
+Every report also says how much memory the app was using (`appMemoryMb`, all its processes together). Diagnostics cover the last 15 minutes of this session (and, past that, enough of its older lines from the last day to make 200, so a copy left open for hours still says what its call did), plus up to 200 lines from earlier sessions in the last day: those are kept, already scrubbed, in `diagnostics.json` in the app's owner-only data folder, so a crash report or a log pull after a restart or a crash still shows what happened before it (a call that failed and was followed by a restart used to leave nothing to pull). A report over the size limit loses its oldest lines rather than being turned away. A crash report never contains a memory dump. When
 the app itself was ended abruptly (a crash, power loss, ending it in Task Manager; not Windows shutting down or logging off, which `session-end` catches), the next start sends a short
 "closed unexpectedly" report without events, since none survived.
 
@@ -35,8 +35,12 @@ npm run inbox
 It prints its key and where it saves reports (`%APPDATA%\Eleusinia Inbox\reports`: a `.json` and a readable
 `.txt` per report). Its identity is `inbox-identity.json` in that folder: **back it up and keep it private.**
 On a server, the same inbox runs without Electron as a service, pulls included: see `docs/oracle-setup.md`, part E.
-Only one inbox may run at a time.
-Whoever holds it receives every report, and losing it means the next build needs a new `INBOX_KEY`.
+Run one inbox, the server's: two with the same identity split what testers send between them, whichever one the
+network finds first. An inbox that receives answers to a pull the other one made still files them under that pull,
+and a new pull keeps the other one's pulls in the record (with a higher record number), but problem and crash
+reports still land in either, and both file what they get when both have a GitHub token. So make pulls on the
+server (below), and run a local inbox only while the server's is stopped.
+Whoever holds the identity receives every report, and losing it means the next build needs a new `INBOX_KEY`.
 
 Only one machine can run the inbox at a time.
 
@@ -73,7 +77,7 @@ The record holds the day's pulls, newest first (as many as fit in 1000 bytes), s
 does not hide it; copies from 0.1.4 and 0.1.5 read only the newest. The window running `npm run logs` says what it
 asked for, and the inbox window says `pull asked for …`, then `published` or why not.
 Tester copies read it every 2 minutes and once on start, and each answers a request once, within a day, with what a
-crash report carries: the app and system details and the last 15 minutes of scrubbed diagnostics. The answers arrive
+crash report carries: the app and system details and the scrubbed diagnostics described above. The answers arrive
 as `[logs]` reports in the reports folder. With GitHub filing set up, each pull becomes **one** issue, labelled
 `logs`, 10 minutes after it was made: who was asked, who answered, and a section per tester (version, system, memory
 in use and their newest events, shortened to fit GitHub's size limit). Testers who answer later, within the day, are

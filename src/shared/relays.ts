@@ -29,9 +29,15 @@ export type Hop = { key: Key; kind: 'friend' | 'hosted' } // friend: the contact
 export type Route = {
   direct: boolean // dial directly first: skipped only when both sides are known to be strict
   first: Hop | null // the relay that worked last, tried alone, if it is still available
-  race: { friends: Key[]; hosted: Key | null } // friend asks and the nearest hosted relay at the same time
+  // the nearest hosted relay, and friend asks starting friendsAfter ms later (at once when the hosted dial fails)
+  race: { friends: Key[]; hosted: Key | null; friendsAfter: number }
   next: Key[] // further hosted relays, nearest first, one at a time once the race failed
 }
+
+// A friend's relay carries voice and pictures only (State.relayed, 24 KB/s), a hosted relay video and files too, so
+// the hosted relay gets this long to link before friends are asked; it links within a couple of seconds when it can.
+// Before, both started at once and a friend that won left the call without video.
+export const HOSTED_HEADSTART = 6000
 
 export function routeFor(o: {
   meStrict: boolean
@@ -41,8 +47,9 @@ export function routeFor(o: {
   friends: Key[] // relaying contacts, already ranked (pickRelays)
 }): Route {
   const g = o.lastGood
-  const first = g && (g.kind === 'friend' ? o.friends : o.hosted).includes(g.key) ? g : null
+  // A friend that worked last goes first only while no hosted relay answers: one that does carries more
+  const first = g && (g.kind === 'friend' ? !o.hosted.length && o.friends.includes(g.key) : o.hosted.includes(g.key)) ? g : null
   const friends = first?.kind === 'friend' ? o.friends.filter((k) => k !== first.key) : o.friends
   const [hosted = null, ...next] = first?.kind === 'hosted' ? o.hosted.filter((k) => k !== first.key) : o.hosted
-  return { direct: !(o.meStrict && o.themStrict === true), first, race: { friends, hosted }, next }
+  return { direct: !(o.meStrict && o.themStrict === true), first, race: { friends, hosted, friendsAfter: hosted ? HOSTED_HEADSTART : 0 }, next }
 }

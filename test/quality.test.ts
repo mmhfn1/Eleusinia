@@ -1,7 +1,7 @@
 import { expect, test } from 'vitest'
 import { lightOpus } from '../src/shared/callstate'
 import { clampOffset, cropRect } from '../src/shared/crop'
-import { WINDOW, grade, handsFree, jitterTarget, patched, pingSummary, remember, rememberPing, trouble, videoHold, worst } from '../src/shared/quality'
+import { OWN_LOSS, WINDOW, grade, handsFree, jitterTarget, ownLoss, ownLossWords, patched, pingSummary, remember, rememberPing, trouble, videoHold, worst } from '../src/shared/quality'
 
 const many = (n: number, s: object) => Array.from({ length: n }, () => ({ rtt: 40, ...s }))
 
@@ -116,4 +116,28 @@ test('reports say what drags a link down, how much of a voice was made up, and s
   expect(patched({ concealed: 50, total: 1000 }, { concealed: 0, total: 0 })).toBe(0) // a new connection's counters
   expect(handsFree('Headset (WH-1000XM4 Hands-Free AG Audio)')).toBe(true)
   expect(handsFree('Headset Microphone (USB Audio)')).toBe(false)
+})
+
+test('our own network is blamed only when every link loses what we send or receive, never with one link', () => {
+  const link = (loss: number, inLoss: number) => Array.from({ length: WINDOW }, () => ({ rtt: 40, loss, inLoss }))
+  // one link: it could be either side
+  expect(ownLoss([link(0.1, 0.1)])).toBeNull()
+  // the 28 Nov tester: everyone lost what they sent, and they lost what everyone sent
+  expect(ownLoss([link(0.06, 0.05), link(0.04, 0.08), link(0.05, 0.06)])).toEqual({ sent: 0.05, received: 0.06 })
+  // one link clean in a direction: that side is not ours
+  expect(ownLoss([link(0.06, 0), link(0.05, 0.08)])).toEqual({ sent: 0.06, received: 0 })
+  // one lossy peer among clean ones is their problem, not ours
+  expect(ownLoss([link(0.1, 0.1), link(0, 0), link(0, 0)])).toBeNull()
+  expect(ownLoss([link(OWN_LOSS - 0.001, 0), link(0.2, 0)])).toBeNull()
+  // a link not sampled yet does not count
+  expect(ownLoss([link(0.05, 0.05), []])).toBeNull()
+  // a passing burst in one sample is not enough: the median of the window counts
+  const burst = [...link(0, 0).slice(1), { rtt: 40, loss: 0.5, inLoss: 0.5 }]
+  expect(ownLoss([burst, burst])).toBeNull()
+})
+
+test('the own-loss note says which way, in whole percents', () => {
+  expect(ownLossWords({ sent: 0.054, received: 0 })).toMatch(/^Your own connection is losing about 5 % of what you send, so others may hear you break up./)
+  expect(ownLossWords({ sent: 0, received: 0.08 })).toContain('about 8 % of what you receive')
+  expect(ownLossWords({ sent: 0.05, received: 0.08 })).toContain('about 8 % of what you send and receive')
 })

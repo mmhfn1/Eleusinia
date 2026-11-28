@@ -227,3 +227,50 @@ test('a server inbox takes pulls asked from the command line, oldest first, each
   expect(JSON.parse(readFileSync(join(dir, 'pulls.json'), 'utf8'))).toHaveLength(1)
   await inbox.destroy()
 })
+
+test('two inboxes with one identity: an answer to the other one\'s pull is filed, and a new pull keeps the other one\'s in the record', async () => {
+  const posted: { url: string; body: any }[] = []
+  vi.stubGlobal('fetch', async (url: string, init: any) => (posted.push({ url, body: JSON.parse(init.body) }), new Response(JSON.stringify({ number: 11 }), { status: 201 })))
+  const keyPair = DHT.keyPair()
+  const dht = { bootstrap: testnet.bootstrap }
+  // A developer's own inbox makes the pull, then closes; the server's, the same identity with the token, stays
+  const own = createInbox({ dir: tmp(), keyPair, dht })
+  const pull = await own.pull('all')
+  expect(pull).not.toBeNull()
+  await own.destroy()
+  const server = createInbox({ dir: tmp(), keyPair, dht, github: { token: 't', repo: 'team/r' }, fileEvery: 200, gatherMs: 500 })
+  await server.listening
+  let node: ReturnType<typeof createNode> | null = null
+  node = createNode({
+    dir: tmp(),
+    keyPair: DHT.keyPair(),
+    emit: () => {},
+    dht,
+    redialMs: 300,
+    inbox: server.key,
+    pullLogs: (p, id) => node!.report({ kind: 'logs', title: `Logs for pull ${p.id.slice(0, 6)}`, body: '', events: [{ at: 1, area: 'call', text: 'connection poor' }] }, id),
+  })
+  await until(() => node!.state().reports === 0)
+  await until(() => posted.length === 1)
+  expect(posted[0].body.title.startsWith(`[logs] Pull ${pull!.id.slice(0, 6)}: 1 tester,`)).toBe(true)
+  expect(posted[0].body.body).toContain('connection poor')
+
+  const next = await server.pull(['kestrel#2741'])
+  expect(next).not.toBeNull()
+  const record = pullsIn(await readRecord(server.key))
+  expect(record.map((p) => p.id).sort()).toEqual([pull!.id, next!.id].sort()) // the first pull still in it, for testers
+
+  vi.unstubAllGlobals()
+  await node.destroy()
+  await server.destroy()
+}, 60000)
+
+// The record under a key, read from the test network the way a tester copy reads it
+async function readRecord(k: string) {
+  const d = new DHT({ bootstrap: testnet.bootstrap })
+  try {
+    return (await d.mutableGet(Buffer.from(k, 'hex'), { latest: true }))?.value ?? null
+  } finally {
+    await d.destroy()
+  }
+}

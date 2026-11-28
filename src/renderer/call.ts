@@ -7,7 +7,7 @@ import { type Jingle, LOOP_EVERY, RING_MS, loopNow } from '../shared/jingles'
 import { type Mate, type Reason, type Tree, forward, reforward } from '../shared/forward'
 import type { Fwd } from '../shared/fwdproto'
 import { CALL_VERSION, type Event, type Key, type State, isKey, mutedNow } from '../shared/protocol'
-import { type PingReading, SAMPLE_EVERY, type Sample, grade, handsFree, jitterTarget, patched, pingSummary, remember, rememberPing, trouble, videoHold, worst } from '../shared/quality'
+import { type PingReading, SAMPLE_EVERY, type Sample, grade, handsFree, jitterTarget, ownLoss, ownLossWords, patched, pingSummary, remember, rememberPing, trouble, videoHold, worst } from '../shared/quality'
 import type { SourceKind } from '../shared/sources'
 import { gate, hear, rms } from '../shared/speaking'
 import { type Opener, type Sealer, createOpener, createSealer } from '../shared/streamkeys'
@@ -90,6 +90,8 @@ type Peer = {
   audio: HTMLAudioElement // muted: it only keeps their stream flowing into Web Audio (see playVoice)
   voice?: Listen & { gain: GainNode }
   relayed?: boolean // the route last logged: through the chat link (relay.ts) or direct
+  at: number // when this connection was made, for the join time in the diagnostics
+  timed?: boolean // its connect time is logged, once
   candidates: ReturnType<typeof createCandidates>
   offer?: number
   screen?: MediaStream // their shared screen, once frames arrive
@@ -125,7 +127,7 @@ const samples = new Map<string, Sample[]>()
 // Fresh ping readings per link over the last minute, for the number shown (pingSummary), and the stat counters they
 // were taken from, so a value that has not updated is never read twice.
 const pingReadings = new Map<string, PingReading[]>()
-const counters = new Map<string, { stun: number; stunTotal: number; rtcp: number; rtcpTotal: number }>()
+const counters = new Map<string, { stun: number; stunTotal: number; rtcp: number; rtcpTotal: number; lost: number; got: number }>()
 // Their voice arriving: packets so far, and when that count last grew. A link whose audio still arrives is never
 // restarted or rebuilt (createWatchdog's flowing), since that would cut a call that still works.
 const heardFrom = new Map<Key, { n: number; at: number }>()
@@ -434,6 +436,7 @@ const sessions = new Map<Key, string>()
 const openedAt = Date.now()
 let shownAny = false
 let joinedAt = 0
+const met = new Set<Key>() // people connected to since our join, so a later connection reads as connected again
 // Updates about our call (mute, share, camera) go only to the people in it, not every member of the group.
 const sendInCall = (to: Key | null, data: unknown) => {
   if (!conv) return
@@ -728,7 +731,7 @@ function connect(k: Key) {
   audio.muted = true
   pc.addTrack(sent()!, stream!)
   pc.onicecandidate = (e) => e.candidate && send(c, k, { k: 'ice', c: e.candidate.toJSON() })
-  const peer: Peer = { pc, audio, candidates: createCandidates(pc) }
+  const peer: Peer = { pc, audio, candidates: createCandidates(pc), at: Date.now() }
   pc.ontrack = (e) => {
     const s = slotsOf(pc)
     if (e.transceiver === s.screen) peer.screen = new MediaStream([e.track])
@@ -759,7 +762,13 @@ function connect(k: Key) {
     watchdogs.get(k)?.update(pc.connectionState)
     if (pc.connectionState === 'failed') askUpdate(`the call with ${who(k)} failed`)
     if (pc.connectionState === 'connected') {
-      if (joinedAt) log(`joined: connected to ${who(k)} in ${Date.now() - joinedAt} ms`)
+      // From our join or this connection, whichever came later: timed from our join alone, someone joining or
+      // reconnecting 53 minutes into the call read as a 53-minute join (28 Nov). Once per connection, not per ICE restart.
+      if (joinedAt && !peer.timed) {
+        peer.timed = true
+        log(`${met.has(k) ? "connected again" : "joined: connected"} to ${who(k)} in ${Date.now() - Math.max(joinedAt, peer.at)} ms`)
+        met.add(k)
+      }
       bitrate(pc)
       sendVoice(k)
       if (screen) sendShare(k)
@@ -1130,6 +1139,7 @@ async function sampleLink(k: Key, pc: RTCPeerConnection): Promise<{ s: Sample | 
   let pair: any
   let rtcp: any
   let direct = 0 // direct candidate pairs that answered, to tell a blocked network from a route not yet switched
+  let heard = { lost: 0, got: 0 } // their voice to us: packets lost and received so far
   const type = (id: string) => stats.get(id)?.candidateType
   stats.forEach((r) => {
     if (r.type === 'candidate-pair' && r.state === 'succeeded' && type(r.remoteCandidateId) !== 'relay') direct++
@@ -1138,13 +1148,18 @@ async function sampleLink(k: Key, pc: RTCPeerConnection): Promise<{ s: Sample | 
       s = { rtt: r.roundTripTime * 1000, loss: r.fractionLost ?? 0, jitter: (r.jitter ?? 0) * 1000 }
     }
     if (r.type === 'transport') pair = stats.get(r.selectedCandidatePairId)
+    if (r.type === 'inbound-rtp' && r.kind === 'audio') heard = { lost: Math.max(0, r.packetsLost ?? 0), got: r.packetsReceived ?? 0 }
   })
   const was = counters.get(k)
-  const now = { stun: pair?.responsesReceived ?? 0, stunTotal: pair?.totalRoundTripTime ?? 0, rtcp: rtcp?.roundTripTimeMeasurements ?? 0, rtcpTotal: rtcp?.totalRoundTripTime ?? 0 }
+  const now = { stun: pair?.responsesReceived ?? 0, stunTotal: pair?.totalRoundTripTime ?? 0, rtcp: rtcp?.roundTripTimeMeasurements ?? 0, rtcpTotal: rtcp?.totalRoundTripTime ?? 0, ...heard }
   counters.set(k, now)
   // After a new route (ICE restart) the counters start again from zero, which reads as nothing new this time.
   const delta = (n: number, total: number, n0 = 0, total0 = 0) => (n > n0 ? ((total - total0) / (n - n0)) * 1000 : null)
   const fresh = delta(now.stun, now.stunTotal, was?.stun, was?.stunTotal) ?? delta(now.rtcp, now.rtcpTotal, was?.rtcp, was?.rtcpTotal)
+  // What we lost of their voice since the last sample (ownLoss tells our network's loss from theirs with it)
+  const dLost = now.lost - (was?.lost ?? 0)
+  const dGot = now.got - (was?.got ?? 0)
+  if (s && dGot >= 0 && dLost >= 0 && dLost + dGot > 0) (s as Sample).inLoss = dLost / (dLost + dGot)
   const route = pair ? { relayed: type(pair.remoteCandidateId) === 'relay', local: type(pair.localCandidateId), remote: type(pair.remoteCandidateId), direct } : null
   return { s: s ?? (pair?.currentRoundTripTime !== undefined ? { rtt: pair.currentRoundTripTime * 1000 } : null), fresh: fresh !== null && fresh >= 0 ? fresh : null, route }
 }
@@ -1224,13 +1239,27 @@ async function measure() {
     await checkStrain()
     if (screen) replan()
     const now = signal()
-    if (now.grade !== lastGrade) log(`connection ${now.grade ?? 'unknown'}; ping ${now.pings.map((p) => `${p.k ? who(p.k) : 'network'} ${Number.isFinite(p.ms) ? `${p.ms} ms ±${p.spread} (${[p.steadiness, trouble(samples.get(p.k))].filter(Boolean).join(', ')})` : 'none'}`).join(', ')}`)
+    noteOwnLoss()
+    if (now.grade !== lastGrade) log(`connection ${now.grade ?? 'unknown'}; ping ${now.pings.map((p) => `${p.k ? who(p.k) : 'network'} ${Number.isFinite(p.ms) ? `${p.ms} ms ±${p.spread} (${[p.steadiness, routeWord(p.k), trouble(samples.get(p.k))].filter(Boolean).join(', ')})` : 'none'}`).join(', ')}`)
     lastGrade = now.grade
   } finally {
     measuring = false
   }
   if (conv) notify()
 }
+
+// Our own network losing packets on every link (ownLoss): logged when it starts and when it ends
+let ownLossy = false
+function noteOwnLoss() {
+  const own = ownLoss([...samples.entries()].filter(([k]) => k).map(([, l]) => l))
+  if (!!own === ownLossy) return
+  ownLossy = !!own
+  const pc = (x: number) => `${Math.round(x * 100)} %`
+  log(own ? `our own connection loses packets on every link: ${own.sent ? pc(own.sent) + ' of what we send' : ''}${own.sent && own.received ? ', ' : ''}${own.received ? pc(own.received) + ' of what we receive' : ''}` : 'our own connection no longer loses packets on every link')
+}
+
+// Each link's route on every grade line, so a report that starts after the call did still says how it travels
+const routeWord = (k: Key) => ((r) => (r === undefined ? '' : r ? 'through the chat link' : 'direct'))(k ? peers.get(k)?.relayed : undefined)
 
 // For the Voice Connected sign: the weakest of your links (or the network while alone), and each one's ping over
 // the last minute with how steady it is. A link that is reconnecting counts as poor.
@@ -1292,6 +1321,8 @@ export function notices() {
   if (!conv) return out
   if (fellBack(state.settings.mic, micId)) out.push('Your microphone is unplugged, so the system default is in use.')
   if (fellBack(state.settings.out, outId)) out.push('Your speakers are unplugged, so the system default is in use.')
+  const own = ownLoss([...samples.entries()].filter(([k]) => k).map(([, l]) => l))
+  if (own) out.push(ownLossWords(own))
   if (handsFree(stream?.getAudioTracks()[0]?.label ?? '')) out.push("Your microphone is a Bluetooth headset's, which puts the headset in phone-call mode: you sound, and hear everyone, like a phone line. Another microphone keeps the headset's sound clear.")
   // Only worth saying while it matters: someone is not connected and the fallback could have helped.
   const struggling = [...peers.values()].some((p) => p.pc.connectionState !== 'connected')
@@ -1341,6 +1372,7 @@ export async function join(c: string, moved = false) {
   listening = setInterval(listenAll, 50)
   navigator.mediaDevices.addEventListener('devicechange', onDeviceChange)
   joinedAt = Date.now()
+  met.clear()
   send(c, null, moved ? { ...JOIN, m: 1 } : JOIN)
   // Those we offer to get the offer at once instead of after their reply to our join: one round trip less each, and
   // all of them in parallel
@@ -1403,6 +1435,7 @@ function end(quiet: boolean) {
   denoiseCtx?.suspend() // no audio thread work between calls
   conv = null
   joinedAt = 0
+  ownLossy = false
   notify()
 }
 

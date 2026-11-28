@@ -39,7 +39,18 @@ test('diagnostics keep only the last minutes, in memory, scrubbed on arrival', (
   expect(d.list(['call']).map((e) => e.text)).toEqual(['joined'])
   now = KEEP_EVENTS_MS + 1
   d.add('app', 'later')
-  expect(d.list().map((e) => e.text)).toEqual(['joined', 'later']) // the oldest aged out
+  // past 15 minutes, a quiet session still keeps its last lines: a copy open for hours answered a pull with 3 lines
+  expect(d.list().map((e) => e.text)).toEqual([`open …A3F9C2`, 'joined', 'later'])
+  // a busy one keeps the last 15 minutes in full, and of what is older only enough to make KEEP_PREVIOUS lines
+  now = 3 * KEEP_EVENTS_MS
+  for (let i = 0; i < KEEP_PREVIOUS; i++) d.add('call', `busy ${i}`)
+  expect(d.list()).toHaveLength(KEEP_PREVIOUS)
+  expect(d.list()[0].text).toBe('busy 0')
+  for (let i = 0; i < 50; i++) d.add('call', `still busy ${i}`) // all within 15 minutes: every one is kept
+  expect(d.list()).toHaveLength(KEEP_PREVIOUS + 50)
+  now = 3 * KEEP_EVENTS_MS + KEEP_PREVIOUS_MS + 1
+  d.add('app', 'next day')
+  expect(d.list().map((e) => e.text)).toEqual(['next day']) // nothing older than a day
 })
 
 test('a report reads the same in the preview and the inbox', () => {

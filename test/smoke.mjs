@@ -1823,6 +1823,17 @@ try {
   if ((await restarts(a)) || (await restartsBC()) > seenRestarts) throw new Error('a normal join was taken for a restart and its connection dropped')
   console.log('ok   the normal join was not taken for a restart')
   console.log(`      heard both ${Date.now() - t} ms after clicking join;`, (await diagLines(a, 'joined:')).join(', '))
+  // Our own connection losing packets on every link (quality.ts ownLoss): said with a simulated loss on relayed call
+  // packets (ELEUSINIA_NO_DIRECT=1 ELEUSINIA_TEST_NET=loss=…), never on a clean line
+  const ownLossLine = () => a.ev(`api.diagnostics().then((d) => d.events.some((e) => e.text.startsWith('our own connection loses packets')))`)
+  if (process.env.ELEUSINIA_NO_DIRECT === '1' && /loss=0\.0[3-9]/.test(process.env.ELEUSINIA_TEST_NET ?? '')) {
+    await until("with every link losing Ann's packets both ways, her log says it is her own connection", ownLossLine, 20)
+    console.log('      ', (await diagLines(a, 'our own connection')).join(', '))
+  } else {
+    await new Promise((r) => setTimeout(r, 12000)) // a full sample window in a three-way call
+    if (await ownLossLine()) throw new Error('a clean line was taken for our own connection losing packets')
+    console.log('ok   a clean line is never taken for our own connection losing packets')
+  }
   // Bob and Cy still hold connections to Ann's old copy that look alive; her new copy's join replaces them at once
   // A window that reloaded since it was launched (the crash step) has lost the connection counter: put it back
   const track = `window.__pcs || (() => { window.__pcs = []; const P = RTCPeerConnection; window.RTCPeerConnection = class extends P { constructor(...a) { super(...a); window.__pcs.push(this) } } })(), window.__pcs.length`

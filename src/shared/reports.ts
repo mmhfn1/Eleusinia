@@ -33,7 +33,9 @@ export type Report = {
 }
 
 export const LIMITS = { title: 120, body: 4000, contact: 40, events: 400, event: 300, bytes: 96 * 1024 }
-export const KEEP_EVENTS_MS = 15 * 60000 // this session's diagnostics cover its last 15 minutes
+// This session's diagnostics cover its last 15 minutes, and past that its newest KEEP_PREVIOUS lines of the last day:
+// a copy left open for hours answered a log pull with 3 lines, its call and the routes it took long gone (28 Nov)
+export const KEEP_EVENTS_MS = 15 * 60000
 // Earlier sessions' last lines, kept in the data folder (index.ts, diagnostics.json) so a crash report or a log pull
 // after a restart still has what happened before it: for a day, as long as a pull stays valid, and at most this many
 export const KEEP_PREVIOUS_MS = 24 * 3600e3
@@ -111,8 +113,10 @@ export function createDiagnostics(now = () => Date.now(), previous: Diag[] = [],
   return {
     add(area: Area, text: string) {
       events.push({ at: now(), area, text: scrub(text) })
-      const cutoff = now() - KEEP_EVENTS_MS
-      while (events.length && (events[0].at < cutoff || events.length > LIMITS.events)) events.shift()
+      const recent = now() - KEEP_EVENTS_MS
+      const day = now() - KEEP_PREVIOUS_MS
+      const old = (e: Diag) => e.at < day || (e.at < recent && events.length > KEEP_PREVIOUS)
+      while (events.length && (old(events[0]) || events.length > LIMITS.events)) events.shift()
       if (save) saving ??= setTimeout(flush, 2000)
     },
     list,

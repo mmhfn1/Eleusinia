@@ -1,7 +1,9 @@
 // How a call's connection is doing, from periodic samples. No DOM imports, so it can be unit tested.
 // Samples live in memory only, a few per link, and are dropped when the call ends.
 
-export type Sample = { rtt: number; loss?: number; jitter?: number } // round trip in ms, lost fraction 0-1, jitter in ms
+// Round trip in ms, the fraction of our voice they lost (loss, from their reports) and of theirs we lost (inLoss), 0-1,
+// and jitter in ms
+export type Sample = { rtt: number; loss?: number; inLoss?: number; jitter?: number }
 export type Grade = 'good' | 'fair' | 'poor'
 
 export const SAMPLE_EVERY = 2000
@@ -54,6 +56,34 @@ export function trouble(samples: Sample[] = []): string {
   const loss = median(samples.map((s) => s.loss ?? 0))
   const jitter = median(samples.map((s) => s.jitter ?? 0))
   return [loss >= 0.02 && `${Math.round(loss * 100)} % lost`, jitter >= 30 && `jitter ${Math.round(jitter)} ms`].filter(Boolean).join(', ')
+}
+
+// Whether the loss is on our side of the call: our own network loses what we send to every one of our links, or what
+// they send us on every one, at OWN_LOSS or more over the last ~10 s. With one link it cannot be told whose side it
+// is, so it says nothing. A tester losing 3 to 10 % on every link both ways had no idea it was them (28 Nov).
+export const OWN_LOSS = 0.03
+export function ownLoss(links: Sample[][]): { sent: number; received: number } | null {
+  const seen = links.filter((l) => l.length)
+  if (seen.length < 2) return null
+  const each = (f: (s: Sample) => number) => seen.map((l) => median(l.map(f)))
+  const sent = each((s) => s.loss ?? 0)
+  const received = each((s) => s.inLoss ?? 0)
+  const all = (xs: number[]) => xs.every((x) => x >= OWN_LOSS)
+  const typical = (xs: number[]) => (all(xs) ? median(xs) : 0)
+  const out = { sent: typical(sent), received: typical(received) }
+  return out.sent || out.received ? out : null
+}
+
+// The call panel's words for it, rounded to whole percents
+export function ownLossWords(o: { sent: number; received: number }) {
+  const pc = (x: number) => `${Math.round(x * 100)} %`
+  const where =
+    o.sent && o.received
+      ? `about ${pc(Math.max(o.sent, o.received))} of what you send and receive, so you may break up for others and they for you`
+      : o.sent
+        ? `about ${pc(o.sent)} of what you send, so others may hear you break up`
+        : `about ${pc(o.received)} of what you receive, so others may break up for you`
+  return `Your own connection is losing ${where}. On Wi-Fi, a cable or a spot nearer the router usually helps.`
 }
 
 // How much of a voice the player had to make up for lost or late packets, 0-1, between two readings of its counters.

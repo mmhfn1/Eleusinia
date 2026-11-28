@@ -47,8 +47,11 @@ export type RelayLimits = { pairs: number; perContact: number; perIp?: number; b
 export const RELAY_LIMITS: RelayLimits = { pairs: 8, perContact: 4, perIp: 16, bytesPerSec: 24 * 1024 }
 // The project's hosted relays (src/relay/main.ts) accept anyone, and keys cost nothing, so the address cap matters
 // there. 400 KB/s a direction carries a 720p screen share plus voice (design/plan-public-relay.md, Addition).
+// 16 per contact: someone behind a strict router links with every contact through it, and both sides dialling at once
+// briefly takes two; at 4 the rest were turned away (relay log, 27 Nov: links dropped while it refused 3 a minute).
+// perIp leaves room for two such people behind one address (a household, a carrier's shared address).
 // shortcut: no separate cap on pairs carrying video yet (40 in the plan), add it with the video phase.
-export const HOSTED_LIMITS: RelayLimits = { pairs: 400, perContact: 4, perIp: 8, bytesPerSec: 400 * 1024 }
+export const HOSTED_LIMITS: RelayLimits = { pairs: 400, perContact: 16, perIp: 32, bytesPerSec: 400 * 1024 }
 
 // The key our blind relay listens on: separate from the identity, so relay connections never look like a peer link.
 export const relayKeyPair = (secretKey: Buffer): KeyPair =>
@@ -58,9 +61,12 @@ export type RelayServer = {
   listening: Promise<void>
   stop(): Promise<void>
   // Since start: pairs open now, bytes relayed (each received byte is sent on once, natively by udx's relayTo, which
-  // does not count it as sent, so this is also the bytes out), connections turned away
-  stats(): { pairs: number; bytes: number; refused: number }
+  // does not count it as sent, so this is also the bytes out), connections turned away, in all and by limit (why)
+  stats(): { pairs: number; bytes: number; refused: number; why: Record<Refusal, number> }
 }
+// Which limit turned a relay connection away: not a contact (our own relay only), banned for going over the byte
+// budget, the relay full, too many for that key, or too many from that address
+export type Refusal = 'unknown' | 'banned' | 'full' | 'contact' | 'address'
 
 // A blind relay on `keyPair`: pairs two peers' encrypted streams without being able to read them (hyperdht's
 // relayThrough). Capped in pairs, per key, per address and in bytes, since it spends someone's bandwidth. No Electron
@@ -71,6 +77,7 @@ export function startBlindRelay(dht: any, keyPair: KeyPair, accept: (key: Key) =
   const streams = new Set<any>()
   let done = 0 // bytes from streams already closed
   let refused = 0
+  const why: Record<Refusal, number> = { unknown: 0, banned: 0, full: 0, contact: 0, address: 0 }
   let meter: ReturnType<typeof setInterval> | null = null
   const blind = new BlindRelay.Server({
     createStream(opts: object) {
@@ -106,13 +113,19 @@ export function startBlindRelay(dht: any, keyPair: KeyPair, accept: (key: Key) =
   const from = new Map<Key, string>()
   const refuse = (k: Buffer, _payload: unknown, addr?: { host: string }) => {
     const key = k.toString('hex')
-    const no =
-      !accept(key) ||
-      (banned.get(key) ?? 0) > Date.now() ||
-      sessions.size >= limits.pairs * 2 ||
-      count((s) => s.key === key) >= limits.perContact ||
-      (limits.perIp !== undefined && !!addr && count((s) => s.host === addr.host) >= limits.perIp)
-    if (no) refused++
+    const reason: Refusal | null = !accept(key)
+      ? 'unknown'
+      : (banned.get(key) ?? 0) > Date.now()
+        ? 'banned'
+        : sessions.size >= limits.pairs * 2
+          ? 'full'
+          : count((s) => s.key === key) >= limits.perContact
+            ? 'contact'
+            : limits.perIp !== undefined && !!addr && count((s) => s.host === addr.host) >= limits.perIp
+              ? 'address'
+              : null
+    const no = reason !== null
+    if (reason) refused++, why[reason]++
     else if (addr) {
       if (from.size > 4096) from.clear() // handshakes admitted but never completed
       from.set(key, addr.host)
@@ -137,7 +150,7 @@ export function startBlindRelay(dht: any, keyPair: KeyPair, accept: (key: Key) =
     stats() {
       let bytes = done
       for (const st of streams) bytes += st.bytesReceived
-      return { pairs: Math.floor(streams.size / 2), bytes, refused }
+      return { pairs: Math.floor(streams.size / 2), bytes, refused, why: { ...why } }
     },
   }
 }
@@ -307,6 +320,15 @@ export function createNet(keyPair: KeyPair, on: Handlers, dhtOpts?: object, allo
     async getShared(seed: Buffer): Promise<{ value: Buffer; seq: number } | null> {
       try {
         const r = await dht.mutableGet(DHT.keyPair(seed).publicKey, { latest: true })
+        return r ? { value: r.value, seq: r.seq } : null
+      } catch {
+        return null
+      }
+    },
+    // The newest record under a key with its number, which a new publish must go past (an inbox sharing its key)
+    async record(key: Key): Promise<{ value: Buffer; seq: number } | null> {
+      try {
+        const r = await dht.mutableGet(Buffer.from(key, 'hex'), { latest: true })
         return r ? { value: r.value, seq: r.seq } : null
       } catch {
         return null

@@ -1891,9 +1891,9 @@ test('a friend seen online through presence notes whom neither a direct dial nor
 }, 180000)
 
 // The project's hosted relay (src/relay/main.ts) on the test DHT, stopped with the nodes
-async function hostedRelay(keyPair = DHT.keyPair()) {
+async function hostedRelay(keyPair = DHT.keyPair(), accept: () => boolean = () => true) {
   const dht = new DHT({ bootstrap: testnet.bootstrap })
-  const relay = startBlindRelay(dht, keyPair, () => true, HOSTED_LIMITS)
+  const relay = startBlindRelay(dht, keyPair, accept, HOSTED_LIMITS)
   await relay.listening
   nodes.push({ node: { destroy: () => relay.stop().then(() => dht.destroy()) } } as any)
   return keyPair.publicKey.toString('hex') as string
@@ -1918,6 +1918,41 @@ test('two strict friends with nobody to relay link through a hosted relay soon a
   const dm = dmId(a.key, b.key)
   a.node.send(dm, 'over the hosted relay')
   await until(() => texts(b, dm).includes('over the hosted relay'))
+}, 180000)
+
+test('a hosted relay that turned two strict friends away does not keep them apart for 10 minutes: they link soon after it accepts', async () => {
+  let open = true
+  const hk = await hostedRelay(DHT.keyPair(), () => open)
+  const said: string[] = []
+  const a = start(undefined, undefined, { strict: true, hostedRelays: [hk], diag: (_area, text) => said.push(text) })
+  const b = start(undefined, undefined, { strict: true, hostedRelays: [hk] })
+  await setUp([a, b])
+  await until(() => said.includes('hosted relays answering: 1 of 1'))
+  open = false // answering, then turning them away, as at its per-contact cap
+  await befriendUnlinked(a, b)
+  const dm = dmId(a.key, b.key)
+  a.node.send(dm, 'through at last')
+  await until(() => said.some((t) => t.includes(`relayed link with …${b.key.slice(-6)} through`) && t.includes('failed')))
+  open = true
+  const t0 = Date.now()
+  await until(() => texts(b, dm).includes('through at last'))
+  console.log(`hosted relay accepting again: delivered ${Date.now() - t0} ms later`)
+  expect(Date.now() - t0).toBeLessThan(15000) // before: the relay was avoided for this friend for 10 minutes
+}, 180000)
+
+test('two strict friends link through the hosted relay, which carries video and files, even with a friend who could relay', async () => {
+  const hk = await hostedRelay()
+  const a = start(undefined, undefined, { strict: true, hostedRelays: [hk] })
+  const b = start(undefined, undefined, { strict: true, hostedRelays: [hk] })
+  const o = start(undefined, undefined, { hostedRelays: [hk] }) // relays for its friends
+  await setUp([a, b, o])
+  await befriend(a, o)
+  await befriend(b, o)
+  await befriendUnlinked(a, b)
+  await until(() => linked(a, b))
+  // a friend's relay carries voice only: a link through o would leave their calls without video
+  expect(a.node.state().hostedRelayed).toContain(b.key)
+  expect(a.node.state().relayed).not.toContain(b.key)
 }, 180000)
 
 test('two strict friends who know it of each other never dial directly', async () => {

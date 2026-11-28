@@ -958,15 +958,21 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     changed()
     spread(s.groups[id])
   }
-  // Doubling waits after each failure, capped at 20 times the first.
-  const later = (n: number, base: number) => Date.now() + base * Math.min(2 ** (n - 1), 20)
+  // Doubling waits after each failure, capped at 20 times the first (`cap` times when given).
+  const later = (n: number, base: number, cap = 20) => Date.now() + base * Math.min(2 ** (n - 1), cap)
   function relayFailed(k: Key) {
     attempting.delete(k)
     const n = (fails.get(k) ?? 0) + 1
     fails.set(k, n)
-    retryAt.set(k, later(n, RETRY))
+    // Both behind strict routers, with a hosted relay answering: that relay is their only way, so they wait at most
+    // 2 minutes between rounds, not 10 (two such testers went 50 minutes without a link on 27 Nov)
+    retryAt.set(k, later(n, RETRY, onlyHosted(k) ? 4 : 20))
     push() // State.unreachable: the window stops saying "connecting"
   }
+  const onlyHosted = (k: Key) => net.strict() && natOf.get(k) === 'strict' && ranked.length > 0
+  // A failed dial through a friend's relay avoids that friend for this person 10 minutes; through a hosted relay only
+  // RETRY (30 s in use). A hosted relay is everyone's last resort and the only way between two strict routers, and a
+  // dial through it fails for passing reasons (a minute at its per-contact cap, a hole punch both sides raced).
   // A dial to k through a relay: resolves with whether it linked. A relay that failed is avoided for a while, unless the
   // failure was the target not being found (offline), which is not the relay's fault.
   function dialThrough(k: Key, hop: Hop, via: Key) {
@@ -976,7 +982,7 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       const done = (ok: boolean, why: string) => {
         clearTimeout(timer)
         if (viaWaits.get(id) === done) viaWaits.delete(id)
-        if (!ok && why !== 'PEER_NOT_FOUND') avoid.set(hop.key + k, Date.now() + 600000)
+        if (!ok && why !== 'PEER_NOT_FOUND') avoid.set(hop.key + k, Date.now() + (hop.kind === 'hosted' ? RETRY : 600000))
         resolve(ok)
       }
       viaWaits.set(id, done)
@@ -1017,9 +1023,25 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
       if (!left) return resolve(false)
       for (const p of ps) p.then((ok) => (ok ? resolve(true) : --left || resolve(false)))
     })
-  // The order of routes (shared/relays.ts routeFor): the relay that worked last, alone; then friend relays and the
-  // nearest hosted relay at the same moment, the first link winning (network.ts adopt drops a later one of ours); then
-  // the other hosted relays one at a time.
+  // Friend asks once the hosted dial has had its head start (shared/relays.ts HOSTED_HEADSTART), or at once when it fails
+  function afterHosted(k: Key, hosted: Promise<boolean>, friends: Key[], wait: number) {
+    if (!friends.length) return Promise.resolve(false)
+    return new Promise<boolean>((resolve) => {
+      let asked = false
+      const ask = () => {
+        if (asked) return
+        asked = true
+        clearTimeout(timer)
+        if (net.linked(k) || stopped) return resolve(false)
+        viaFriend(k, friends).then(resolve)
+      }
+      const timer = setTimeout(ask, wait)
+      hosted.then((ok) => (ok ? ((asked = true), clearTimeout(timer), resolve(false)) : ask()))
+    })
+  }
+  // The order of routes (shared/relays.ts routeFor): the relay that worked last, alone; then the nearest hosted relay,
+  // with friend relays asked after its head start (the first link winning: network.ts adopt drops a later one of
+  // ours); then the other hosted relays one at a time.
   async function tryRelay(k: Key) {
     attempting.add(k)
     const now = Date.now()
@@ -1036,7 +1058,10 @@ export function createNode({ dir, keyPair, emit, dht, redialMs = 15000, noDirect
     const { first, race, next } = routeFor({ meStrict: net.strict(), themStrict: them ? them === 'strict' : null, lastGood: last, hosted: ranked.filter(ok), friends })
     const steps = [
       ...(first ? [() => (first.kind === 'friend' ? viaFriend(k, [first.key]) : viaHosted(k, first.key))] : []),
-      () => firstOk([viaFriend(k, race.friends), ...(race.hosted ? [viaHosted(k, race.hosted)] : [])]),
+      () => {
+        const hosted = race.hosted ? viaHosted(k, race.hosted) : Promise.resolve(false)
+        return firstOk([hosted, afterHosted(k, hosted, race.friends, race.friendsAfter)])
+      },
       ...next.map((h) => () => viaHosted(k, h)),
     ]
     for (const step of steps) if (stopped || net.linked(k) || (await step())) break

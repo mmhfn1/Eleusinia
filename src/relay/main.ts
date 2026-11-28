@@ -43,6 +43,7 @@ try {
 } catch {}
 let counted = 0
 let refusedBefore = 0
+let whyBefore: Record<string, number> = {}
 const gb = (n: number) => (n / 1e9).toFixed(2) + ' GB'
 
 function tick() {
@@ -51,8 +52,12 @@ function tick() {
   usage.bytes += s.bytes - counted
   counted = s.bytes
   writeFileSync(usageFile, JSON.stringify(usage))
-  log(`pairs ${s.pairs}, relayed ${gb(s.bytes)} since start, ${gb(usage.bytes)} out this month, refused ${s.refused - refusedBefore} in the last minute`)
+  // Which limit turned them away (network.ts Refusal), counts only, as everything here
+  const why = Object.entries(s.why).map(([k, n]) => [k, n - (whyBefore[k] ?? 0)] as const).filter(([, n]) => n > 0)
+  const reasons = why.length ? ` (${why.map(([k, n]) => `${k} ${n}`).join(', ')})` : ''
+  log(`pairs ${s.pairs}, relayed ${gb(s.bytes)} since start, ${gb(usage.bytes)} out this month, refused ${s.refused - refusedBefore} in the last minute${reasons}`)
   refusedBefore = s.refused
+  whyBefore = s.why
   if (usage.bytes >= MONTH_CAP * 0.8) log(`warning: ${Math.round((usage.bytes / MONTH_CAP) * 100)} % of this month's 10 TB used`)
 }
 
